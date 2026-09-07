@@ -1,0 +1,36 @@
+{{define "content"}}
+<div class="chat-shell">
+  <div class="toolbar chat-toolbar">
+    <select id="chat-model" class="chat-model" required>
+      {{if .Aliases}}
+      <optgroup label="Alias в шлюзе">
+        {{range .Aliases}}<option value="{{.}}">{{.}}</option>{{end}}
+      </optgroup>
+      {{end}}
+      {{if .Catalog}}
+      <optgroup label="Ollama">
+        {{range .Catalog}}<option value="{{.}}">{{.}}</option>{{end}}
+      </optgroup>
+      {{end}}
+      {{if and (not .Aliases) (not .Catalog)}}
+      <option value="" disabled selected>нет моделей</option>
+      {{end}}
+    </select>
+    <input id="chat-temp" type="number" min="0" max="2" step="0.1" value="0.7" title="temperature" class="sel-sm">
+    <input id="chat-max" type="number" min="16" max="8192" step="16" value="1024" title="max_tokens" class="sel-sm">
+    <span class="muted grow">Playground · без API-ключа, через шлюз</span>
+    <button type="button" class="ghost" id="chat-clear">Новый чат</button>
+  </div>
+
+  <div class="chat-log card flush" id="chat-log">
+    <div class="chat-empty muted" id="chat-empty">Выберите модель и напишите сообщение — как в LiteLLM Playground.</div>
+  </div>
+
+  <form class="chat-composer" id="chat-form">
+    <textarea id="chat-input" rows="2" placeholder="Сообщение… Enter — отправить, Shift+Enter — строка" required></textarea>
+    <button type="submit" id="chat-send">Отправить</button>
+    <button type="button" class="ghost" id="chat-stop" hidden>Стоп</button>
+  </form>
+  <p class="muted chat-hint" id="chat-status"></p>
+</div>
+{{end}}

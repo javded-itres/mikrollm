@@ -1,0 +1,21 @@
+{{define "content"}}
+<h1>Последние запросы</h1>
+<div class="card">
+  <table>
+    <tr><th>Время</th><th>Ключ</th><th>Модель</th><th>Бэкенд</th><th>HTTP</th><th>мс</th><th>байт</th></tr>
+    {{range .Logs}}
+    <tr>
+      <td class="muted">{{.TS.Format "15:04:05"}}</td>
+      <td>{{.KeyPrefix}}</td>
+      <td>{{.Model}}</td>
+      <td>{{.Backend}}</td>
+      <td>{{.Status}}</td>
+      <td>{{.LatencyMS}}</td>
+      <td>{{.BytesOut}}</td>
+    </tr>
+    {{else}}
+    <tr><td colspan="7" class="muted">Пока пусто.</td></tr>
+    {{end}}
+  </table>
+</div>
+{{end}}

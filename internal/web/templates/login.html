@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MikroLLM — вход</title>
+  <link rel="stylesheet" href="/admin/static/app.css">
+</head>
+<body>
+  <form class="card login" method="post" action="/admin/login">
+    <h1>MikroLLM</h1>
+    <p class="muted">Админка LLM-прокси</p>
+    {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
+    <label>Пароль</label>
+    <input type="password" name="password" autofocus required>
+    <p><button type="submit">Войти</button></p>
+  </form>
+</body>
+</html>

@@ -1,0 +1,161 @@
+{{define "content"}}
+<div class="pagehead">
+  <div>
+    <h1>Модели</h1>
+    <p class="muted">Загрузка в RAM — кнопки у сервера. Скачивание — сверху. Обновление страницы не сбрасывает задачу.</p>
+  </div>
+  <form method="post" action="/admin/refresh">
+    <input type="hidden" name="next" value="/admin/models">
+    <button class="ghost" type="submit">Обновить</button>
+  </form>
+</div>
+
+<details class="card pull-box" id="pull-card" {{if .PullJob}}open{{end}}>
+  <summary>Скачать модель в Ollama</summary>
+  <form id="pull-form" class="pull-row">
+    <select name="backend_id" id="pull-backend" required title="Сервер">
+      {{range .Backends}}
+      <option value="{{.ID}}">{{.Name}}</option>
+      {{else}}
+      <option value="" disabled>нет серверов</option>
+      {{end}}
+    </select>
+    <input name="name" id="pull-name" placeholder="llama3.2 или qwen3.8:27b-mlx" value="{{if .PullJob}}{{.PullJob.Model}}{{end}}" required>
+    <button type="submit">Скачать</button>
+    <span class="muted" id="pull-status">{{if .PullJob}}{{.PullJob.Message}}{{end}}</span>
+  </form>
+  <progress id="pull-bar" max="100" value="{{if .PullJob}}{{.PullJob.Percent}}{{else}}0{{end}}" {{if not .PullJob}}hidden{{end}}></progress>
+  <pre class="pull-log" id="pull-log" {{if not .PullJob}}hidden{{end}}>{{if .PullJob}}{{.PullJob.Log}}{{end}}</pre>
+</details>
+
+{{if .Catalog}}
+<form method="post" action="/admin/models/connect" id="catalog-form"></form>
+  <div class="toolbar">
+    <input type="search" id="model-filter" placeholder="Фильтр по имени…" autocomplete="off">
+    <label class="inline"><input type="checkbox" data-toggle="#catalog-table"> Все свободные</label>
+    <span class="muted grow">{{.Available}} не в шлюзе</span>
+    <select name="lb_policy" form="catalog-form" class="sel-sm" title="Балансировка">
+      <option value="least_conn">least_conn</option>
+      <option value="round_robin">round_robin</option>
+      <option value="failover">failover</option>
+    </select>
+    <button type="submit" form="catalog-form">В шлюз</button>
+  </div>
+
+  <div class="table-wrap card flush" id="catalog-table">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th class="col-check"></th>
+          <th>Модель</th>
+          <th class="col-num">Размер</th>
+          <th>RAM</th>
+          <th>Шлюз</th>
+          <th class="col-act">Диск</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range $m := .Catalog}}
+        <tr class="model-tr {{if $m.Connected}}is-on{{end}}" data-name="{{$m.Name}}">
+          <td class="col-check">
+            <input type="checkbox" form="catalog-form" name="model" value="{{$m.Name}}" {{if $m.Connected}}disabled{{end}} title="Подключить к шлюзу">
+          </td>
+          <td>
+            <div class="name" title="{{$m.Name}}">{{$m.Name}}</div>
+          </td>
+          <td class="col-num muted">{{if $m.SizeLabel}}{{$m.SizeLabel}}{{else}}—{{end}}</td>
+          <td>
+            <div class="host-pills">
+              {{range $m.Hosts}}
+              <form class="ram-form" method="post" action="/admin/ollama/{{.ID}}/{{if .Loaded}}unload{{else}}load{{end}}">
+                <input type="hidden" name="name" value="{{$m.Name}}">
+                <input type="hidden" name="next" value="/admin/models">
+                {{if .Loaded}}
+                <button type="submit" class="pill-btn ram" data-ollama="unload" data-id="{{.ID}}" data-name="{{$m.Name}}" title="Выгрузить из RAM на {{.Name}}">{{.Short}} · выгрузить</button>
+                {{else}}
+                <button type="submit" class="pill-btn" data-ollama="load" data-id="{{.ID}}" data-name="{{$m.Name}}" title="Загрузить в RAM на {{.Name}}">{{.Short}} · в RAM</button>
+                {{end}}
+              </form>
+              {{end}}
+            </div>
+          </td>
+          <td>
+            {{if $m.Connected}}<span class="pill ok">вкл</span>
+            {{else}}<span class="muted">—</span>{{end}}
+          </td>
+          <td class="col-act">
+            <div class="act">
+              {{range $m.Hosts}}
+              <form class="ram-form" method="post" action="/admin/ollama/{{.ID}}/delete">
+                <input type="hidden" name="name" value="{{$m.Name}}">
+                <input type="hidden" name="next" value="/admin/models">
+                <button type="submit" class="btn-sm danger-text" data-ollama="delete" data-id="{{.ID}}" data-name="{{$m.Name}}" title="Удалить файл с {{.Name}}">✕ {{.Short}}</button>
+              </form>
+              {{end}}
+            </div>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+{{else}}
+<div class="card empty">
+  <p>Ollama ещё не отдал список. Проверьте серверы и нажмите «Обновить».</p>
+</div>
+{{end}}
+
+{{if .Models}}
+<div class="card">
+  <h2>Alias в шлюзе</h2>
+  <div class="table-wrap">
+    <table class="tbl">
+      <thead>
+        <tr><th>Клиентам</th><th>Ollama</th><th>Серверы</th><th>LB</th><th class="col-act"></th></tr>
+      </thead>
+      <tbody>
+        {{range .Models}}
+        <tr>
+          <td><code>{{.Alias}}</code></td>
+          <td class="muted">{{.UpstreamName}}</td>
+          <td>{{.BackendNames}}</td>
+          <td class="muted">{{.LBPolicy}}</td>
+          <td class="col-act">
+            <form method="post" action="/admin/models/{{.ID}}/delete" onsubmit="return confirm('Убрать {{.Alias}} из шлюза? Файл на Ollama останется.')">
+              <button class="btn-sm danger-text" type="submit">Убрать</button>
+            </form>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+
+{{if .Catalog}}
+<details class="card">
+  <summary>Свой alias (другое имя для клиентов)</summary>
+  <form method="post" action="/admin/models" id="alias-form" class="pull-row" style="margin-top:.8rem;flex-wrap:wrap">
+    <select name="upstream_name" id="upstream" required>
+      <option value="" disabled selected>Модель Ollama…</option>
+      {{range .Catalog}}
+      <option value="{{.Name}}" data-backends="{{.BackendCSV}}">{{.Name}}</option>
+      {{end}}
+    </select>
+    <input name="alias" id="alias" placeholder="имя для клиентов">
+    <select name="lb_policy" class="sel-sm">
+      <option value="least_conn">least_conn</option>
+      <option value="round_robin">round_robin</option>
+      <option value="failover">failover</option>
+    </select>
+    <div class="checks" id="backend-checks">
+      {{range .Backends}}
+      <label><input type="checkbox" name="backend_id" value="{{.ID}}"> {{.Name}}</label>
+      {{end}}
+    </div>
+    <button type="submit">Создать</button>
+  </form>
+</details>
+{{end}}
+{{end}}

@@ -1,0 +1,95 @@
+{{define "content"}}
+<div class="pagehead">
+  <div>
+    <h1>Ключи</h1>
+    <p class="muted">Клиенты ходят с <code>Authorization: Bearer sk-…</code>. Секрет показывается один раз.</p>
+  </div>
+</div>
+
+{{if .NewKey}}
+<div class="flash secret-card">
+  <div>
+    <div class="job-title">Ключ создан</div>
+    <p class="muted" style="margin:.15rem 0 0">Скопируйте сейчас — повторно не покажем.</p>
+  </div>
+  <div class="secret-row">
+    <code class="secret" id="new-key">{{.NewKey}}</code>
+    <button type="button" class="ghost" data-copy="#new-key">Копировать</button>
+  </div>
+</div>
+{{end}}
+
+<form method="post" action="/admin/keys" id="key-form">
+  <div class="toolbar">
+    <input name="name" placeholder="Имя: holix, open-webui…" required autocomplete="off">
+    <input name="rpm" type="number" value="0" min="0" class="sel-sm" title="Лимит запросов в минуту, 0 — без лимита" placeholder="RPM">
+    <label class="inline"><input type="checkbox" name="all_models" value="1" id="all-models"> Все модели</label>
+    <input type="search" id="key-model-filter" placeholder="Фильтр моделей…" autocomplete="off">
+    <label class="inline"><input type="checkbox" data-toggle="#key-models"> Отметить видимые</label>
+    <span class="muted grow">{{len .ModelNames}} в списке</span>
+    <button type="submit">Выпустить</button>
+  </div>
+
+  <div id="key-models" class="pick-grid dense card flush" style="padding:.65rem">
+    {{range .ModelNames}}
+    <label class="pick" data-name="{{.}}">
+      <input type="checkbox" name="model" value="{{.}}">
+      <span class="pick-name">{{.}}</span>
+    </label>
+    {{else}}
+    <p class="muted" style="margin:0">Списка нет — отметьте «Все модели» или подключите модели на вкладке «Модели».</p>
+    {{end}}
+  </div>
+</form>
+
+{{if .Keys}}
+<div class="toolbar" style="margin-top:1rem">
+  <input type="search" id="key-list-filter" placeholder="Фильтр по имени…" autocomplete="off">
+  <span class="muted grow">{{len .Keys}} в списке</span>
+</div>
+<div class="table-wrap card flush">
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>Имя</th>
+        <th>Prefix</th>
+        <th>Доступ</th>
+        <th class="col-num">RPM</th>
+        <th class="col-num">Запросы</th>
+        <th>Был</th>
+        <th class="col-act"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Keys}}
+      <tr class="key-tr {{if not .Enabled}}is-on{{end}}" data-name="{{.Name}}">
+        <td>
+          <div class="name" title="{{.Name}}">{{.Name}}</div>
+          {{if not .Enabled}}<span class="muted">выкл</span>{{end}}
+        </td>
+        <td class="mono muted">{{.Prefix}}…</td>
+        <td class="col-models">
+          <div class="host-pills" style="flex-wrap:wrap">
+            {{if .AllModels}}<span class="pill ok">все модели</span>
+            {{else}}{{range .AllowedModels}}<span class="pill">{{.}}</span>{{end}}{{end}}
+          </div>
+        </td>
+        <td class="col-num muted">{{if eq .RPM 0}}∞{{else}}{{.RPM}}{{end}}</td>
+        <td class="col-num">{{.RequestCount}}</td>
+        <td class="muted">{{.LastUsed}}</td>
+        <td class="col-act">
+          <form method="post" action="/admin/keys/{{.ID}}/delete" onsubmit="return confirm('Отозвать ключ {{.Name}}?')">
+            <button class="btn-sm danger-text" type="submit">Отозвать</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<div class="card empty">
+  <p>Ключей нет. Выпустите первый — без Bearer API отвечает 401.</p>
+</div>
+{{end}}
+{{end}}

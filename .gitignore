@@ -1,0 +1,11 @@
+/data/
+/dist/
+*.pass
+*.key
+*.db
+*.db-wal
+*.db-shm
+.idea/
+.DS_Store
+*.tar
+

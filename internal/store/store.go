@@ -1,0 +1,496 @@
+package store
+
+import (
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"log"
+	"strings"
+	"time"
+
+	"github.com/javded-itres/mikrollm/internal/domain"
+	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
+)
+
+type Store struct {
+	DB *sql.DB
+}
+
+type Backend = domain.Backend
+type Model = domain.Model
+type APIKey = domain.APIKey
+type RequestLog = domain.RequestLog
+
+func Open(path string) (*Store, error) {
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	s := &Store{DB: db}
+	if err := s.migrate(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Store) Close() error { return s.DB.Close() }
+
+func (s *Store) migrate() error {
+	_, err := s.DB.Exec(`
+CREATE TABLE IF NOT EXISTS backends (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  base_url TEXT NOT NULL UNIQUE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  weight INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS models (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  alias TEXT NOT NULL UNIQUE,
+  upstream_name TEXT NOT NULL,
+  lb_policy TEXT NOT NULL DEFAULT 'least_conn',
+  enabled INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS model_backends (
+  model_id INTEGER NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+  backend_id INTEGER NOT NULL REFERENCES backends(id) ON DELETE CASCADE,
+  PRIMARY KEY (model_id, backend_id)
+);
+CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  prefix TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE,
+  allowed_models TEXT NOT NULL DEFAULT '["*"]',
+  rpm INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  request_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS admin_meta (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  password_hash TEXT NOT NULL,
+  session_secret TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS request_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  key_prefix TEXT NOT NULL,
+  model TEXT NOT NULL,
+  backend TEXT NOT NULL,
+  status INTEGER NOT NULL,
+  latency_ms INTEGER NOT NULL,
+  bytes_out INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS request_log_ts ON request_log(ts);
+CREATE TABLE IF NOT EXISTS ollama_jobs (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  backend_id INTEGER NOT NULL,
+  backend TEXT NOT NULL,
+  model TEXT NOT NULL,
+  status TEXT NOT NULL,
+  percent INTEGER NOT NULL DEFAULT 0,
+  message TEXT NOT NULL DEFAULT '',
+  error TEXT NOT NULL DEFAULT '',
+  log TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
+`)
+	return err
+}
+
+func (s *Store) EnsureAdmin(password string, reset bool) error {
+	var n int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM admin_meta`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 && !reset {
+		return nil
+	}
+	if password == "" {
+		b := make([]byte, 6)
+		_, _ = rand.Read(b)
+		password = hex.EncodeToString(b)
+		log.Printf("generated admin password: %s", password)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	sec := make([]byte, 32)
+	if _, err := rand.Read(sec); err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(`
+INSERT INTO admin_meta (id, password_hash, session_secret) VALUES (1, ?, ?)
+ON CONFLICT(id) DO UPDATE SET password_hash=excluded.password_hash, session_secret=excluded.session_secret
+`, string(hash), hex.EncodeToString(sec))
+	return err
+}
+
+func (s *Store) AdminHash() (string, error) {
+	var h string
+	err := s.DB.QueryRow(`SELECT password_hash FROM admin_meta WHERE id=1`).Scan(&h)
+	return h, err
+}
+
+func (s *Store) SessionSecret() (string, error) {
+	var h string
+	err := s.DB.QueryRow(`SELECT session_secret FROM admin_meta WHERE id=1`).Scan(&h)
+	return h, err
+}
+
+func (s *Store) SetAdminPassword(password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(`UPDATE admin_meta SET password_hash=? WHERE id=1`, string(hash))
+	return err
+}
+
+func (s *Store) ListBackends() ([]Backend, error) {
+	rows, err := s.DB.Query(`SELECT id, name, base_url, enabled, weight FROM backends ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Backend
+	for rows.Next() {
+		var b Backend
+		var en int
+		if err := rows.Scan(&b.ID, &b.Name, &b.BaseURL, &en, &b.Weight); err != nil {
+			return nil, err
+		}
+		b.Enabled = en == 1
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetBackend(id int64) (Backend, error) {
+	var b Backend
+	var en int
+	err := s.DB.QueryRow(`SELECT id, name, base_url, enabled, weight FROM backends WHERE id=?`, id).
+		Scan(&b.ID, &b.Name, &b.BaseURL, &en, &b.Weight)
+	b.Enabled = en == 1
+	return b, err
+}
+
+func (s *Store) UpsertBackend(name, baseURL string, enabled bool, weight int) (int64, error) {
+	if weight <= 0 {
+		weight = 1
+	}
+	en := 0
+	if enabled {
+		en = 1
+	}
+	res, err := s.DB.Exec(`
+INSERT INTO backends (name, base_url, enabled, weight) VALUES (?, ?, ?, ?)
+ON CONFLICT(base_url) DO UPDATE SET name=excluded.name, enabled=excluded.enabled, weight=excluded.weight
+`, name, strings.TrimRight(baseURL, "/"), en, weight)
+	if err != nil {
+		return 0, err
+	}
+	id, _ := res.LastInsertId()
+	if id == 0 {
+		_ = s.DB.QueryRow(`SELECT id FROM backends WHERE base_url=?`, strings.TrimRight(baseURL, "/")).Scan(&id)
+	}
+	return id, nil
+}
+
+func (s *Store) DeleteBackend(id int64) error {
+	_, err := s.DB.Exec(`DELETE FROM backends WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) ListModels() ([]Model, error) {
+	rows, err := s.DB.Query(`SELECT id, alias, upstream_name, lb_policy, enabled FROM models ORDER BY alias`)
+	if err != nil {
+		return nil, err
+	}
+	var out []Model
+	for rows.Next() {
+		var m Model
+		var en int
+		if err := rows.Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		m.Enabled = en == 1
+		out = append(out, m)
+	}
+	qerr := rows.Err()
+	rows.Close()
+	if qerr != nil {
+		return nil, qerr
+	}
+	// Second query after Close: MaxOpenConns=1 deadlocks if rows stay open.
+	for i := range out {
+		ids, err := s.modelBackendIDs(out[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		out[i].BackendIDs = ids
+	}
+	return out, nil
+}
+
+func (s *Store) GetModelByAlias(alias string) (Model, error) {
+	var m Model
+	var en int
+	err := s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled FROM models WHERE alias=?`, alias).
+		Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en)
+	if err != nil {
+		return m, err
+	}
+	m.Enabled = en == 1
+	m.BackendIDs, err = s.modelBackendIDs(m.ID)
+	return m, err
+}
+
+func (s *Store) modelBackendIDs(modelID int64) ([]int64, error) {
+	rows, err := s.DB.Query(`SELECT backend_id FROM model_backends WHERE model_id=?`, modelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *Store) SaveModel(m Model) (int64, error) {
+	if m.LBPolicy == "" {
+		m.LBPolicy = "least_conn"
+	}
+	en := 0
+	if m.Enabled {
+		en = 1
+	}
+	if m.UpstreamName == "" {
+		m.UpstreamName = m.Alias
+	}
+	if m.ID == 0 {
+		res, err := s.DB.Exec(`INSERT INTO models (alias, upstream_name, lb_policy, enabled) VALUES (?,?,?,?)`,
+			m.Alias, m.UpstreamName, m.LBPolicy, en)
+		if err != nil {
+			return 0, err
+		}
+		id, _ := res.LastInsertId()
+		m.ID = id
+	} else {
+		_, err := s.DB.Exec(`UPDATE models SET alias=?, upstream_name=?, lb_policy=?, enabled=? WHERE id=?`,
+			m.Alias, m.UpstreamName, m.LBPolicy, en, m.ID)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if _, err := s.DB.Exec(`DELETE FROM model_backends WHERE model_id=?`, m.ID); err != nil {
+		return 0, err
+	}
+	for _, bid := range m.BackendIDs {
+		if _, err := s.DB.Exec(`INSERT INTO model_backends (model_id, backend_id) VALUES (?,?)`, m.ID, bid); err != nil {
+			return 0, err
+		}
+	}
+	return m.ID, nil
+}
+
+func (s *Store) DeleteModel(id int64) error {
+	_, err := s.DB.Exec(`DELETE FROM models WHERE id=?`, id)
+	return err
+}
+
+// ConnectOllamaModel creates or updates an alias named after the Ollama model.
+func (s *Store) ConnectOllamaModel(name string, backendIDs []int64, policy string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || len(backendIDs) == 0 {
+		return fmt.Errorf("model and backends required")
+	}
+	if policy == "" {
+		policy = "least_conn"
+	}
+	m, err := s.GetModelByAlias(name)
+	if err != nil {
+		m = Model{Alias: name, UpstreamName: name, LBPolicy: policy, Enabled: true, BackendIDs: backendIDs}
+	} else {
+		m.BackendIDs = backendIDs
+		m.Enabled = true
+		if m.UpstreamName == "" {
+			m.UpstreamName = name
+		}
+	}
+	_, err = s.SaveModel(m)
+	return err
+}
+
+func (s *Store) ListKeys() ([]APIKey, error) {
+	rows, err := s.DB.Query(`SELECT id, name, prefix, key_hash, allowed_models, rpm, enabled, created_at, last_used_at, request_count FROM api_keys ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []APIKey
+	for rows.Next() {
+		k, err := scanKey(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanKey(r rowScanner) (APIKey, error) {
+	var k APIKey
+	var allowed, created string
+	var last sql.NullString
+	var en int
+	if err := r.Scan(&k.ID, &k.Name, &k.Prefix, &k.KeyHash, &allowed, &k.RPM, &en, &created, &last, &k.RequestCount); err != nil {
+		return k, err
+	}
+	k.Enabled = en == 1
+	_ = json.Unmarshal([]byte(allowed), &k.AllowedModels)
+	k.CreatedAt, _ = time.Parse(time.RFC3339, created)
+	if last.Valid {
+		t, _ := time.Parse(time.RFC3339, last.String)
+		k.LastUsedAt = &t
+	}
+	return k, nil
+}
+
+func (s *Store) GetKeyByHash(hash string) (APIKey, error) {
+	row := s.DB.QueryRow(`SELECT id, name, prefix, key_hash, allowed_models, rpm, enabled, created_at, last_used_at, request_count FROM api_keys WHERE key_hash=?`, hash)
+	return scanKey(row)
+}
+
+func (s *Store) InsertKey(k APIKey) (int64, error) {
+	raw, _ := json.Marshal(k.AllowedModels)
+	en := 0
+	if k.Enabled {
+		en = 1
+	}
+	res, err := s.DB.Exec(`INSERT INTO api_keys (name, prefix, key_hash, allowed_models, rpm, enabled, created_at) VALUES (?,?,?,?,?,?,?)`,
+		k.Name, k.Prefix, k.KeyHash, string(raw), k.RPM, en, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (s *Store) UpdateKey(k APIKey) error {
+	raw, _ := json.Marshal(k.AllowedModels)
+	en := 0
+	if k.Enabled {
+		en = 1
+	}
+	_, err := s.DB.Exec(`UPDATE api_keys SET name=?, allowed_models=?, rpm=?, enabled=? WHERE id=?`,
+		k.Name, string(raw), k.RPM, en, k.ID)
+	return err
+}
+
+func (s *Store) DeleteKey(id int64) error {
+	_, err := s.DB.Exec(`DELETE FROM api_keys WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) TouchKey(id int64) {
+	_, _ = s.DB.Exec(`UPDATE api_keys SET last_used_at=?, request_count=request_count+1 WHERE id=?`,
+		time.Now().UTC().Format(time.RFC3339), id)
+}
+
+func (s *Store) Log(prefix, model, backend string, status int, latency time.Duration, bytesOut int64) {
+	_, _ = s.DB.Exec(`INSERT INTO request_log (ts, key_prefix, model, backend, status, latency_ms, bytes_out) VALUES (?,?,?,?,?,?,?)`,
+		time.Now().UTC().Format(time.RFC3339Nano), prefix, model, backend, status, latency.Milliseconds(), bytesOut)
+	_, _ = s.DB.Exec(`DELETE FROM request_log WHERE id NOT IN (SELECT id FROM request_log ORDER BY id DESC LIMIT 500)`)
+}
+
+func (s *Store) ListLogs(limit int) ([]RequestLog, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.DB.Query(`SELECT id, ts, key_prefix, model, backend, status, latency_ms, bytes_out FROM request_log ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RequestLog
+	for rows.Next() {
+		var l RequestLog
+		var ts string
+		if err := rows.Scan(&l.ID, &ts, &l.KeyPrefix, &l.Model, &l.Backend, &l.Status, &l.LatencyMS, &l.BytesOut); err != nil {
+			return nil, err
+		}
+		l.TS, _ = time.Parse(time.RFC3339Nano, ts)
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpsertJob(j domain.Job) error {
+	_, err := s.DB.Exec(`
+INSERT INTO ollama_jobs (id, kind, backend_id, backend, model, status, percent, message, error, log, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  kind=excluded.kind, backend_id=excluded.backend_id, backend=excluded.backend,
+  model=excluded.model, status=excluded.status, percent=excluded.percent,
+  message=excluded.message, error=excluded.error, log=excluded.log, updated_at=excluded.updated_at
+`, j.ID, j.Kind, j.BackendID, j.Backend, j.Model, j.Status, j.Percent, j.Message, j.Error, j.Log, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func (s *Store) ListJobs() ([]domain.Job, error) {
+	rows, err := s.DB.Query(`
+SELECT id, kind, backend_id, backend, model, status, percent, message, error, log
+FROM ollama_jobs
+ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, updated_at DESC
+LIMIT 12`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Job
+	for rows.Next() {
+		var j domain.Job
+		if err := rows.Scan(&j.ID, &j.Kind, &j.BackendID, &j.Backend, &j.Model, &j.Status, &j.Percent, &j.Message, &j.Error, &j.Log); err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) SeedIfEmpty(backends []Backend) error {
+	var n int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM backends`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	for _, b := range backends {
+		if _, err := s.UpsertBackend(b.Name, b.BaseURL, true, b.Weight); err != nil {
+			return fmt.Errorf("seed backend %s: %w", b.Name, err)
+		}
+	}
+	return nil
+}
