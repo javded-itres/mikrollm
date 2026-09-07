@@ -2,7 +2,7 @@
 <div class="pagehead">
   <div>
     <h1>Модели</h1>
-    <p class="muted">Загрузка в RAM — кнопки у сервера. Скачивание — сверху. Обновление страницы не сбрасывает задачу.</p>
+    <p class="muted">RAM и скачивание — если бэкенд это умеет. vLLM поднимает модель на сервере. F5 не сбрасывает задачу.</p>
   </div>
   <form method="post" action="/admin/refresh">
     <input type="hidden" name="next" value="/admin/models">
@@ -11,13 +11,12 @@
 </div>
 
 <details class="card pull-box" id="pull-card" {{if .PullJob}}open{{end}}>
-  <summary>Скачать модель в Ollama</summary>
+  <summary>Скачать модель</summary>
+  {{if .PullBackends}}
   <form id="pull-form" class="pull-row">
     <select name="backend_id" id="pull-backend" required title="Сервер">
-      {{range .Backends}}
-      <option value="{{.ID}}">{{.Name}}</option>
-      {{else}}
-      <option value="" disabled>нет серверов</option>
+      {{range .PullBackends}}
+      <option value="{{.ID}}" data-kind="{{.KindNorm}}">{{.Name}} · {{.Label}}</option>
       {{end}}
     </select>
     <input name="name" id="pull-name" placeholder="llama3.2 или qwen3.8:27b-mlx" value="{{if .PullJob}}{{.PullJob.Model}}{{end}}" required>
@@ -26,14 +25,36 @@
   </form>
   <progress id="pull-bar" max="100" value="{{if .PullJob}}{{.PullJob.Percent}}{{else}}0{{end}}" {{if not .PullJob}}hidden{{end}}></progress>
   <pre class="pull-log" id="pull-log" {{if not .PullJob}}hidden{{end}}>{{if .PullJob}}{{.PullJob.Log}}{{end}}</pre>
+  {{else}}
+  <p class="muted" style="margin-top:.8rem">Нет серверов, которые умеют скачивать через API (Ollama, LM Studio).</p>
+  {{end}}
+  {{if .HasVLLM}}
+  <p class="hint">vLLM не качает модель через API. Остановите процесс и запустите <code>vllm serve &lt;HuggingFace-id&gt; --host 0.0.0.0 --port 8000</code>. <a href="https://github.com/javded-itres/mikrollm/blob/main/docs/providers.md#vllm">Инструкция</a></p>
+  {{end}}
+  {{if .HasCloud}}
+  <p class="hint">OpenRouter и Ollama Cloud не качают веса к вам — модели уже в облаке. Отметьте нужные и нажмите «В шлюз».</p>
+  {{end}}
 </details>
 
 {{if .Catalog}}
 <form method="post" action="/admin/models/connect" id="catalog-form"></form>
-  <div class="toolbar">
-    <input type="search" id="model-filter" placeholder="Фильтр по имени…" autocomplete="off">
+  <div class="toolbar" id="catalog-filters">
+    <input type="search" id="model-filter" placeholder="Имя или провайдер…" autocomplete="off">
+    <select id="model-provider" class="sel-sm" title="Провайдер">
+      <option value="">Все провайдеры</option>
+      {{range .Providers}}<option value="{{.}}">{{.}}</option>{{end}}
+    </select>
+    <select id="model-price" class="sel-sm" title="Цена входа за 1M токенов">
+      <option value="">Все цены</option>
+      <option value="free">Бесплатные</option>
+      <option value="lt0.5">до $0.50 / 1M</option>
+      <option value="lt2">до $2 / 1M</option>
+      <option value="lt10">до $10 / 1M</option>
+      <option value="more">от $10 / 1M</option>
+      <option value="none">без цены</option>
+    </select>
     <label class="inline"><input type="checkbox" data-toggle="#catalog-table"> Все свободные</label>
-    <span class="muted grow">{{.Available}} не в шлюзе</span>
+    <span class="muted grow" id="catalog-count">{{.Available}} не в шлюзе</span>
     <select name="lb_policy" form="catalog-form" class="sel-sm" title="Балансировка">
       <option value="least_conn">least_conn</option>
       <option value="round_robin">round_robin</option>
@@ -48,7 +69,10 @@
         <tr>
           <th class="col-check"></th>
           <th>Модель</th>
+          <th>Провайдер</th>
           <th class="col-num">Размер</th>
+          <th class="col-num">Контекст</th>
+          <th class="col-num">Цена 1M</th>
           <th>RAM</th>
           <th>Шлюз</th>
           <th class="col-act">Диск</th>
@@ -56,17 +80,22 @@
       </thead>
       <tbody>
         {{range $m := .Catalog}}
-        <tr class="model-tr {{if $m.Connected}}is-on{{end}}" data-name="{{$m.Name}}">
+        <tr class="model-tr {{if $m.Connected}}is-on{{end}}" data-name="{{$m.Name}}" data-provider="{{$m.Provider}}" data-band="{{$m.PriceBand}}" data-prompt="{{$m.PromptUSD}}" data-title="{{$m.Title}}">
           <td class="col-check">
             <input type="checkbox" form="catalog-form" name="model" value="{{$m.Name}}" {{if $m.Connected}}disabled{{end}} title="Подключить к шлюзу">
           </td>
           <td>
-            <div class="name" title="{{$m.Name}}">{{$m.Name}}</div>
+            <div class="name" title="{{if $m.Title}}{{$m.Title}} · {{end}}{{$m.Name}}">{{$m.Name}}</div>
+            {{if $m.Title}}<div class="muted small">{{$m.Title}}</div>{{end}}
           </td>
+          <td>{{if $m.Provider}}<span class="pill">{{$m.Provider}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
           <td class="col-num muted">{{if $m.SizeLabel}}{{$m.SizeLabel}}{{else}}—{{end}}</td>
+          <td class="col-num muted" title="Контекст с сервера">{{if $m.CtxLabel}}{{$m.CtxLabel}}{{else}}—{{end}}</td>
+          <td class="col-num muted" title="вход / выход за 1M токенов">{{if $m.PriceLabel}}{{$m.PriceLabel}}{{else}}—{{end}}</td>
           <td>
             <div class="host-pills">
               {{range $m.Hosts}}
+              {{if .CanLoad}}
               <form class="ram-form" method="post" action="/admin/ollama/{{.ID}}/{{if .Loaded}}unload{{else}}load{{end}}">
                 <input type="hidden" name="name" value="{{$m.Name}}">
                 <input type="hidden" name="next" value="/admin/models">
@@ -76,6 +105,9 @@
                 <button type="submit" class="pill-btn" data-ollama="load" data-id="{{.ID}}" data-name="{{$m.Name}}" title="Загрузить в RAM на {{.Name}}">{{.Short}} · в RAM</button>
                 {{end}}
               </form>
+              {{else}}
+              <span class="pill{{if .Loaded}} ram{{end}}" title="{{.Hint}}">{{.Short}} · {{if .Cloud}}облако{{else}}{{.Label}}{{end}}{{if .Loaded}} · RAM{{end}}</span>
+              {{end}}
               {{end}}
             </div>
           </td>
@@ -86,11 +118,15 @@
           <td class="col-act">
             <div class="act">
               {{range $m.Hosts}}
+              {{if .CanDelete}}
               <form class="ram-form" method="post" action="/admin/ollama/{{.ID}}/delete">
                 <input type="hidden" name="name" value="{{$m.Name}}">
                 <input type="hidden" name="next" value="/admin/models">
                 <button type="submit" class="btn-sm danger-text" data-ollama="delete" data-id="{{.ID}}" data-name="{{$m.Name}}" title="Удалить файл с {{.Name}}">✕ {{.Short}}</button>
               </form>
+              {{else}}
+              <span class="muted" title="{{.Hint}}">—</span>
+              {{end}}
               {{end}}
             </div>
           </td>
@@ -101,7 +137,7 @@
   </div>
 {{else}}
 <div class="card empty">
-  <p>Ollama ещё не отдал список. Проверьте серверы и нажмите «Обновить».</p>
+  <p>Серверы ещё не отдали список моделей. Проверьте тип/URL и нажмите «Обновить».</p>
 </div>
 {{end}}
 
@@ -111,17 +147,37 @@
   <div class="table-wrap">
     <table class="tbl">
       <thead>
-        <tr><th>Клиентам</th><th>Ollama</th><th>Серверы</th><th>LB</th><th class="col-act"></th></tr>
+        <tr><th>Клиентам</th><th>На сервере</th><th>Провайдер</th><th>Цена 1M</th><th>Серверы</th><th>Контекст</th><th>Запасная</th><th>LB</th><th class="col-act"></th></tr>
       </thead>
       <tbody>
-        {{range .Models}}
+        {{range $m := .Models}}
         <tr>
-          <td><code>{{.Alias}}</code></td>
-          <td class="muted">{{.UpstreamName}}</td>
-          <td>{{.BackendNames}}</td>
-          <td class="muted">{{.LBPolicy}}</td>
+          <td><code>{{$m.Alias}}</code></td>
+          <td class="muted">{{$m.UpstreamName}}</td>
+          <td>{{if $m.Provider}}<span class="pill">{{$m.Provider}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+          <td class="muted" title="вход / выход за 1M токенов">{{if $m.PriceLabel}}{{$m.PriceLabel}}{{else}}—{{end}}</td>
+          <td>{{$m.BackendNames}}</td>
+          <td>
+            <form method="post" action="/admin/models/{{$m.ID}}/context" class="ctx-form" title="0 — взять с сервера ({{if $m.Detected}}{{hctx $m.Detected}}{{else}}нет{{end}})">
+              <input type="number" name="max_context" min="0" step="1024" value="{{$m.MaxContext}}" placeholder="{{if $m.Detected}}{{$m.Detected}}{{end}}">
+              <button class="btn-sm" type="submit">OK</button>
+            </form>
+            <div class="muted small">{{if $m.CtxLabel}}{{$m.CtxLabel}}{{else}}неизвестно{{end}}</div>
+          </td>
+          <td>
+            <form method="post" action="/admin/models/{{$m.ID}}/fallback" class="ctx-form" title="Если у основной кончились кредиты, квота или подписка — шлюз возьмёт эту модель">
+              <select name="fallback">
+                <option value="">нет</option>
+                {{range $o := $.Models}}
+                {{if ne $o.Alias $m.Alias}}<option value="{{$o.Alias}}" {{if eq $o.Alias $m.Fallback}}selected{{end}}>{{$o.Alias}}</option>{{end}}
+                {{end}}
+              </select>
+              <button class="btn-sm" type="submit">OK</button>
+            </form>
+          </td>
+          <td class="muted">{{$m.LBPolicy}}</td>
           <td class="col-act">
-            <form method="post" action="/admin/models/{{.ID}}/delete" onsubmit="return confirm('Убрать {{.Alias}} из шлюза? Файл на Ollama останется.')">
+            <form method="post" action="/admin/models/{{$m.ID}}/delete" onsubmit="return confirm('Убрать {{$m.Alias}} из шлюза? Файл на сервере останется.')">
               <button class="btn-sm danger-text" type="submit">Убрать</button>
             </form>
           </td>
@@ -138,16 +194,21 @@
   <summary>Свой alias (другое имя для клиентов)</summary>
   <form method="post" action="/admin/models" id="alias-form" class="pull-row" style="margin-top:.8rem;flex-wrap:wrap">
     <select name="upstream_name" id="upstream" required>
-      <option value="" disabled selected>Модель Ollama…</option>
+      <option value="" disabled selected>Модель на сервере…</option>
       {{range .Catalog}}
-      <option value="{{.Name}}" data-backends="{{.BackendCSV}}">{{.Name}}</option>
+      <option value="{{.Name}}" data-backends="{{.BackendCSV}}">{{if .Provider}}{{.Provider}} · {{end}}{{.Name}}{{if .PriceLabel}} · {{.PriceLabel}}{{end}}</option>
       {{end}}
     </select>
     <input name="alias" id="alias" placeholder="имя для клиентов">
+    <input name="max_context" type="number" min="0" step="1024" placeholder="контекст, 0 = авто" class="sel-sm" title="max_input_tokens">
     <select name="lb_policy" class="sel-sm">
       <option value="least_conn">least_conn</option>
       <option value="round_robin">round_robin</option>
       <option value="failover">failover</option>
+    </select>
+    <select name="fallback" class="sel-sm" title="Запасная модель, если кончились кредиты">
+      <option value="">без запасной</option>
+      {{range .Models}}<option value="{{.Alias}}">запас: {{.Alias}}</option>{{end}}
     </select>
     <div class="checks" id="backend-checks">
       {{range .Backends}}

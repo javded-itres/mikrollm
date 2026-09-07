@@ -10,15 +10,35 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/javded-itres/mikrollm/internal/domain"
 	"github.com/javded-itres/mikrollm/internal/ports"
 )
 
-func (u *UI) backendByID(id int64) (ok bool, base, name string) {
+func (u *UI) backendByID(id int64) (domain.Backend, bool) {
 	b, err := u.st.GetBackend(id)
 	if err != nil || !b.Enabled {
-		return false, "", ""
+		return domain.Backend{}, false
 	}
-	return true, b.BaseURL, b.Name
+	return b, true
+}
+
+func rejectOp(b domain.Backend, op string) string {
+	ok := false
+	switch op {
+	case "pull":
+		ok = b.CanPull()
+	case "load", "unload":
+		ok = b.CanLoad()
+	case "delete":
+		ok = b.CanDelete()
+	}
+	if ok {
+		return ""
+	}
+	if h := b.LoadHint(); h != "" {
+		return h
+	}
+	return b.Label() + " не поддерживает эту операцию через API. См. docs/providers.md"
 }
 
 func (u *UI) ollamaJobs(w http.ResponseWriter, r *http.Request) {
@@ -27,42 +47,50 @@ func (u *UI) ollamaJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) ollamaPull(w http.ResponseWriter, r *http.Request) {
-	u.startJob(w, r, "pull", "pulling", func(id, base, model string) error {
+	u.startJob(w, r, "pull", "pulling", func(id string, b domain.Backend, model string) error {
 		wr := u.jobs.Writer(id)
-		err := u.host.Pull(context.Background(), base, model, wr)
+		err := u.host.Pull(context.Background(), b, model, wr)
 		_ = wr.Close()
 		return err
 	})
 }
 
 func (u *UI) ollamaDelete(w http.ResponseWriter, r *http.Request) {
-	u.ollamaMutate(w, r, func(base, model string) error {
-		return u.host.Delete(r.Context(), base, model)
+	u.ollamaMutate(w, r, "delete", func(b domain.Backend, model string) error {
+		return u.host.Delete(r.Context(), b, model)
 	}, "deleted")
 }
 
 func (u *UI) ollamaUnload(w http.ResponseWriter, r *http.Request) {
-	u.ollamaMutate(w, r, func(base, model string) error {
-		return u.host.Unload(r.Context(), base, model)
+	u.ollamaMutate(w, r, "unload", func(b domain.Backend, model string) error {
+		return u.host.Unload(r.Context(), b, model)
 	}, "unloaded")
 }
 
 func (u *UI) ollamaLoad(w http.ResponseWriter, r *http.Request) {
-	u.startJob(w, r, "load", "loading", func(id, base, model string) error {
+	u.startJob(w, r, "load", "loading", func(id string, b domain.Backend, model string) error {
 		u.jobs.SetMessage(id, "загрузка в RAM…")
-		return u.host.Load(context.Background(), base, model)
+		return u.host.Load(context.Background(), b, model)
 	})
 }
 
-func (u *UI) startJob(w http.ResponseWriter, r *http.Request, kind, okFlash string, run func(id, base, model string) error) {
+func (u *UI) startJob(w http.ResponseWriter, r *http.Request, kind, okFlash string, run func(id string, b domain.Backend, model string) error) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	found, base, bname := u.backendByID(id)
+	b, found := u.backendByID(id)
 	if !found {
 		if wantsJSON(r) {
 			writeJSONErr(w, http.StatusNotFound, "unknown backend")
 			return
 		}
 		http.Redirect(w, r, nextPath(r)+"?err=unknown+backend", http.StatusFound)
+		return
+	}
+	if msg := rejectOp(b, kind); msg != "" {
+		if wantsJSON(r) {
+			writeJSONErr(w, http.StatusBadRequest, msg)
+			return
+		}
+		http.Redirect(w, r, nextPath(r)+"?err="+url.QueryEscape(msg), http.StatusFound)
 		return
 	}
 	_ = r.ParseForm()
@@ -75,7 +103,7 @@ func (u *UI) startJob(w http.ResponseWriter, r *http.Request, kind, okFlash stri
 		http.Redirect(w, r, nextPath(r)+"?err=name+required", http.StatusFound)
 		return
 	}
-	j, busy, err := u.jobs.Begin(kind, id, bname, model)
+	j, busy, err := u.jobs.Begin(kind, id, b.Name, model)
 	if err != nil {
 		msg := "busy"
 		if busy != nil {
@@ -93,7 +121,7 @@ func (u *UI) startJob(w http.ResponseWriter, r *http.Request, kind, okFlash stri
 		return
 	}
 	go func() {
-		if err := run(j.ID, base, model); err != nil {
+		if err := run(j.ID, b, model); err != nil {
 			u.jobs.Fail(j.ID, err.Error())
 			return
 		}
@@ -108,15 +136,23 @@ func (u *UI) startJob(w http.ResponseWriter, r *http.Request, kind, okFlash stri
 	http.Redirect(w, r, nextPath(r)+"?ok="+okFlash, http.StatusFound)
 }
 
-func (u *UI) ollamaMutate(w http.ResponseWriter, r *http.Request, fn func(base, model string) error, ok string) {
+func (u *UI) ollamaMutate(w http.ResponseWriter, r *http.Request, op string, fn func(b domain.Backend, model string) error, ok string) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	found, base, _ := u.backendByID(id)
+	b, found := u.backendByID(id)
 	if !found {
 		if wantsJSON(r) {
 			writeJSONErr(w, http.StatusNotFound, "unknown backend")
 			return
 		}
 		http.Redirect(w, r, nextPath(r)+"?err=unknown+backend", http.StatusFound)
+		return
+	}
+	if msg := rejectOp(b, op); msg != "" {
+		if wantsJSON(r) {
+			writeJSONErr(w, http.StatusBadRequest, msg)
+			return
+		}
+		http.Redirect(w, r, nextPath(r)+"?err="+url.QueryEscape(msg), http.StatusFound)
 		return
 	}
 	_ = r.ParseForm()
@@ -129,7 +165,7 @@ func (u *UI) ollamaMutate(w http.ResponseWriter, r *http.Request, fn func(base, 
 		http.Redirect(w, r, nextPath(r)+"?err=name+required", http.StatusFound)
 		return
 	}
-	if err := fn(base, model); err != nil {
+	if err := fn(b, model); err != nil {
 		if wantsJSON(r) {
 			writeJSONErr(w, http.StatusBadGateway, err.Error())
 			return

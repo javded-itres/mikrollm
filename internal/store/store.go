@@ -104,7 +104,14 @@ CREATE TABLE IF NOT EXISTS ollama_jobs (
   updated_at TEXT NOT NULL
 );
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	_, _ = s.DB.Exec(`ALTER TABLE backends ADD COLUMN kind TEXT NOT NULL DEFAULT 'ollama'`)
+	_, _ = s.DB.Exec(`ALTER TABLE backends ADD COLUMN token TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN max_context INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN fallback TEXT NOT NULL DEFAULT ''`)
+	return nil
 }
 
 func (s *Store) EnsureAdmin(password string, reset bool) error {
@@ -158,7 +165,7 @@ func (s *Store) SetAdminPassword(password string) error {
 }
 
 func (s *Store) ListBackends() ([]Backend, error) {
-	rows, err := s.DB.Query(`SELECT id, name, base_url, enabled, weight FROM backends ORDER BY id`)
+	rows, err := s.DB.Query(`SELECT id, name, base_url, enabled, weight, kind, token FROM backends ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -167,10 +174,11 @@ func (s *Store) ListBackends() ([]Backend, error) {
 	for rows.Next() {
 		var b Backend
 		var en int
-		if err := rows.Scan(&b.ID, &b.Name, &b.BaseURL, &en, &b.Weight); err != nil {
+		if err := rows.Scan(&b.ID, &b.Name, &b.BaseURL, &en, &b.Weight, &b.Kind, &b.Token); err != nil {
 			return nil, err
 		}
 		b.Enabled = en == 1
+		b.Kind = domain.NormalizeKind(b.Kind)
 		out = append(out, b)
 	}
 	return out, rows.Err()
@@ -179,13 +187,14 @@ func (s *Store) ListBackends() ([]Backend, error) {
 func (s *Store) GetBackend(id int64) (Backend, error) {
 	var b Backend
 	var en int
-	err := s.DB.QueryRow(`SELECT id, name, base_url, enabled, weight FROM backends WHERE id=?`, id).
-		Scan(&b.ID, &b.Name, &b.BaseURL, &en, &b.Weight)
+	err := s.DB.QueryRow(`SELECT id, name, base_url, enabled, weight, kind, token FROM backends WHERE id=?`, id).
+		Scan(&b.ID, &b.Name, &b.BaseURL, &en, &b.Weight, &b.Kind, &b.Token)
 	b.Enabled = en == 1
+	b.Kind = domain.NormalizeKind(b.Kind)
 	return b, err
 }
 
-func (s *Store) UpsertBackend(name, baseURL string, enabled bool, weight int) (int64, error) {
+func (s *Store) UpsertBackend(name, baseURL string, enabled bool, weight int, kind, token string) (int64, error) {
 	if weight <= 0 {
 		weight = 1
 	}
@@ -193,10 +202,12 @@ func (s *Store) UpsertBackend(name, baseURL string, enabled bool, weight int) (i
 	if enabled {
 		en = 1
 	}
+	kind = domain.NormalizeKind(kind)
+	token = domain.SanitizeToken(token)
 	res, err := s.DB.Exec(`
-INSERT INTO backends (name, base_url, enabled, weight) VALUES (?, ?, ?, ?)
-ON CONFLICT(base_url) DO UPDATE SET name=excluded.name, enabled=excluded.enabled, weight=excluded.weight
-`, name, strings.TrimRight(baseURL, "/"), en, weight)
+INSERT INTO backends (name, base_url, enabled, weight, kind, token) VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(base_url) DO UPDATE SET name=excluded.name, enabled=excluded.enabled, weight=excluded.weight, kind=excluded.kind, token=excluded.token
+`, name, strings.TrimRight(baseURL, "/"), en, weight, kind, token)
 	if err != nil {
 		return 0, err
 	}
@@ -213,7 +224,7 @@ func (s *Store) DeleteBackend(id int64) error {
 }
 
 func (s *Store) ListModels() ([]Model, error) {
-	rows, err := s.DB.Query(`SELECT id, alias, upstream_name, lb_policy, enabled FROM models ORDER BY alias`)
+	rows, err := s.DB.Query(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback FROM models ORDER BY alias`)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +232,7 @@ func (s *Store) ListModels() ([]Model, error) {
 	for rows.Next() {
 		var m Model
 		var en int
-		if err := rows.Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en); err != nil {
+		if err := rows.Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en, &m.MaxContext, &m.Fallback); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -244,11 +255,24 @@ func (s *Store) ListModels() ([]Model, error) {
 	return out, nil
 }
 
+func (s *Store) GetModel(id int64) (Model, error) {
+	var m Model
+	var en int
+	err := s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback FROM models WHERE id=?`, id).
+		Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en, &m.MaxContext, &m.Fallback)
+	if err != nil {
+		return m, err
+	}
+	m.Enabled = en == 1
+	m.BackendIDs, err = s.modelBackendIDs(m.ID)
+	return m, err
+}
+
 func (s *Store) GetModelByAlias(alias string) (Model, error) {
 	var m Model
 	var en int
-	err := s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled FROM models WHERE alias=?`, alias).
-		Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en)
+	err := s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback FROM models WHERE alias=?`, alias).
+		Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en, &m.MaxContext, &m.Fallback)
 	if err != nil {
 		return m, err
 	}
@@ -285,17 +309,21 @@ func (s *Store) SaveModel(m Model) (int64, error) {
 	if m.UpstreamName == "" {
 		m.UpstreamName = m.Alias
 	}
+	m.Fallback = strings.TrimSpace(m.Fallback)
+	if m.Fallback == m.Alias {
+		m.Fallback = ""
+	}
 	if m.ID == 0 {
-		res, err := s.DB.Exec(`INSERT INTO models (alias, upstream_name, lb_policy, enabled) VALUES (?,?,?,?)`,
-			m.Alias, m.UpstreamName, m.LBPolicy, en)
+		res, err := s.DB.Exec(`INSERT INTO models (alias, upstream_name, lb_policy, enabled, max_context, fallback) VALUES (?,?,?,?,?,?)`,
+			m.Alias, m.UpstreamName, m.LBPolicy, en, m.MaxContext, m.Fallback)
 		if err != nil {
 			return 0, err
 		}
 		id, _ := res.LastInsertId()
 		m.ID = id
 	} else {
-		_, err := s.DB.Exec(`UPDATE models SET alias=?, upstream_name=?, lb_policy=?, enabled=? WHERE id=?`,
-			m.Alias, m.UpstreamName, m.LBPolicy, en, m.ID)
+		_, err := s.DB.Exec(`UPDATE models SET alias=?, upstream_name=?, lb_policy=?, enabled=?, max_context=?, fallback=? WHERE id=?`,
+			m.Alias, m.UpstreamName, m.LBPolicy, en, m.MaxContext, m.Fallback, m.ID)
 		if err != nil {
 			return 0, err
 		}
@@ -312,12 +340,17 @@ func (s *Store) SaveModel(m Model) (int64, error) {
 }
 
 func (s *Store) DeleteModel(id int64) error {
+	var alias string
+	_ = s.DB.QueryRow(`SELECT alias FROM models WHERE id=?`, id).Scan(&alias)
+	if alias != "" {
+		_, _ = s.DB.Exec(`UPDATE models SET fallback='' WHERE fallback=?`, alias)
+	}
 	_, err := s.DB.Exec(`DELETE FROM models WHERE id=?`, id)
 	return err
 }
 
 // ConnectOllamaModel creates or updates an alias named after the Ollama model.
-func (s *Store) ConnectOllamaModel(name string, backendIDs []int64, policy string) error {
+func (s *Store) ConnectOllamaModel(name string, backendIDs []int64, policy string, maxContext int) error {
 	name = strings.TrimSpace(name)
 	if name == "" || len(backendIDs) == 0 {
 		return fmt.Errorf("model and backends required")
@@ -327,12 +360,15 @@ func (s *Store) ConnectOllamaModel(name string, backendIDs []int64, policy strin
 	}
 	m, err := s.GetModelByAlias(name)
 	if err != nil {
-		m = Model{Alias: name, UpstreamName: name, LBPolicy: policy, Enabled: true, BackendIDs: backendIDs}
+		m = Model{Alias: name, UpstreamName: name, LBPolicy: policy, Enabled: true, BackendIDs: backendIDs, MaxContext: maxContext}
 	} else {
 		m.BackendIDs = backendIDs
 		m.Enabled = true
 		if m.UpstreamName == "" {
 			m.UpstreamName = name
+		}
+		if m.MaxContext == 0 && maxContext > 0 {
+			m.MaxContext = maxContext
 		}
 	}
 	_, err = s.SaveModel(m)
@@ -380,6 +416,11 @@ func scanKey(r rowScanner) (APIKey, error) {
 
 func (s *Store) GetKeyByHash(hash string) (APIKey, error) {
 	row := s.DB.QueryRow(`SELECT id, name, prefix, key_hash, allowed_models, rpm, enabled, created_at, last_used_at, request_count FROM api_keys WHERE key_hash=?`, hash)
+	return scanKey(row)
+}
+
+func (s *Store) GetKey(id int64) (APIKey, error) {
+	row := s.DB.QueryRow(`SELECT id, name, prefix, key_hash, allowed_models, rpm, enabled, created_at, last_used_at, request_count FROM api_keys WHERE id=?`, id)
 	return scanKey(row)
 }
 
@@ -488,7 +529,7 @@ func (s *Store) SeedIfEmpty(backends []Backend) error {
 		return nil
 	}
 	for _, b := range backends {
-		if _, err := s.UpsertBackend(b.Name, b.BaseURL, true, b.Weight); err != nil {
+		if _, err := s.UpsertBackend(b.Name, b.BaseURL, true, b.Weight, b.Kind, b.Token); err != nil {
 			return fmt.Errorf("seed backend %s: %w", b.Name, err)
 		}
 	}

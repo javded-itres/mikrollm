@@ -6,6 +6,8 @@ type Backend struct {
 	ID      int64
 	Name    string
 	BaseURL string
+	Kind    string
+	Token   string
 	Enabled bool
 	Weight  int
 }
@@ -17,6 +19,8 @@ type Model struct {
 	LBPolicy     string
 	Enabled      bool
 	BackendIDs   []int64
+	MaxContext   int
+	Fallback     string
 }
 
 type APIKey struct {
@@ -56,22 +60,34 @@ type RequestLog struct {
 }
 
 type HostStatus struct {
-	Healthy bool
-	Latency time.Duration
-	Error   string
-	Checked time.Time
-	Models  []string
-	Sizes   map[string]int64
-	Running []string
+	Healthy    bool
+	Latency    time.Duration
+	Error      string
+	Checked    time.Time
+	Models     []string
+	Sizes      map[string]int64
+	Running    []string
+	Contexts   map[string]int
+	Providers  map[string]string
+	Titles     map[string]string
+	Prompt     map[string]float64
+	Completion map[string]float64
+	Priced     map[string]bool
 }
 
 type CatalogEntry struct {
-	Name         string
-	BackendIDs   []int64
-	BackendNames []string
-	BackendCSV   string
-	Size         int64
-	LoadedOn     []string
+	Name          string
+	Title         string
+	Provider      string
+	BackendIDs    []int64
+	BackendNames  []string
+	BackendCSV    string
+	Size          int64
+	LoadedOn      []string
+	Context       int
+	Priced        bool
+	PromptUSD     float64
+	CompletionUSD float64
 }
 
 type Job struct {

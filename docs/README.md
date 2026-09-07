@@ -6,6 +6,7 @@
 | [install-docker.md](install-docker.md) | Docker и systemd на сервере |
 | [install-mikrotik.md](install-mikrotik.md) | Контейнер RouterOS 7, veth, dst-nat, USB |
 | [admin.md](admin.md) | Админка: серверы, модели, RAM, ключи, чат |
+| [providers.md](providers.md) | Ollama, Ollama Cloud, OpenRouter, vLLM, LM Studio |
 | [api.md](api.md) | OpenAI / Ollama API, ключи, примеры |
 | [architecture.md](architecture.md) | Пакеты, порты, внедрение зависимостей |
 

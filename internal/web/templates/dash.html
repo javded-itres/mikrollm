@@ -1,75 +1,149 @@
 {{define "content"}}
 <div class="pagehead">
   <div>
-    <h1>Серверы Ollama</h1>
-    <p class="muted">{{.Up}} из {{.Total}} онлайн · подключено alias: {{.AliasCount}}</p>
+    <h1>Серверы</h1>
+    <p class="muted">Шлюз смотрит на эти бэкенды каждые 10 с. RAM — только у локального Ollama и LM Studio.</p>
   </div>
   <form method="post" action="/admin/refresh">
     <input type="hidden" name="next" value="/admin">
-    <button class="ghost" type="submit">Обновить статусы</button>
+    <button class="ghost" type="submit">Обновить</button>
   </form>
+</div>
+
+<div class="stat-row">
+  <div class="stat">
+    <div class="stat-val">{{.Up}}<span class="stat-of">/{{.Total}}</span></div>
+    <div class="stat-k">онлайн</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val">{{.AliasCount}}</div>
+    <div class="stat-k">alias в шлюзе</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val">{{.Total}}</div>
+    <div class="stat-k">бэкендов</div>
+  </div>
 </div>
 
 {{if not .Backends}}
 <div class="card empty">
-  <p>Пока нет серверов. Добавьте хост с Ollama — модели подтянутся сами.</p>
+  <p>Пока нет бэкендов. Добавьте локальный сервер или облако — модели подтянутся сами.</p>
 </div>
 {{end}}
 
-<div class="cards">
+{{if .Backends}}
+<div class="host-list">
 {{range $b := .Backends}}
-  <article class="card host {{if $b.Healthy}}is-up{{else}}is-down{{end}}">
-    <div class="host-top">
-      <div>
-        <div class="host-name">{{if $b.Healthy}}<span class="dot ok"></span>{{else}}<span class="dot bad"></span>{{end}}{{$b.Name}}</div>
-        <div class="muted mono">{{$b.BaseURL}}</div>
-      </div>
-      <form method="post" action="/admin/backends/{{$b.ID}}/delete" onsubmit="return confirm('Удалить {{$b.Name}}?')">
-        <button class="ghost danger-text" type="submit">Удалить</button>
-      </form>
+  <article class="host-row {{if $b.Healthy}}is-up{{else}}is-down{{end}} {{if $b.Cloud}}is-cloud{{end}}">
+    <div class="host-status">
+      {{if $b.Healthy}}<span class="badge ok">Онлайн</span>{{else}}<span class="badge bad">Нет связи</span>{{end}}
     </div>
-    <div class="muted">{{if $b.Healthy}}{{$b.Latency}} · {{$b.NModels}} на диске{{if $b.Running}} · в RAM: {{len $b.Running}}{{end}}{{else}}{{if $b.Err}}{{$b.Err}}{{else}}недоступен{{end}}{{end}}</div>
-    {{if $b.Running}}
-    <div class="chips">
-      {{range $n := $b.Running}}
-      <form class="ram-form" method="post" action="/admin/ollama/{{$b.ID}}/unload">
-        <input type="hidden" name="name" value="{{$n}}">
+    <div class="host-main">
+      <div class="host-title">
+        <span class="host-name">{{$b.Name}}</span>
+        <span class="pill {{$b.KindClass}}">{{$b.Label}}</span>
+        {{if $b.Cloud}}<span class="pill">облако</span>{{end}}
+        {{if $b.Token}}<span class="pill">ключ</span>{{end}}
+      </div>
+      <div class="host-url mono" title="{{$b.BaseURL}}">{{$b.BaseURL}}</div>
+      {{if not $b.Healthy}}
+      <div class="host-err" title="{{$b.Err}}">{{if $b.ErrShort}}{{$b.ErrShort}}{{else}}недоступен{{end}}</div>
+      {{end}}
+      {{if $b.UIHint}}<p class="hint">{{$b.UIHint}} · <a href="{{$b.DocsURL}}">как поднять модель</a></p>{{end}}
+    </div>
+    <div class="host-metrics" aria-label="метрики">
+      <div class="metric">
+        <span class="k">задержка</span>
+        <span class="v">{{if $b.Healthy}}{{$b.Latency}}{{else}}—{{end}}</span>
+      </div>
+      <div class="metric">
+        <span class="k">{{if $b.Cloud}}в каталоге{{else}}на диске{{end}}</span>
+        <span class="v">{{$b.NModels}}</span>
+      </div>
+      <div class="metric">
+        <span class="k">{{if $b.Cloud}}в облаке{{else}}в RAM{{end}}</span>
+        <span class="v">{{if $b.Cloud}}{{if $b.Healthy}}да{{else}}—{{end}}{{else}}{{$b.NRunning}}{{end}}</span>
+      </div>
+    </div>
+    <form class="host-del" method="post" action="/admin/backends/{{$b.ID}}/delete" onsubmit="return confirm('Удалить {{$b.Name}} из шлюза?')">
+      <button class="ghost danger-text" type="submit">Удалить</button>
+    </form>
+
+    {{if or $b.Running (and $b.Healthy $b.CanLoad)}}
+    <div class="host-ram">
+      {{if $b.Running}}
+      <div class="ram-k">{{if $b.CanLoad}}В RAM — нажмите, чтобы выгрузить{{else}}Сейчас отдаёт{{end}}</div>
+      <div class="chips">
+        {{range $n := $b.Running}}
+        {{if $b.CanLoad}}
+        <form class="ram-form" method="post" action="/admin/ollama/{{$b.ID}}/unload">
+          <input type="hidden" name="name" value="{{$n}}">
+          <input type="hidden" name="next" value="/admin">
+          <button type="submit" class="chip ram chip-btn" data-ollama="unload" data-id="{{$b.ID}}" data-name="{{$n}}" title="Выгрузить {{$n}} из RAM">{{$n}} · выгрузить</button>
+        </form>
+        {{else}}
+        <span class="chip ram" title="{{$b.UIHint}}">{{$n}}</span>
+        {{end}}
+        {{end}}
+      </div>
+      {{end}}
+      {{if and $b.Healthy $b.CanLoad}}
+      <form class="ram-load" method="post" action="/admin/ollama/{{$b.ID}}/load">
         <input type="hidden" name="next" value="/admin">
-        <button type="submit" class="chip ram chip-btn" data-ollama="unload" data-id="{{$b.ID}}" data-name="{{$n}}" title="Выгрузить из RAM">RAM {{$n}} · выгрузить</button>
+        <select name="name" id="load-{{$b.ID}}" required>
+          <option value="" disabled selected>загрузить с диска…</option>
+          {{range $n := $b.Models}}
+          <option value="{{$n}}">{{$n}}</option>
+          {{end}}
+        </select>
+        <button type="submit" class="btn-sm" data-ollama="load" data-id="{{$b.ID}}" data-name-from="load-{{$b.ID}}">В RAM</button>
       </form>
       {{end}}
     </div>
     {{end}}
-    {{if $b.Healthy}}
-    <form class="ram-load" method="post" action="/admin/ollama/{{$b.ID}}/load">
-      <input type="hidden" name="next" value="/admin">
-      <select name="name" id="load-{{$b.ID}}" required>
-        <option value="" disabled selected>модель с диска…</option>
-        {{range $n := $b.Models}}
-        <option value="{{$n}}">{{$n}}</option>
-        {{end}}
-      </select>
-      <button type="submit" class="btn-sm" data-ollama="load" data-id="{{$b.ID}}" data-name-from="load-{{$b.ID}}">Загрузить в RAM</button>
-    </form>
-    {{end}}
   </article>
 {{end}}
 </div>
+{{end}}
 
-<div class="card">
-  <h2>Добавить Ollama</h2>
-  <form method="post" action="/admin/backends" class="grid2">
+{{if .Backends}}
+<details class="card add-box">
+  <summary>Добавить сервер</summary>
+{{else}}
+<div class="card add-box">
+  <h2>Добавить сервер</h2>
+{{end}}
+  <form method="post" action="/admin/backends" class="grid2" id="add-backend">
     <div>
       <label>Имя</label>
       <input name="name" placeholder="mac-82" required>
     </div>
     <div>
-      <label>URL</label>
-      <input name="base_url" placeholder="http://192.168.88.82:11434" required>
+      <label>Тип</label>
+      <select name="kind" id="backend-kind">
+        <option value="ollama">Ollama локальный (:11434)</option>
+        <option value="ollama-cloud">Ollama Cloud</option>
+        <option value="openrouter">OpenRouter</option>
+        <option value="vllm">vLLM (:8000)</option>
+        <option value="lmstudio">LM Studio (:1234)</option>
+      </select>
     </div>
-    <div class="span2"><button type="submit">Добавить сервер</button></div>
+    <div>
+      <label>URL</label>
+      <input name="base_url" id="backend-url" placeholder="http://192.168.88.82:11434" required>
+    </div>
+    <div>
+      <label id="backend-token-label">Токен (необязательно)</label>
+      <input name="token" id="backend-token" placeholder="Bearer / API-ключ" autocomplete="off">
+    </div>
+    <p class="muted small span2" id="backend-kind-hint">Локальный Ollama: pull, load/unload и удаление файла — из админки.</p>
+    <div class="span2"><button type="submit">Добавить</button></div>
   </form>
+{{if .Backends}}
+</details>
+{{else}}
 </div>
+{{end}}
 
 <details class="card">
   <summary>Пароль админки</summary>

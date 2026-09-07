@@ -26,22 +26,25 @@ type BackendQuery interface {
 }
 
 type BackendCommand interface {
-	UpsertBackend(name, baseURL string, enabled bool, weight int) (int64, error)
+	UpsertBackend(name, baseURL string, enabled bool, weight int, kind, token string) (int64, error)
 	DeleteBackend(id int64) error
 }
 
 type ModelRepo interface {
 	ListModels() ([]domain.Model, error)
+	GetModel(id int64) (domain.Model, error)
 	GetModelByAlias(alias string) (domain.Model, error)
 	SaveModel(m domain.Model) (int64, error)
 	DeleteModel(id int64) error
-	ConnectOllamaModel(name string, backendIDs []int64, policy string) error
+	ConnectOllamaModel(name string, backendIDs []int64, policy string, maxContext int) error
 }
 
 type KeyRepo interface {
 	GetKeyByHash(hash string) (domain.APIKey, error)
+	GetKey(id int64) (domain.APIKey, error)
 	ListKeys() ([]domain.APIKey, error)
 	InsertKey(k domain.APIKey) (int64, error)
+	UpdateKey(k domain.APIKey) error
 	DeleteKey(id int64) error
 	TouchKey(id int64)
 }
@@ -103,10 +106,10 @@ type Auth interface {
 }
 
 type Host interface {
-	Pull(ctx context.Context, base, model string, w io.Writer) error
-	Delete(ctx context.Context, base, model string) error
-	Unload(ctx context.Context, base, model string) error
-	Load(ctx context.Context, base, model string) error
+	Pull(ctx context.Context, b domain.Backend, model string, w io.Writer) error
+	Delete(ctx context.Context, b domain.Backend, model string) error
+	Unload(ctx context.Context, b domain.Backend, model string) error
+	Load(ctx context.Context, b domain.Backend, model string) error
 }
 
 type ChatGateway interface {

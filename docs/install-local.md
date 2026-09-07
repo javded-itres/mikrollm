@@ -3,7 +3,7 @@
 ## Зависимости
 
 - Go 1.23 или новее
-- (по желанию) Ollama на этой же машине или в LAN
+- (по желанию) Ollama, vLLM или LM Studio на этой же машине или в LAN
 
 ```bash
 git clone https://github.com/javded-itres/mikrollm.git
@@ -37,7 +37,7 @@ generated admin password: …………
 | mac-82 | `http://192.168.88.82:11434` |
 | mac-80 | `http://192.168.88.80:11434` |
 
-Это удобно для типовой LAN MikroTik. Иначе зайдите в **Статус**, удалите лишнее и добавьте свой Ollama (`http://127.0.0.1:11434`).
+Это удобно для типовой LAN MikroTik. Иначе зайдите в **Статус**, удалите лишнее и добавьте свой бэкенд (`http://127.0.0.1:11434` Ollama, `:8000` vLLM, `:1234` LM Studio). Как загрузить модель на GPU-сервер — [providers.md](providers.md).
 
 ## Сброс пароля
 

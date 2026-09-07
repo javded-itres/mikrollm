@@ -8,9 +8,10 @@ internal/app          сборка графа зависимостей
 internal/domain       сущности (Backend, Model, APIKey, Job…)
 internal/ports        интерфейсы Store, Health, Auth, Host, Jobs, ChatGateway
 internal/store        SQLite (modernc.org/sqlite, без CGO)
-internal/health       опрос Ollama
+internal/health       опрос Ollama / Ollama Cloud / OpenRouter / vLLM / LM Studio
 internal/auth         bcrypt, cookie, ключи SHA-256
-internal/ollama       pull / delete / load / unload
+internal/host         pull / delete / load / unload по типу бэкенда
+internal/ollama       Ollama HTTP (pull NDJSON, generate keep_alive)
 internal/jobs         фон pull/load + прогресс
 internal/proxy        OpenAI/Ollama API, LB
 internal/admin        HTML-админка
@@ -19,7 +20,7 @@ internal/web          шаблоны и static (embed)
 
 ## Принципы
 
-- **S** — прокси не знает HTML, Ollama-клиент не знает SQLite.
+- **S** — прокси не знает HTML, host-адаптер не знает SQLite.
 - **O / L** — новый адаптер вешается на порт, не меняя `proxy`/`admin`.
 - **I** — health видит только `BackendQuery`, auth — `AuthStore`.
 - **D** — HTTP-слои зависят от `ports`, не от конкретных пакетов. `*http.Client` тоже внедряется.
@@ -42,7 +43,7 @@ ui := admin.New(admin.Deps{
 
 `POST /admin/ollama/{id}/pull` сразу отвечает и качает в goroutine с `context.Background()`. Прогресс в памяти и в таблице `ollama_jobs`. UI опрашивает `GET /admin/ollama/jobs`. После рестарта процесса running-pull возобновляется.
 
-Load в RAM — `POST /api/generate` с пустым prompt и `keep_alive: -1`.
+Load в RAM: Ollama — `POST /api/generate` с пустым prompt и `keep_alive: -1`; LM Studio — `POST /api/v1/models/load`. vLLM не грузит модель через API (см. [providers.md](providers.md)).
 
 ## Сборка образа RouterOS
 

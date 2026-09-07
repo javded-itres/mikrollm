@@ -11,8 +11,10 @@
 | Метод | Путь | Авторизация | Назначение |
 |---|---|---|---|
 | GET | `/health` | нет | процесс жив |
-| GET | `/ready` | нет | есть хотя бы один живой Ollama |
-| GET | `/v1/models` | ключ | список alias (и fallback на tags) |
+| GET | `/ready` | нет | есть хотя бы один живой бэкенд |
+| GET | `/v1/models` | ключ | список alias; `context_length` / `max_input_tokens` |
+| GET | `/v1/model/info` | ключ | как LiteLLM: `model_info.max_input_tokens` |
+| GET | `/model/info` | ключ | то же, без префикса `/v1` |
 | POST | `/v1/chat/completions` | ключ | OpenAI Chat Completions, в т.ч. `stream: true` |
 | POST | `/api/chat` | ключ | Ollama `/api/chat` |
 | GET | `/api/tags` | ключ | имена моделей |
@@ -22,7 +24,7 @@
 
 ## Chat Completions
 
-Тело как у OpenAI. Поле `model` — **alias шлюза** или имя модели Ollama, если alias нет, но теги бэкенда её содержат.
+Тело как у OpenAI. Поле `model` — **alias шлюза** или имя модели на бэкенде, если alias нет, но health её видит.
 
 ```bash
 curl http://192.168.88.1:4000/v1/chat/completions \
@@ -41,6 +43,28 @@ curl http://192.168.88.1:4000/v1/chat/completions \
 
 Шлюз подменяет `model` на `upstream_name` alias, если они различаются.
 
+Если у alias задана **запасная модель** и апстрим ответил 402 или текстом про кредиты/квоту/подписку, запрос повторяется на запасной alias. В ответе будет заголовок `X-MikroLLM-Fallback: исходная -> запасная`.
+
+`GET /v1/models` дополняет каждую модель полями `context_length`, `max_model_len`, `max_tokens`, `max_input_tokens` (если известен контекст), `provider`, `owned_by`, при наличии прайса OpenRouter — `input_cost_per_token` / `output_cost_per_token`.
+
+`GET /v1/model/info` (и `/model/info`) — формат как у LiteLLM:
+
+```json
+{
+  "data": [{
+    "model_name": "fast",
+    "litellm_params": { "model": "qwen3.8:27b-mlx", "custom_llm_provider": "mikrollm" },
+    "model_info": {
+      "id": "fast",
+      "key": "qwen3.8:27b-mlx",
+      "max_tokens": 32768,
+      "max_input_tokens": 32768,
+      "max_output_tokens": 32768
+    }
+  }]
+}
+```
+
 ## Ollama Chat
 
 ```bash
@@ -50,14 +74,15 @@ curl http://192.168.88.1:4000/api/chat \
   -d '{"model":"llama3.2","messages":[{"role":"user","content":"hi"}],"stream":false}'
 ```
 
-Проксируется в `POST <ollama>/api/chat`.
+Проксируется в `POST <ollama>/api/chat` для локального Ollama и Ollama Cloud. Иначе путь меняется на OpenAI-чат провайдера (`/v1/chat/completions` или `/chat/completions` у OpenRouter).
 
 ## Выбор бэкенда
 
 1. Ищется включённый alias с таким именем.
 2. Берутся его серверы, из них — **healthy**.
 3. Политика LB (см. [admin.md](admin.md)).
-4. Если alias нет — любой healthy Ollama, у которого имя есть в `/api/tags` (или tags ещё не подтянулись).
+4. Если alias нет — любой healthy бэкенд, у которого имя есть в каталоге (или список моделей ещё не подтянулся).
+5. Если у бэкенда задан токен, шлюз шлёт `Authorization: Bearer …` апстриму.
 
 ## Ошибки
 

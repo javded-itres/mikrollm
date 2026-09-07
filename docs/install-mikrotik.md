@@ -20,7 +20,7 @@ make tar-ros
 
 ## 2. Сеть контейнера
 
-Типовая схема: bridge для docker-сетей, veth MikroLLM в этой подсети, Ollama — хосты LAN (`192.168.88.0/24` в примере).
+Типовая схема: bridge для docker-сетей, veth MikroLLM в этой подсети, бэкенды (Ollama / vLLM / LM Studio) — хосты LAN (`192.168.88.0/24` в примере).
 
 ```routeros
 /interface veth add name=LLM address=192.168.254.5/24 gateway=192.168.254.1
@@ -116,7 +116,26 @@ curl -sS http://192.168.88.1:4000/health
 | админка висит на POST login | устаревшие сборки: вложенный SQLite-запрос; нужна версия ≥ 0.0.1 |
 | Ollama «недоступен» | с контейнера должен пинговаться `192.168.88.x`; gateway veth, firewall |
 | pull с админки не идёт в интернет | DNS контейнера, маршруты, не помечать src контейнера в `main` целиком, если это ломает VPN |
+| OpenRouter **403 Forbidden** | API с IP РФ режется. Контейнер `192.168.254.5` не в правиле LAN 88 → VPN, см. [ниже](#openrouter-403) |
+
+## OpenRouter 403
+
+OpenRouter отвечает 403 на `GET /api/v1/key` и `/models` с адреса ISP РФ; тот же ключ с LAN через AMS WG проходит. Ollama Cloud с ISP при этом может быть жив.
+
+Контейнер в `192.168.254.5` **не** совпадает с `src-address=192.168.88.0/24`, поэтому его HTTPS уходит в `main` (ISP). Пометьте только этот адрес в таблицу `vpn` (после `ru-domains` / `novpn`), и сделайте src-nat на **свободный** адрес LAN, который AMS уже маршрутизирует — не `.1` роутера и не адрес WG (`10.88.97.2`), иначе ответ попадает в INPUT и health зависает до timeout.
+
+```routeros
+/ip firewall mangle add chain=prerouting action=mark-routing new-routing-mark=vpn \
+  passthrough=yes src-address=192.168.254.5 dst-address=!192.168.0.0/16 routing-mark=!main \
+  comment="mikrollm via AMS WG"
+
+/ip firewall nat add place-before=[find comment="do not masq AMS WG"] chain=srcnat \
+  action=src-nat to-addresses=192.168.88.9 src-address=192.168.254.5 \
+  out-interface=wireguard-ams comment="mikrollm via AMS WG"
+```
+
+`192.168.88.9` должен быть вне DHCP pool и не назначен на интерфейс. Локальный Ollama (`192.168.88.x`) правилом не трогается (`dst-address=!192.168.0.0/16`). Не помечайте весь `192.168.254.0/24`: там mihomo / wstunnel, их увод в VPN зациклит туннель.
 
 ## Память и CPU
 
-MikroLLM сам лёгкий. Тяжёлые модели живут на Mac/PC с Ollama, не на роутере. Не поднимайте `memory-high` «на всякий случай» до сотен мегабайт — ax³ и так тесный.
+MikroLLM сам лёгкий. Тяжёлые локальные модели живут на Mac/PC с Ollama, vLLM или LM Studio, не на роутере. OpenRouter и Ollama Cloud ходят из контейнера в интернет по HTTPS — в образе есть `ca-certificates`. Не поднимайте `memory-high` «на всякий случай» до сотен мегабайт — ax³ и так тесный. Как подключить облако или загрузить модель на GPU — [providers.md](providers.md).

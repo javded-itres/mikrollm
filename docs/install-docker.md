@@ -25,7 +25,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o dis
 docker buildx build --platform linux/arm64 -t mikrollm:arm64 --load .
 ```
 
-Контейнер слушает `:4000`. Данные — том `/data`. DNS контейнера должен резолвить хосты Ollama (часто достаточно `--network host` в домашней сети или явные IP в админке).
+Контейнер слушает `:4000`. Данные — том `/data`. DNS контейнера должен резолвить хосты Ollama / vLLM / LM Studio (часто достаточно `--network host` в домашней сети или явные IP в админке).
 
 Пример compose:
 

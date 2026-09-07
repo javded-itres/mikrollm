@@ -12,8 +12,8 @@ import (
 	"github.com/javded-itres/mikrollm/internal/auth"
 	"github.com/javded-itres/mikrollm/internal/domain"
 	"github.com/javded-itres/mikrollm/internal/health"
+	"github.com/javded-itres/mikrollm/internal/host"
 	"github.com/javded-itres/mikrollm/internal/jobs"
-	"github.com/javded-itres/mikrollm/internal/ollama"
 	"github.com/javded-itres/mikrollm/internal/ports"
 	"github.com/javded-itres/mikrollm/internal/proxy"
 	"github.com/javded-itres/mikrollm/internal/store"
@@ -23,7 +23,7 @@ var (
 	_ ports.Store      = (*store.Store)(nil)
 	_ ports.Health     = (*health.Checker)(nil)
 	_ ports.Auth       = (*auth.Service)(nil)
-	_ ports.Host       = (*ollama.Client)(nil)
+	_ ports.Host       = (*host.Manager)(nil)
 	_ ports.Jobs       = (*jobs.Tracker)(nil)
 	_ ports.HTTPGetter = (*http.Client)(nil)
 	_ ports.HTTPDoer   = (*http.Client)(nil)
@@ -63,12 +63,12 @@ func New(cfg Config) (*App, error) {
 	checker := health.New(st, nil)
 	go checker.Loop(10 * time.Second)
 	keys := auth.New(st)
-	host := ollama.New(nil)
+	hosts := host.New(nil)
 	tracker := jobs.New(st)
-	resumePulls(tracker, st, host, checker)
+	resumePulls(tracker, st, hosts, checker)
 	px := proxy.New(st, checker, keys, nil)
 	ui := admin.New(admin.Deps{
-		Store: st, Health: checker, Auth: keys, Host: host, Jobs: tracker, Chat: px,
+		Store: st, Health: checker, Auth: keys, Host: hosts, Jobs: tracker, Chat: px,
 	})
 
 	mux := http.NewServeMux()
@@ -76,6 +76,8 @@ func New(cfg Config) (*App, error) {
 	mux.HandleFunc("GET /ready", px.Ready)
 	mux.HandleFunc("POST /v1/chat/completions", px.ChatCompletions)
 	mux.HandleFunc("GET /v1/models", px.ListModels)
+	mux.HandleFunc("GET /v1/model/info", px.ModelInfo)
+	mux.HandleFunc("GET /model/info", px.ModelInfo)
 	mux.HandleFunc("POST /api/chat", px.OllamaChat)
 	mux.HandleFunc("GET /api/tags", px.OllamaTags)
 	ui.Mount(mux)
@@ -104,9 +106,9 @@ func resumePulls(t *jobs.Tracker, backends ports.BackendQuery, host ports.Host, 
 			t.Fail(j.ID, "сервер недоступен")
 			continue
 		}
-		go func(j domain.Job, base string) {
+		go func(j domain.Job, b domain.Backend) {
 			wr := t.Writer(j.ID)
-			err := host.Pull(context.Background(), base, j.Model, wr)
+			err := host.Pull(context.Background(), b, j.Model, wr)
 			_ = wr.Close()
 			if err != nil {
 				t.Fail(j.ID, err.Error())
@@ -114,7 +116,7 @@ func resumePulls(t *jobs.Tracker, backends ports.BackendQuery, host ports.Host, 
 			}
 			t.Done(j.ID)
 			h.CheckOnce()
-		}(j, b.BaseURL)
+		}(j, b)
 	}
 }
 

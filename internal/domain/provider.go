@@ -1,0 +1,122 @@
+package domain
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+var providerNames = map[string]string{
+	"openai":       "OpenAI",
+	"anthropic":    "Anthropic",
+	"google":       "Google",
+	"x-ai":         "xAI",
+	"xai":          "xAI",
+	"meta":         "Meta",
+	"meta-llama":   "Meta",
+	"mistralai":    "Mistral",
+	"mistral":      "Mistral",
+	"qwen":         "Qwen",
+	"deepseek":     "DeepSeek",
+	"cohere":       "Cohere",
+	"perplexity":   "Perplexity",
+	"nvidia":       "NVIDIA",
+	"microsoft":    "Microsoft",
+	"amazon":       "Amazon",
+	"ai21":         "AI21",
+	"together":     "Together",
+	"groq":         "Groq",
+	"fireworks":    "Fireworks",
+	"huggingface":  "Hugging Face",
+	"minimax":      "MiniMax",
+	"z-ai":         "Z.ai",
+	"zhipu":        "Zhipu",
+	"moonshotai":   "Moonshot",
+	"moonshot":     "Moonshot",
+	"inclusionai":  "InclusionAI",
+	"liquid":       "Liquid",
+	"nousresearch": "Nous",
+	"inflection":   "Inflection",
+	"openrouter":   "OpenRouter",
+	"ollama":       "Ollama",
+}
+
+func ProviderOf(model, kind string) string {
+	model = strings.TrimSpace(model)
+	if i := strings.Index(model, "/"); i > 0 {
+		return ProviderLabel(model[:i])
+	}
+	return Backend{Kind: kind}.Label()
+}
+
+func ProviderLabel(slug string) string {
+	slug = strings.TrimSpace(strings.ToLower(slug))
+	if slug == "" {
+		return ""
+	}
+	if n, ok := providerNames[slug]; ok {
+		return n
+	}
+	parts := strings.FieldsFunc(slug, func(r rune) bool { return r == '-' || r == '_' })
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+func PerMillion(perToken float64) float64 {
+	if perToken <= 0 {
+		return 0
+	}
+	return perToken * 1_000_000
+}
+
+func FormatUSD(n float64) string {
+	if n <= 0 {
+		return "$0"
+	}
+	if n < 0.01 {
+		s := strconv.FormatFloat(n, 'f', 4, 64)
+		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+		return "$" + s
+	}
+	if n < 1 {
+		return fmt.Sprintf("$%.2f", n)
+	}
+	if n == float64(int(n)) {
+		return fmt.Sprintf("$%.0f", n)
+	}
+	return fmt.Sprintf("$%.2f", n)
+}
+
+func PriceLabel(priced bool, promptPerM, completionPerM float64) string {
+	if !priced {
+		return ""
+	}
+	if promptPerM <= 0 && completionPerM <= 0 {
+		return "бесплатно"
+	}
+	return FormatUSD(promptPerM) + " / " + FormatUSD(completionPerM)
+}
+
+func PriceBand(priced bool, promptPerM float64) string {
+	if !priced {
+		return "none"
+	}
+	if promptPerM <= 0 {
+		return "free"
+	}
+	if promptPerM < 0.5 {
+		return "lt0.5"
+	}
+	if promptPerM < 2 {
+		return "lt2"
+	}
+	if promptPerM < 10 {
+		return "lt10"
+	}
+	return "more"
+}

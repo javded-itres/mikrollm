@@ -2,7 +2,7 @@
 <div class="pagehead">
   <div>
     <h1>Ключи</h1>
-    <p class="muted">Клиенты ходят с <code>Authorization: Bearer sk-…</code>. Секрет показывается один раз.</p>
+    <p class="muted">Клиенты ходят с <code>Authorization: Bearer sk-…</code>. Секрет показывается один раз. Список моделей можно менять после выпуска.</p>
   </div>
 </div>
 
@@ -19,22 +19,68 @@
 </div>
 {{end}}
 
+{{if .EditKey}}
+<div class="card" style="border-color:var(--acc)">
+  <h2 style="margin-bottom:.35rem">Доступ ключа «{{.EditKey.Name}}»</h2>
+  <p class="muted">Prefix <code>{{.EditKey.Prefix}}…</code> · отметьте alias и модели, которые этот ключ может вызывать.</p>
+</div>
+<form method="post" action="/admin/keys/{{.EditKey.ID}}" id="key-form">
+  <div class="toolbar">
+    <input name="name" value="{{.EditKey.Name}}" required autocomplete="off">
+    <input name="rpm" type="number" value="{{.EditKey.RPM}}" min="0" class="sel-sm" title="Лимит запросов в минуту, 0 — без лимита" placeholder="RPM">
+    <label class="inline"><input type="checkbox" name="all_models" value="1" id="all-models" {{if .EditKey.AllModels}}checked{{end}}> Все модели</label>
+    <input type="search" id="key-model-filter" placeholder="Имя или провайдер…" autocomplete="off">
+    <select id="key-provider" class="sel-sm" title="Провайдер">
+      <option value="">Все провайдеры</option>
+      {{range .Providers}}<option value="{{.}}">{{.}}</option>{{end}}
+    </select>
+    <select id="key-price" class="sel-sm" title="Цена входа за 1M токенов">
+      <option value="">Все цены</option>
+      <option value="free">Бесплатные</option>
+      <option value="lt0.5">до $0.50 / 1M</option>
+      <option value="lt2">до $2 / 1M</option>
+      <option value="lt10">до $10 / 1M</option>
+      <option value="more">от $10 / 1M</option>
+      <option value="none">без цены</option>
+    </select>
+    <label class="inline"><input type="checkbox" data-toggle="#key-models"> Отметить видимые</label>
+    <span class="muted grow" id="key-count">{{len .KeyModels}} в списке</span>
+    <button type="submit">Сохранить</button>
+    <a class="btn ghost" href="/admin/keys">Отмена</a>
+  </div>
+{{else}}
 <form method="post" action="/admin/keys" id="key-form">
   <div class="toolbar">
     <input name="name" placeholder="Имя: holix, open-webui…" required autocomplete="off">
     <input name="rpm" type="number" value="0" min="0" class="sel-sm" title="Лимит запросов в минуту, 0 — без лимита" placeholder="RPM">
     <label class="inline"><input type="checkbox" name="all_models" value="1" id="all-models"> Все модели</label>
-    <input type="search" id="key-model-filter" placeholder="Фильтр моделей…" autocomplete="off">
+    <input type="search" id="key-model-filter" placeholder="Имя или провайдер…" autocomplete="off">
+    <select id="key-provider" class="sel-sm" title="Провайдер">
+      <option value="">Все провайдеры</option>
+      {{range .Providers}}<option value="{{.}}">{{.}}</option>{{end}}
+    </select>
+    <select id="key-price" class="sel-sm" title="Цена входа за 1M токенов">
+      <option value="">Все цены</option>
+      <option value="free">Бесплатные</option>
+      <option value="lt0.5">до $0.50 / 1M</option>
+      <option value="lt2">до $2 / 1M</option>
+      <option value="lt10">до $10 / 1M</option>
+      <option value="more">от $10 / 1M</option>
+      <option value="none">без цены</option>
+    </select>
     <label class="inline"><input type="checkbox" data-toggle="#key-models"> Отметить видимые</label>
-    <span class="muted grow">{{len .ModelNames}} в списке</span>
+    <span class="muted grow" id="key-count">{{len .KeyModels}} в списке</span>
     <button type="submit">Выпустить</button>
   </div>
+{{end}}
 
   <div id="key-models" class="pick-grid dense card flush" style="padding:.65rem">
-    {{range .ModelNames}}
-    <label class="pick" data-name="{{.}}">
-      <input type="checkbox" name="model" value="{{.}}">
-      <span class="pick-name">{{.}}</span>
+    {{range .KeyModels}}
+    {{if .GroupHead}}<div class="pick-group">{{.GroupHead}}</div>{{end}}
+    <label class="pick" data-name="{{.Name}}" data-provider="{{.Provider}}" data-band="{{.PriceBand}}" data-prompt="{{.Prompt}}" data-title="{{.Title}}">
+      <input type="checkbox" name="model" value="{{.Name}}" {{if .Checked}}checked{{end}}>
+      <span class="pick-name" title="{{if .Title}}{{.Title}} · {{end}}{{.Name}}">{{if .Provider}}<span class="pill">{{.Provider}}</span> {{end}}{{.Name}}</span>
+      <span class="pick-meta">{{if .CtxLabel}}{{.CtxLabel}}{{end}}{{if .PriceLabel}} · {{.PriceLabel}}{{end}}</span>
     </label>
     {{else}}
     <p class="muted" style="margin:0">Списка нет — отметьте «Все модели» или подключите модели на вкладке «Модели».</p>
@@ -78,9 +124,12 @@
         <td class="col-num">{{.RequestCount}}</td>
         <td class="muted">{{.LastUsed}}</td>
         <td class="col-act">
-          <form method="post" action="/admin/keys/{{.ID}}/delete" onsubmit="return confirm('Отозвать ключ {{.Name}}?')">
-            <button class="btn-sm danger-text" type="submit">Отозвать</button>
-          </form>
+          <div class="act">
+            <a class="btn-sm" href="/admin/keys?edit={{.ID}}">Изменить</a>
+            <form method="post" action="/admin/keys/{{.ID}}/delete" onsubmit="return confirm('Отозвать ключ {{.Name}}?')">
+              <button class="btn-sm danger-text" type="submit">Отозвать</button>
+            </form>
+          </div>
         </td>
       </tr>
       {{end}}

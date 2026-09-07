@@ -1,6 +1,6 @@
 # MikroLLM
 
-Лёгкий шлюз к [Ollama](https://ollama.com) в духе LiteLLM: OpenAI-совместимый API, виртуальные ключи `sk-…`, HTML-админка, playground-чат, pull/load моделей.
+Лёгкий шлюз к [Ollama](https://ollama.com) (локальный и Cloud), [OpenRouter](https://openrouter.ai), [vLLM](https://docs.vllm.ai) и [LM Studio](https://lmstudio.ai) в духе LiteLLM: OpenAI-совместимый API, виртуальные ключи `sk-…`, HTML-админка, playground-чат, pull/load моделей там, где API это умеет.
 
 Пишется на Go, без Python и без CGO. Бинарь ~12 МБ, в работе обычно 8–20 МБ RAM. Удобно ставить:
 
@@ -12,13 +12,15 @@
 
 ## Что умеет
 
-- Несколько серверов Ollama, health-check каждые 10 с (`/api/version`, `/api/tags`, `/api/ps`).
-- Alias для клиентов, балансировка `least_conn` / `round_robin` / `failover`.
+- Несколько бэкендов: **Ollama**, **Ollama Cloud**, **OpenRouter**, **vLLM**, **LM Studio**; health-check каждые 10 с.
+- Alias для клиентов, балансировка `least_conn` / `round_robin` / `failover`, запасная модель при конце кредитов.
 - Виртуальные ключи с ограничением моделей и RPM.
-- Админка: серверы, модели, ключи, лог, чат.
-- Скачивание модели (`pull`) с полосой прогресса; F5 не обрывает задачу.
-- Загрузка / выгрузка весов в RAM (`keep_alive: -1` / `0`).
-- Playground: выбрать alias или имя Ollama и писать в чат без ключа (нужна сессия админки).
+- Админка: серверы, модели (фильтр по провайдеру и цене), ключи, лог, чат.
+- Скачивание модели (`pull`) с полосой прогресса на Ollama и LM Studio; F5 не обрывает задачу.
+- Загрузка / выгрузка весов в RAM (Ollama `keep_alive`, LM Studio `/api/v1/models/load|unload`).
+- vLLM: модель задаётся на сервере (`vllm serve <HuggingFace-id>`) — [инструкция](docs/providers.md#vllm).
+- OpenRouter и Ollama Cloud — напрямую по HTTPS, без промежуточного GPU-сервера; нужен API-ключ.
+- Playground: выбрать alias или имя модели и писать в чат без ключа (нужна сессия админки).
 
 ## Быстрый старт (локально)
 
@@ -33,7 +35,7 @@ make run
 
 `make run` слушает `:4000`, пароль админки `admin`, каталог данных `./data`.
 
-Откройте http://127.0.0.1:4000/admin → **Статус** → поправьте URL Ollama → **Модели** → подключите нужные → **Ключи** → выпустите `sk-…`.
+Откройте http://127.0.0.1:4000/admin → **Статус** → добавьте Ollama / vLLM / LM Studio → **Модели** → подключите нужные → **Ключи** → выпустите `sk-…`.
 
 ```bash
 curl http://127.0.0.1:4000/v1/chat/completions \
@@ -52,12 +54,13 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 | Linux-сервер, Docker или systemd | [docs/install-docker.md](docs/install-docker.md) |
 | Контейнер MikroTik RouterOS 7 | [docs/install-mikrotik.md](docs/install-mikrotik.md) |
 | Админка: модели, RAM, ключи, чат | [docs/admin.md](docs/admin.md) |
+| Ollama / Cloud / OpenRouter / vLLM / LM Studio | [docs/providers.md](docs/providers.md) |
 | HTTP API | [docs/api.md](docs/api.md) |
 | Устройство кода | [docs/architecture.md](docs/architecture.md) |
 
 ## Требования
 
-- Ollama 0.3+ на хостах с моделями (сеть должна быть доступна из процесса MikroLLM).
+- Хотя бы один бэкенд: локальный Ollama / vLLM / LM Studio **или** облако OpenRouter / Ollama Cloud (HTTPS + API-ключ). Сеть должна быть доступна из процесса MikroLLM.
 - Для образа RouterOS: Docker Buildx, Python 3, USB-диск на роутере желателен.
 - Порт **4000/tcp** (меняется флагом `-listen` / `MIKROLLM_LISTEN`).
 
