@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/banner.jpg" alt="banner" width="920">
+</p>
+
 # MikroLLM
 
 Лёгкий шлюз к [Ollama](https://ollama.com) (локальный и Cloud), [OpenRouter](https://openrouter.ai), [vLLM](https://docs.vllm.ai) и [LM Studio](https://lmstudio.ai) в духе LiteLLM: OpenAI-совместимый API, виртуальные ключи `sk-…`, HTML-админка, playground-чат, pull/load моделей там, где API это умеет.
