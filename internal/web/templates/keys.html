@@ -25,36 +25,33 @@
   <p class="muted">Prefix <code>{{.EditKey.Prefix}}…</code> · отметьте alias и модели, которые этот ключ может вызывать.</p>
 </div>
 <form method="post" action="/admin/keys/{{.EditKey.ID}}" id="key-form">
-  <div class="toolbar">
+  <div class="key-form-bar">
     <input name="name" value="{{.EditKey.Name}}" required autocomplete="off">
     <input name="rpm" type="number" value="{{.EditKey.RPM}}" min="0" class="sel-sm" title="Лимит запросов в минуту, 0 — без лимита" placeholder="RPM">
     <label class="inline"><input type="checkbox" name="all_models" value="1" id="all-models" {{if .EditKey.AllModels}}checked{{end}}> Все модели</label>
-    <input type="search" id="key-model-filter" placeholder="Имя или провайдер…" autocomplete="off">
-    <select id="key-provider" class="sel-sm" title="Провайдер">
-      <option value="">Все провайдеры</option>
-      {{range .Providers}}<option value="{{.}}">{{.}}</option>{{end}}
-    </select>
-    <select id="key-price" class="sel-sm" title="Цена входа за 1M токенов">
-      <option value="">Все цены</option>
-      <option value="free">Бесплатные</option>
-      <option value="lt0.5">до $0.50 / 1M</option>
-      <option value="lt2">до $2 / 1M</option>
-      <option value="lt10">до $10 / 1M</option>
-      <option value="more">от $10 / 1M</option>
-      <option value="none">без цены</option>
-    </select>
-    <label class="inline"><input type="checkbox" data-toggle="#key-models"> Отметить видимые</label>
-    <span class="muted grow" id="key-count">{{len .KeyModels}} в списке</span>
+    <span class="muted grow"></span>
     <button type="submit">Сохранить</button>
     <a class="btn ghost" href="/admin/keys">Отмена</a>
   </div>
 {{else}}
 <form method="post" action="/admin/keys" id="key-form">
-  <div class="toolbar">
+  <div class="key-form-bar">
     <input name="name" placeholder="Имя: holix, open-webui…" required autocomplete="off">
     <input name="rpm" type="number" value="0" min="0" class="sel-sm" title="Лимит запросов в минуту, 0 — без лимита" placeholder="RPM">
     <label class="inline"><input type="checkbox" name="all_models" value="1" id="all-models"> Все модели</label>
-    <input type="search" id="key-model-filter" placeholder="Имя или провайдер…" autocomplete="off">
+    <span class="muted grow"></span>
+    <button type="submit">Выпустить</button>
+  </div>
+{{end}}
+
+  <div class="key-picked card" id="key-picked">
+    <div class="key-picked-h">Выбрано <strong id="key-picked-n">0</strong> <button type="button" class="btn-sm" id="key-picked-clear">Очистить</button></div>
+    <div class="key-picked-chips" id="key-picked-chips"></div>
+    <p class="muted small" id="key-picked-empty">Отметьте модели ниже — они соберутся здесь, полное имя видно целиком.</p>
+  </div>
+
+  <div class="toolbar key-filters">
+    <input type="search" id="key-model-filter" placeholder="Поиск по имени, id, провайдеру…" autocomplete="off">
     <select id="key-provider" class="sel-sm" title="Провайдер">
       <option value="">Все провайдеры</option>
       {{range .Providers}}<option value="{{.}}">{{.}}</option>{{end}}
@@ -68,22 +65,36 @@
       <option value="more">от $10 / 1M</option>
       <option value="none">без цены</option>
     </select>
+    <label class="inline"><input type="checkbox" id="key-only-picked"> Только выбранные</label>
     <label class="inline"><input type="checkbox" data-toggle="#key-models"> Отметить видимые</label>
     <span class="muted grow" id="key-count">{{len .KeyModels}} в списке</span>
-    <button type="submit">Выпустить</button>
   </div>
-{{end}}
 
-  <div id="key-models" class="pick-grid dense card flush" style="padding:.65rem">
+  <div id="key-models" class="key-pick-list card flush">
     {{range .KeyModels}}
-    {{if .GroupHead}}<div class="pick-group">{{.GroupHead}}</div>{{end}}
-    <label class="pick" data-name="{{.Name}}" data-provider="{{.Provider}}" data-band="{{.PriceBand}}" data-prompt="{{.Prompt}}" data-title="{{.Title}}">
+    {{if .GroupHead}}
+    <div class="pick-group" data-group="{{.Group}}">
+      <span>{{.GroupHead}}</span>
+      <button type="button" class="btn-sm" data-group-check="{{.Group}}">все видимые</button>
+    </div>
+    {{end}}
+    <label class="pick key-pick" data-name="{{.Name}}" data-provider="{{.Provider}}" data-group="{{.Group}}" data-band="{{.PriceBand}}" data-prompt="{{.Prompt}}" data-title="{{.Title}}">
       <input type="checkbox" name="model" value="{{.Name}}" {{if .Checked}}checked{{end}}>
-      <span class="pick-name" title="{{if .Title}}{{.Title}} · {{end}}{{.Name}}">{{if .Provider}}<span class="pill">{{.Provider}}</span> {{end}}{{.Name}}</span>
-      <span class="pick-meta">{{if .CtxLabel}}{{.CtxLabel}}{{end}}{{if .PriceLabel}} · {{.PriceLabel}}{{end}}</span>
+      <span class="pick-body">
+        {{if and .Title (ne .Title .Name)}}
+        <span class="pick-title">{{.Title}}</span>
+        <span class="pick-id" title="{{.Name}}">{{.Name}}</span>
+        {{else}}
+        <span class="pick-title" title="{{.Name}}">{{.Name}}</span>
+        {{end}}
+      </span>
+      <span class="pick-side">
+        {{if .Provider}}<span class="pill">{{.Provider}}</span>{{end}}
+        <span class="pick-meta">{{if .CtxLabel}}{{.CtxLabel}}{{end}}{{if .PriceLabel}} · {{.PriceLabel}}{{end}}</span>
+      </span>
     </label>
     {{else}}
-    <p class="muted" style="margin:0">Списка нет — отметьте «Все модели» или подключите модели на вкладке «Модели».</p>
+    <p class="muted" style="margin:.8rem">Списка нет — отметьте «Все модели» или подключите модели на вкладке «Модели».</p>
     {{end}}
   </div>
 </form>

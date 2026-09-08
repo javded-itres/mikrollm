@@ -1,21 +1,74 @@
 {{define "content"}}
-<h1>Последние запросы</h1>
-<div class="card">
-  <table>
-    <tr><th>Время</th><th>Ключ</th><th>Модель</th><th>Бэкенд</th><th>HTTP</th><th>мс</th><th>байт</th></tr>
-    {{range .Logs}}
-    <tr>
-      <td class="muted">{{.TS.Format "15:04:05"}}</td>
-      <td>{{.KeyPrefix}}</td>
-      <td>{{.Model}}</td>
-      <td>{{.Backend}}</td>
-      <td>{{.Status}}</td>
-      <td>{{.LatencyMS}}</td>
-      <td>{{.BytesOut}}</td>
-    </tr>
-    {{else}}
-    <tr><td colspan="7" class="muted">Пока пусто.</td></tr>
-    {{end}}
-  </table>
+<div class="pagehead">
+  <div>
+    <h1>Лог запросов</h1>
+    <p class="muted">Последние обращения к шлюзу. Поиск и фильтры только по этой выборке, без перезагрузки.</p>
+  </div>
 </div>
+
+{{if .Logs}}
+<div class="toolbar log-filters" id="log-filters">
+  <input type="search" id="log-q" placeholder="Поиск: модель, ключ, бэкенд…" autocomplete="off" value="{{.Q}}">
+  <select id="log-status" class="sel-sm" title="HTTP-статус">
+    <option value="">Все статусы</option>
+    <option value="2">Успех 2xx</option>
+    <option value="4">Клиент 4xx</option>
+    <option value="5">Ошибка 5xx</option>
+  </select>
+  <select id="log-model" class="sel-sm" title="Модель">
+    <option value="">Все модели</option>
+    {{range .Models}}<option value="{{.}}">{{.}}</option>{{end}}
+  </select>
+  <select id="log-backend" class="sel-sm" title="Бэкенд">
+    <option value="">Все бэкенды</option>
+    {{range .Backends}}<option value="{{.}}">{{.}}</option>{{end}}
+  </select>
+  <select id="log-key" class="sel-sm" title="Ключ">
+    <option value="">Все ключи</option>
+    {{range .Keys}}<option value="{{.}}">{{.}}</option>{{end}}
+  </select>
+  <select id="log-ms" class="sel-sm" title="Задержка">
+    <option value="">Любая задержка</option>
+    <option value="fast">до 100 мс</option>
+    <option value="mid">100 мс – 1 с</option>
+    <option value="slow">дольше 1 с</option>
+  </select>
+  <button type="button" class="btn-sm" id="log-clear">Сбросить</button>
+  <span class="muted grow" id="log-count">{{len .Logs}} записей</span>
+</div>
+
+<div class="table-wrap card flush log-table">
+  <table class="tbl">
+    <thead>
+      <tr>
+        <th>Время</th>
+        <th>Ключ</th>
+        <th>Модель</th>
+        <th>Бэкенд</th>
+        <th class="col-num">HTTP</th>
+        <th class="col-num">Задержка</th>
+        <th class="col-num">Ответ</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Logs}}
+      <tr class="log-tr" data-model="{{.Model}}" data-backend="{{.Backend}}" data-key="{{.KeyPrefix}}" data-status="{{.Status}}" data-kind="{{.Kind}}" data-ms="{{.LatencyMS}}" data-q="{{.KeyPrefix}} {{.Model}} {{.Backend}} {{.Status}}">
+        <td class="muted mono" title="{{.TimeFull}}">{{.TimeLabel}}</td>
+        <td class="mono">{{if .KeyPrefix}}{{.KeyPrefix}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td><div class="name" title="{{.Model}}">{{.Model}}</div></td>
+        <td>{{if .Backend}}{{.Backend}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="col-num"><span class="pill {{if eq .Kind "2"}}ok{{else if eq .Kind "4"}}warn{{else if eq .Kind "5"}}bad{{end}}">{{.Status}}</span></td>
+        <td class="col-num muted {{if ge .LatencyMS 1000}}is-slow{{end}}">{{.LatencyMS}} мс</td>
+        <td class="col-num muted">{{if .SizeLabel}}{{.SizeLabel}}{{else}}0{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  <p class="muted empty-filter" id="log-empty" hidden>Ничего не подошло — сбросьте фильтры.</p>
+</div>
+{{else}}
+<div class="card empty">
+  <p>Запросов ещё не было. Как только клиент дернет API, строки появятся здесь.</p>
+</div>
+{{end}}
 {{end}}

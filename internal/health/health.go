@@ -30,6 +30,9 @@ type Checker struct {
 	ctxCache map[string]int
 	orMu     sync.Mutex
 	orCache  map[int64]catalogSnap
+	ocMu     sync.Mutex
+	ocPrices ollamaPriceSnap
+	ocLib    map[string]ollamaLibSnap
 }
 
 type catalogSnap struct {
@@ -59,7 +62,7 @@ const openRouterCatalogTTL = 5 * time.Minute
 
 func New(backends ports.BackendQuery, doer ports.HTTPDoer) *Checker {
 	if doer == nil {
-		doer = &http.Client{Timeout: 8 * time.Second}
+		doer = &http.Client{Timeout: 8 * time.Second, CheckRedirect: domain.NoRedirect}
 	}
 	return &Checker{
 		backends: backends,
@@ -68,6 +71,7 @@ func New(backends ports.BackendQuery, doer ports.HTTPDoer) *Checker {
 		conn:     map[int64]int{},
 		ctxCache: map[string]int{},
 		orCache:  map[int64]catalogSnap{},
+		ocLib:    map[string]ollamaLibSnap{},
 	}
 }
 
@@ -364,6 +368,7 @@ func (c *Checker) probeOllamaCloud(b domain.Backend, start time.Time) Status {
 		if len(n) > 0 {
 			st.Healthy = true
 			st.Models, st.Sizes, st.Contexts = n, sz, ctx
+			c.applyOllamaCloudPrices(b, &st)
 			return st
 		}
 		st.Error = resp.Status
@@ -372,6 +377,7 @@ func (c *Checker) probeOllamaCloud(b domain.Backend, start time.Time) Status {
 	st.Healthy = true
 	st.Models, st.Sizes = decodeOllamaTags(resp.Body)
 	st.Contexts = c.ollamaContexts(b, st.Models)
+	c.applyOllamaCloudPrices(b, &st)
 	return st
 }
 

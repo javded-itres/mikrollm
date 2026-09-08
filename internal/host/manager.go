@@ -22,7 +22,8 @@ type Manager struct {
 func New(httpClient *http.Client) *Manager {
 	if httpClient == nil {
 		httpClient = &http.Client{
-			Timeout: 0,
+			Timeout:       0,
+			CheckRedirect: domain.NoRedirect,
 			Transport: &http.Transport{
 				ResponseHeaderTimeout: 10 * time.Minute,
 				IdleConnTimeout:       120 * time.Second,

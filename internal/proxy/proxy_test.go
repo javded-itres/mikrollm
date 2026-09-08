@@ -99,6 +99,72 @@ func TestAllowlistAndProxy(t *testing.T) {
 	}
 }
 
+func TestRewriteModelReplacesQueueAlias(t *testing.T) {
+	in := []byte(`{"model":"itres-coder","messages":[{"role":"user","content":"hi"}]}`)
+	out := rewriteModel(in, "ornith-1.5:35b")
+	var raw map[string]any
+	if json.Unmarshal(out, &raw) != nil {
+		t.Fatal(string(out))
+	}
+	if raw["model"] != "ornith-1.5:35b" {
+		t.Fatalf("model %v", raw["model"])
+	}
+	if same := rewriteModel(out, "ornith-1.5:35b"); string(same) != string(out) {
+		t.Fatal("idempotent")
+	}
+}
+
+func TestDropsUpstreamCookies(t *testing.T) {
+	st, h, _, px, _ := setup(t)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/version":
+			w.Write([]byte(`{"version":"0"}`))
+		case "/api/tags":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{{"name": "qwen"}}})
+		case "/v1/chat/completions":
+			w.Header().Set("Set-Cookie", "mikrollm_session=stolen; Path=/")
+			w.Header().Set("Location", "https://evil.example/")
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"id":"1"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(up.Close)
+	bid, err := st.UpsertBackend("mac", up.URL, true, 1, "ollama", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.SaveModel(store.Model{Alias: "qwen", UpstreamName: "qwen", Enabled: true, BackendIDs: []int64{bid}}); err != nil {
+		t.Fatal(err)
+	}
+	plain, prefix, hash, err := auth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.InsertKey(store.APIKey{Name: "t", Prefix: prefix, KeyHash: hash, AllowedModels: []string{"*"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	h.CheckOnce()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen"}`))
+	req.Header.Set("Authorization", "Bearer "+plain)
+	rec := httptest.NewRecorder()
+	px.ChatCompletions(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("code %d %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Set-Cookie") != "" {
+		t.Fatalf("leaked cookie %q", rec.Header().Get("Set-Cookie"))
+	}
+	if rec.Header().Get("Location") != "" {
+		t.Fatalf("leaked location %q", rec.Header().Get("Location"))
+	}
+	if rec.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("content-type %q", rec.Header().Get("Content-Type"))
+	}
+}
+
 func TestServeChatSkipsAPIKey(t *testing.T) {
 	st, h, _, px, _ := setup(t)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

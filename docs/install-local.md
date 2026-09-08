@@ -48,6 +48,10 @@ ADMIN_PASSWORD=новыйсекрет ADMIN_PASSWORD_RESET=1 \
 
 После успешного входа уберите `ADMIN_PASSWORD_RESET`, иначе пароль будет перезаписываться на каждом старте.
 
+MCP-токен при первом старте генерируется в лог (`generated MCP token:`). Задать свой: `-mcp-token` / `MIKROLLM_MCP_TOKEN`. Сброс: `-mcp-token-reset` / `MIKROLLM_MCP_TOKEN_RESET=1`. Как подключить агента — [mcp.md](mcp.md).
+
+Очереди (необязательно): `MIKROLLM_QUEUE_MAX_BYTES` (по умолчанию 16 МиБ тела на диске), `MIKROLLM_QUEUE_MAX_JOBS` (200), `MIKROLLM_QUEUE_MAX_WAIT` (`3m`).
+
 ## Сборка бинаря
 
 ```bash

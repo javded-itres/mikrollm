@@ -18,12 +18,14 @@
 
 - Несколько бэкендов: **Ollama**, **Ollama Cloud**, **OpenRouter**, **vLLM**, **LM Studio**; health-check каждые 10 с.
 - Alias для клиентов, балансировка `least_conn` / `round_robin` / `failover`, запасная модель при конце кредитов.
+- Очереди: шаги (локальные → бесплатное облако → платное), визуализация на дашборде, ожидание на диске без Kafka/Redis. Клиент может слать alias, имя очереди или `имя-alias`.
 - Виртуальные ключи с ограничением моделей и RPM.
-- Админка: серверы, модели (фильтр по провайдеру и цене), ключи, лог, чат.
+- Админка: серверы, модели (фильтр по провайдеру и цене), ключи, очереди, лог с фильтрами, чат.
+- **MCP** на `POST /mcp`: агент настраивает провайдеры, модели, очереди и ключи, читает логи и статус. [docs/mcp.md](docs/mcp.md)
 - Скачивание модели (`pull`) с полосой прогресса на Ollama и LM Studio; F5 не обрывает задачу.
 - Загрузка / выгрузка весов в RAM (Ollama `keep_alive`, LM Studio `/api/v1/models/load|unload`).
 - vLLM: модель задаётся на сервере (`vllm serve <HuggingFace-id>`) — [инструкция](docs/providers.md#vllm).
-- OpenRouter и Ollama Cloud — напрямую по HTTPS, без промежуточного GPU-сервера; нужен API-ключ.
+- OpenRouter и Ollama Cloud — напрямую по HTTPS, без промежуточного GPU-сервера; нужен API-ключ. Цены $/1M в каталоге: OpenRouter из `/models`, Ollama Cloud с [ollama.com/pricing](https://ollama.com/pricing).
 - Playground: выбрать alias или имя модели и писать в чат без ключа (нужна сессия админки).
 
 ## Быстрый старт (локально)
@@ -60,6 +62,7 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 | Админка: модели, RAM, ключи, чат | [docs/admin.md](docs/admin.md) |
 | Ollama / Cloud / OpenRouter / vLLM / LM Studio | [docs/providers.md](docs/providers.md) |
 | HTTP API | [docs/api.md](docs/api.md) |
+| MCP для агента | [docs/mcp.md](docs/mcp.md) |
 | Устройство кода | [docs/architecture.md](docs/architecture.md) |
 
 ## Требования
@@ -76,6 +79,11 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 | `-data` | `MIKROLLM_DATA` | `./data` |
 | `-admin-password` | `ADMIN_PASSWORD` | пусто: пароль генерируется и пишется в лог при **первом** старте |
 | `-admin-password-reset` | `ADMIN_PASSWORD_RESET=1` | не сбрасывать |
+| `-mcp-token` | `MIKROLLM_MCP_TOKEN` | Bearer для `/mcp`; если пусто — генерируется при первом старте |
+| `-mcp-token-reset` | `MIKROLLM_MCP_TOKEN_RESET=1` | выпустить новый MCP-токен |
+|  | `MIKROLLM_QUEUE_MAX_BYTES` | `16777216` — потолок тела очереди на диске, старше ждущие сбрасываются |
+|  | `MIKROLLM_QUEUE_MAX_JOBS` | `200` — максимум ждущих+идущих |
+|  | `MIKROLLM_QUEUE_MAX_WAIT` | `3m` — сколько HTTP-соединение может ждать слот |
 
 Пароль хранится в SQLite (`data/mikrollm.db`) как bcrypt. Сброс — только с `ADMIN_PASSWORD_RESET=1`.
 

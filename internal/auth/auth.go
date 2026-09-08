@@ -4,9 +4,11 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,12 +19,22 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const (
+	sessionCookie = "mikrollm_session"
+	flashCookie   = "mikrollm_flash"
+	cookiePath    = "/admin"
+	sessionTTL    = 12 * time.Hour
+	loginWindow   = 10 * time.Minute
+	loginMaxFails = 5
+)
+
 type Service struct {
 	st ports.AuthStore
 
 	mu      sync.Mutex
 	buckets map[int64]*bucket
 	fails   map[string]*fail
+	flashes map[string]flash
 }
 
 type bucket struct {
@@ -35,8 +47,26 @@ type fail struct {
 	n     int
 }
 
+type flash struct {
+	val   string
+	until time.Time
+}
+
 func New(st ports.AuthStore) *Service {
-	return &Service{st: st, buckets: map[int64]*bucket{}, fails: map[string]*fail{}}
+	return &Service{
+		st: st, buckets: map[int64]*bucket{}, fails: map[string]*fail{}, flashes: map[string]flash{},
+	}
+}
+
+func ClientIP(r *http.Request) string {
+	if r == nil || r.RemoteAddr == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func HashKey(secret string) string {
@@ -50,6 +80,21 @@ func GenerateKey() (plain, prefix, hash string, err error) {
 		return
 	}
 	plain = "sk-" + hex.EncodeToString(b)
+	if len(plain) > 11 {
+		prefix = plain[:11]
+	} else {
+		prefix = plain
+	}
+	hash = HashKey(plain)
+	return
+}
+
+func GenerateMCPToken() (plain, prefix, hash string, err error) {
+	b := make([]byte, 24)
+	if _, err = rand.Read(b); err != nil {
+		return
+	}
+	plain = "mcp-" + hex.EncodeToString(b)
 	if len(plain) > 11 {
 		prefix = plain[:11]
 	} else {
@@ -121,38 +166,64 @@ func (s *Service) CheckPassword(pw string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(pw)) == nil
 }
 
+func (s *Service) ValidMCP(token string) bool {
+	token = domain.SanitizeToken(token)
+	if token == "" {
+		return false
+	}
+	hash, err := s.st.MCPTokenHash()
+	if err == nil && len(hash) == 64 {
+		got := HashKey(token)
+		if subtle.ConstantTimeCompare([]byte(got), []byte(hash)) == 1 {
+			return true
+		}
+	}
+	return s.CheckPassword(token)
+}
+
 func (s *Service) LoginBlocked(ip string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneFailsLocked()
 	f := s.fails[ip]
 	if f == nil {
 		return false
 	}
-	if time.Now().After(f.until) {
-		delete(s.fails, ip)
-		return false
-	}
-	return f.n >= 5
+	return f.n >= loginMaxFails
 }
 
 func (s *Service) RecordLogin(ip string, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneFailsLocked()
 	if ok {
 		delete(s.fails, ip)
 		return
 	}
 	f := s.fails[ip]
-	if f == nil || time.Now().After(f.until) {
-		f = &fail{until: time.Now().Add(10 * time.Minute)}
+	if f == nil {
+		if len(s.fails) > 8192 {
+			s.fails = map[string]*fail{}
+		}
+		f = &fail{until: time.Now().Add(loginWindow)}
 		s.fails[ip] = f
 	}
 	f.n++
 }
 
+func (s *Service) pruneFailsLocked() {
+	now := time.Now()
+	for ip, f := range s.fails {
+		if now.After(f.until) {
+			delete(s.fails, ip)
+		}
+	}
+}
+
 type session struct {
-	Exp int64 `json:"exp"`
-	V   int   `json:"v"`
+	Exp  int64  `json:"exp"`
+	V    int    `json:"v"`
+	CSRF string `json:"csrf"`
 }
 
 func (s *Service) IssueCookie(w http.ResponseWriter, r *http.Request) error {
@@ -160,54 +231,135 @@ func (s *Service) IssueCookie(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	payload, _ := json.Marshal(session{Exp: time.Now().Add(12 * time.Hour).Unix(), V: 1})
+	csrf, err := randomHex(16)
+	if err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(session{Exp: time.Now().Add(sessionTTL).Unix(), V: 2, CSRF: csrf})
 	mac := hmac.New(sha256.New, []byte(sec))
 	mac.Write(payload)
 	val := base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	http.SetCookie(w, &http.Cookie{
-		Name:     "mikrollm_session",
-		Value:    val,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   12 * 3600,
-	})
+	http.SetCookie(w, sessionCookieValue(val, int(sessionTTL.Seconds()), r))
 	return nil
 }
 
 func (s *Service) ClearCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{Name: "mikrollm_session", Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: cookiePath, MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: flashCookie, Value: "", Path: cookiePath, MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }
 
 func (s *Service) ValidSession(r *http.Request) bool {
-	c, err := r.Cookie("mikrollm_session")
-	if err != nil {
+	_, ok := s.parseSession(r)
+	return ok
+}
+
+func (s *Service) CSRF(r *http.Request) string {
+	sess, ok := s.parseSession(r)
+	if !ok {
+		return ""
+	}
+	return sess.CSRF
+}
+
+func (s *Service) ValidCSRF(r *http.Request, tok string) bool {
+	want := s.CSRF(r)
+	if want == "" || tok == "" {
 		return false
+	}
+	if len(want) != len(tok) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(want), []byte(tok)) == 1
+}
+
+func (s *Service) PutFlash(w http.ResponseWriter, val string) {
+	id, err := randomHex(16)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	if len(s.flashes) > 256 {
+		s.flashes = map[string]flash{}
+	}
+	s.flashes[id] = flash{val: val, until: time.Now().Add(2 * time.Minute)}
+	s.mu.Unlock()
+	http.SetCookie(w, &http.Cookie{
+		Name: flashCookie, Value: id, Path: cookiePath, HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, MaxAge: 120,
+	})
+}
+
+func (s *Service) TakeFlash(w http.ResponseWriter, r *http.Request) string {
+	c, err := r.Cookie(flashCookie)
+	http.SetCookie(w, &http.Cookie{Name: flashCookie, Value: "", Path: cookiePath, MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	if err != nil || c.Value == "" {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.flashes[c.Value]
+	delete(s.flashes, c.Value)
+	if !ok || time.Now().After(f.until) {
+		return ""
+	}
+	return f.val
+}
+
+func (s *Service) parseSession(r *http.Request) (session, bool) {
+	var zero session
+	if r == nil {
+		return zero, false
+	}
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return zero, false
 	}
 	sec, err := s.st.SessionSecret()
 	if err != nil {
-		return false
+		return zero, false
 	}
 	parts := strings.Split(c.Value, ".")
 	if len(parts) != 2 {
-		return false
+		return zero, false
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return false
+		return zero, false
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return false
+		return zero, false
 	}
 	mac := hmac.New(sha256.New, []byte(sec))
 	mac.Write(payload)
 	if !hmac.Equal(mac.Sum(nil), sig) {
-		return false
+		return zero, false
 	}
 	var sess session
 	if json.Unmarshal(payload, &sess) != nil {
-		return false
+		return zero, false
 	}
-	return time.Now().Unix() < sess.Exp
+	if sess.V != 2 || sess.CSRF == "" || time.Now().Unix() >= sess.Exp {
+		return zero, false
+	}
+	return sess, true
+}
+
+func sessionCookieValue(val string, maxAge int, r *http.Request) *http.Cookie {
+	c := &http.Cookie{
+		Name: sessionCookie, Value: val, Path: cookiePath,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: maxAge,
+	}
+	if r != nil && r.TLS != nil {
+		c.Secure = true
+	}
+	return c
+}
+
+func randomHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

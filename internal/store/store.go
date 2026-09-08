@@ -2,6 +2,7 @@ package store
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -111,7 +112,51 @@ CREATE TABLE IF NOT EXISTS ollama_jobs (
 	_, _ = s.DB.Exec(`ALTER TABLE backends ADD COLUMN token TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN max_context INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN fallback TEXT NOT NULL DEFAULT ''`)
-	return nil
+	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN mcp_token_hash TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN mcp_token_prefix TEXT NOT NULL DEFAULT ''`)
+	_, err = s.DB.Exec(`
+CREATE TABLE IF NOT EXISTS queues (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  alias TEXT NOT NULL UNIQUE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  overflow_after INTEGER NOT NULL DEFAULT 5,
+  overflow_alias TEXT NOT NULL DEFAULT '',
+  max_wait_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS queue_steps (
+  queue_id INTEGER NOT NULL REFERENCES queues(id) ON DELETE CASCADE,
+  pos INTEGER NOT NULL,
+  model_alias TEXT NOT NULL,
+  max_concurrent INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (queue_id, pos)
+);
+CREATE TABLE IF NOT EXISTS queue_aliases (
+  alias TEXT PRIMARY KEY,
+  queue_id INTEGER NOT NULL REFERENCES queues(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS queue_jobs (
+  id TEXT PRIMARY KEY,
+  queue_id INTEGER NOT NULL,
+  seq INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  alias TEXT NOT NULL DEFAULT '',
+  assigned_model TEXT NOT NULL DEFAULT '',
+  assigned_backend TEXT NOT NULL DEFAULT '',
+  provider TEXT NOT NULL DEFAULT '',
+  key_prefix TEXT NOT NULL DEFAULT '',
+  path TEXT NOT NULL DEFAULT '',
+  body BLOB,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS queue_jobs_q_status_seq ON queue_jobs(queue_id, status, seq);
+CREATE INDEX IF NOT EXISTS queue_jobs_status ON queue_jobs(status);
+`)
+	return err
 }
 
 func (s *Store) EnsureAdmin(password string, reset bool) error {
@@ -123,7 +168,7 @@ func (s *Store) EnsureAdmin(password string, reset bool) error {
 		return nil
 	}
 	if password == "" {
-		b := make([]byte, 6)
+		b := make([]byte, 16)
 		_, _ = rand.Read(b)
 		password = hex.EncodeToString(b)
 		log.Printf("generated admin password: %s", password)
@@ -160,8 +205,71 @@ func (s *Store) SetAdminPassword(password string) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.Exec(`UPDATE admin_meta SET password_hash=? WHERE id=1`, string(hash))
+	sec := make([]byte, 32)
+	if _, err := rand.Read(sec); err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(`UPDATE admin_meta SET password_hash=?, session_secret=? WHERE id=1`, string(hash), hex.EncodeToString(sec))
 	return err
+}
+
+func hashSecret(plain string) string {
+	sum := sha256.Sum256([]byte(plain))
+	return hex.EncodeToString(sum[:])
+}
+
+func mcpPrefix(plain string) string {
+	if len(plain) > 11 {
+		return plain[:11]
+	}
+	return plain
+}
+
+func (s *Store) MCPTokenHash() (string, error) {
+	var h string
+	err := s.DB.QueryRow(`SELECT mcp_token_hash FROM admin_meta WHERE id=1`).Scan(&h)
+	return h, err
+}
+
+func (s *Store) MCPTokenPrefix() (string, error) {
+	var p string
+	err := s.DB.QueryRow(`SELECT mcp_token_prefix FROM admin_meta WHERE id=1`).Scan(&p)
+	return p, err
+}
+
+func (s *Store) SetMCPToken(plain string) (string, error) {
+	plain = strings.TrimSpace(plain)
+	if plain == "" {
+		return "", fmt.Errorf("empty mcp token")
+	}
+	prefix := mcpPrefix(plain)
+	_, err := s.DB.Exec(`UPDATE admin_meta SET mcp_token_hash=?, mcp_token_prefix=? WHERE id=1`, hashSecret(plain), prefix)
+	return prefix, err
+}
+
+func (s *Store) EnsureMCPToken(plain string, reset bool) (string, error) {
+	plain = strings.TrimSpace(plain)
+	if plain != "" {
+		_, err := s.SetMCPToken(plain)
+		return "", err
+	}
+	hash, err := s.MCPTokenHash()
+	if err != nil {
+		return "", err
+	}
+	if hash != "" && !reset {
+		return "", nil
+	}
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	gen := "mcp-" + hex.EncodeToString(b)
+	if _, err := s.SetMCPToken(gen); err != nil {
+		return "", err
+	}
+	log.Printf("generated MCP token: %s", gen)
+	return gen, nil
 }
 
 func (s *Store) ListBackends() ([]Backend, error) {
@@ -312,6 +420,13 @@ func (s *Store) SaveModel(m Model) (int64, error) {
 	m.Fallback = strings.TrimSpace(m.Fallback)
 	if m.Fallback == m.Alias {
 		m.Fallback = ""
+	}
+	taken, err := s.AliasTaken(m.Alias, 0, m.ID)
+	if err != nil {
+		return 0, err
+	}
+	if taken {
+		return 0, fmt.Errorf("alias %s already used", m.Alias)
 	}
 	if m.ID == 0 {
 		res, err := s.DB.Exec(`INSERT INTO models (alias, upstream_name, lb_policy, enabled, max_context, fallback) VALUES (?,?,?,?,?,?)`,

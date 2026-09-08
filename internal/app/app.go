@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/javded-itres/mikrollm/internal/admin"
@@ -14,19 +15,21 @@ import (
 	"github.com/javded-itres/mikrollm/internal/health"
 	"github.com/javded-itres/mikrollm/internal/host"
 	"github.com/javded-itres/mikrollm/internal/jobs"
+	"github.com/javded-itres/mikrollm/internal/mcp"
 	"github.com/javded-itres/mikrollm/internal/ports"
 	"github.com/javded-itres/mikrollm/internal/proxy"
+	"github.com/javded-itres/mikrollm/internal/queue"
 	"github.com/javded-itres/mikrollm/internal/store"
 )
 
 var (
-	_ ports.Store      = (*store.Store)(nil)
-	_ ports.Health     = (*health.Checker)(nil)
-	_ ports.Auth       = (*auth.Service)(nil)
-	_ ports.Host       = (*host.Manager)(nil)
-	_ ports.Jobs       = (*jobs.Tracker)(nil)
-	_ ports.HTTPGetter = (*http.Client)(nil)
-	_ ports.HTTPDoer   = (*http.Client)(nil)
+	_ ports.Store       = (*store.Store)(nil)
+	_ ports.Health      = (*health.Checker)(nil)
+	_ ports.Auth        = (*auth.Service)(nil)
+	_ ports.Host        = (*host.Manager)(nil)
+	_ ports.Jobs        = (*jobs.Tracker)(nil)
+	_ ports.HTTPGetter  = (*http.Client)(nil)
+	_ ports.HTTPDoer    = (*http.Client)(nil)
 	_ ports.JobRepo     = (*store.Store)(nil)
 	_ ports.ChatGateway = (*proxy.Proxy)(nil)
 )
@@ -36,6 +39,9 @@ type Config struct {
 	DataDir       string
 	AdminPassword string
 	ResetPassword bool
+	MCPToken      string
+	ResetMCPToken bool
+	Version       string
 }
 
 type App struct {
@@ -55,6 +61,10 @@ func New(cfg Config) (*App, error) {
 		st.Close()
 		return nil, err
 	}
+	if _, err := st.EnsureMCPToken(cfg.MCPToken, cfg.ResetMCPToken); err != nil {
+		st.Close()
+		return nil, err
+	}
 	_ = st.SeedIfEmpty([]domain.Backend{
 		{Name: "mac-82", BaseURL: "http://192.168.88.82:11434", Weight: 1},
 		{Name: "mac-80", BaseURL: "http://192.168.88.80:11434", Weight: 1},
@@ -67,8 +77,11 @@ func New(cfg Config) (*App, error) {
 	tracker := jobs.New(st)
 	resumePulls(tracker, st, hosts, checker)
 	px := proxy.New(st, checker, keys, nil)
+	queues := queue.New(st, px, queue.LimitsFromEnv())
+	px.SetQueue(queues)
+	go queues.Loop(context.Background())
 	ui := admin.New(admin.Deps{
-		Store: st, Health: checker, Auth: keys, Host: hosts, Jobs: tracker, Chat: px,
+		Store: st, Health: checker, Auth: keys, Host: hosts, Jobs: tracker, Chat: px, Queues: queues,
 	})
 
 	mux := http.NewServeMux()
@@ -81,8 +94,42 @@ func New(cfg Config) (*App, error) {
 	mux.HandleFunc("POST /api/chat", px.OllamaChat)
 	mux.HandleFunc("GET /api/tags", px.OllamaTags)
 	ui.Mount(mux)
+	mcp.New(mcp.Deps{
+		Store: st, Health: checker, Auth: keys, Host: hosts, Jobs: tracker, Queues: queues,
+		Version: cfg.Version,
+	}).Mount(mux)
 
-	return &App{Handler: logRequests(mux), Store: st}, nil
+	return &App{Handler: logRequests(secureHeaders(limitBody(mux))), Store: st}, nil
+}
+
+func limitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			n := int64(32 << 20)
+			p := r.URL.Path
+			if (strings.HasPrefix(p, "/admin") && p != "/admin/chat") || p == "/mcp" || strings.HasPrefix(p, "/mcp/") {
+				n = 1 << 20
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, n)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func secureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("X-Robots-Tag", "noindex, nofollow")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		if strings.HasPrefix(r.URL.Path, "/admin") {
+			h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+			h.Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (a *App) Close() error {

@@ -186,14 +186,6 @@ func wantsJSON(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "application/json")
 }
 
-func nextPath(r *http.Request) string {
-	next := strings.TrimSpace(r.FormValue("next"))
-	if strings.HasPrefix(next, "/admin") && !strings.HasPrefix(next, "//") {
-		return next
-	}
-	return "/admin/models"
-}
-
 func writeJSONErr(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

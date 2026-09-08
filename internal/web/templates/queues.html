@@ -1,0 +1,103 @@
+{{define "content"}}
+<div class="pagehead">
+  <div>
+    <h1>Очереди</h1>
+    <p class="muted">Запрос по alias очереди идёт по шагам: свободный слот на шаге 1, иначе шаг 2… Если все заняты — ждёт в очереди на диске. Ответ уходит в то же соединение.</p>
+  </div>
+</div>
+
+<section class="q-wrap card" id="q-board" data-live="1">
+  <div class="q-head"><h2>Сейчас</h2></div>
+  <div class="q-list" id="q-list"></div>
+</section>
+
+{{range .Queues}}
+{{$q := .}}
+<article class="card q-edit">
+  <div class="q-title">
+    <span class="host-name">{{.Name}}</span> <code>{{.Alias}}</code>
+    {{range .ExtraAliases}}<span class="pill">{{.}}</span>{{end}}
+    <form method="post" action="/admin/queues/{{$q.ID}}/delete" onsubmit="return confirm('Удалить очередь {{$q.Name}}?')" style="margin-left:auto">
+      <button class="btn-sm danger-text" type="submit">Удалить</button>
+    </form>
+  </div>
+  <form method="post" action="/admin/queues" class="pull-row" style="flex-wrap:wrap">
+    <input type="hidden" name="id" value="{{$q.ID}}">
+    <input name="name" value="{{.Name}}" required>
+    <input name="alias" value="{{.Alias}}" required title="имя в поле model у клиента">
+    <input name="overflow_after" type="number" min="0" value="{{.OverflowAfter}}" class="sel-sm" title="если ждущих ≥ N, новый запрос на запасной alias">
+    <input name="overflow_alias" value="{{.OverflowAlias}}" placeholder="запасной alias" class="sel-sm">
+    <button type="submit">Сохранить</button>
+  </form>
+  <p class="muted small">Порог переполнения {{.OverflowAfter}}: новые запросы уйдут на запасной alias, не вставая в эту очередь.</p>
+
+  <h3 class="q-sub">Порядок разбора</h3>
+  <ol class="q-steps">
+    {{range $i, $s := .Steps}}
+    <li>
+      <span class="q-step-n">{{add $i 1}}</span>
+      <code>{{$s.Alias}}</code>
+      <span class="muted">до {{$s.Cap}} сразу</span>
+      {{if $s.Provider}}<span class="pill">{{$s.Provider}}</span>{{end}}
+      {{if gt $i 0}}
+      <form method="post" action="/admin/queues/{{$q.ID}}/steps/{{$i}}/up"><button class="btn-sm" type="submit">↑</button></form>
+      {{end}}
+      <form method="post" action="/admin/queues/{{$q.ID}}/steps/{{$i}}/delete" onsubmit="return confirm('Убрать шаг?')">
+        <button class="btn-sm danger-text" type="submit">✕</button>
+      </form>
+    </li>
+    {{else}}
+    <li class="muted">Нет шагов — добавьте alias моделей снизу.</li>
+    {{end}}
+  </ol>
+  <form method="post" action="/admin/queues/{{$q.ID}}/steps" class="pull-row">
+    <select name="model_alias" required>
+      <option value="" disabled selected>модель / alias…</option>
+      {{range $.Models}}<option value="{{.Alias}}">{{.Alias}}</option>{{end}}
+    </select>
+    <input name="max_concurrent" type="number" min="1" value="1" class="sel-sm" title="сколько запросов одновременно на этом шаге">
+    <button type="submit">Добавить шаг</button>
+  </form>
+
+  <h3 class="q-sub">Ещё alias на эту очередь</h3>
+  <form method="post" action="/admin/queues/{{$q.ID}}/aliases" class="pull-row">
+    <input name="alias" placeholder="второй alias" required>
+    <button type="submit">Добавить alias</button>
+  </form>
+  {{if .ExtraAliases}}
+  <div class="chips">
+    {{range .ExtraAliases}}
+    <form method="post" action="/admin/queues/{{$q.ID}}/aliases/delete" class="ram-form">
+      <input type="hidden" name="alias" value="{{.}}">
+      <button class="chip" type="submit" title="убрать">{{.}} ×</button>
+    </form>
+    {{end}}
+  </div>
+  {{end}}
+</article>
+{{end}}
+
+<div class="card add-box">
+  <h2>Новая очередь</h2>
+  <form method="post" action="/admin/queues" class="grid2">
+    <div>
+      <label>Имя</label>
+      <input name="name" placeholder="chat-home" required>
+    </div>
+    <div>
+      <label>Alias для клиентов</label>
+      <input name="alias" placeholder="chat" required>
+    </div>
+    <div>
+      <label>Ждущих до запасного</label>
+      <input name="overflow_after" type="number" min="0" value="5">
+    </div>
+    <div>
+      <label>Запасной alias</label>
+      <input name="overflow_alias" placeholder="если очередь &gt; N">
+    </div>
+    <div class="span2"><button type="submit">Создать</button></div>
+  </form>
+  <p class="hint">Пример шагов: 2 слота локальной бесплатной → облачная бесплатная → облачная платная. Пока слот занят, следующий запрос идёт дальше по списку. Если все слоты заняты — копим на диске, пока кто-то не освободится.</p>
+</div>
+{{end}}

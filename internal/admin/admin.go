@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"fmt"
 	"html/template"
 	"net/http"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"github.com/javded-itres/mikrollm/internal/auth"
 	"github.com/javded-itres/mikrollm/internal/domain"
 	"github.com/javded-itres/mikrollm/internal/ports"
+	"github.com/javded-itres/mikrollm/internal/queue"
 	"github.com/javded-itres/mikrollm/internal/web"
 )
 
@@ -21,6 +23,7 @@ type Deps struct {
 	Host   ports.Host
 	Jobs   ports.Jobs
 	Chat   ports.ChatGateway
+	Queues *queue.Engine
 }
 
 type UI struct {
@@ -30,6 +33,7 @@ type UI struct {
 	host   ports.Host
 	jobs   ports.Jobs
 	chat   ports.ChatGateway
+	queues *queue.Engine
 	pages  map[string]*template.Template
 	login  *template.Template
 }
@@ -39,12 +43,13 @@ func New(d Deps) *UI {
 		"hsize": humanSize,
 		"hctx":  domain.FormatContext,
 		"join":  strings.Join,
+		"add":   func(a, b int) int { return a + b },
 	}
 	must := func(files ...string) *template.Template {
 		return template.Must(template.New("layout.html").Funcs(fm).ParseFS(web.FS, files...))
 	}
 	return &UI{
-		st: d.Store, health: d.Health, keys: d.Auth, host: d.Host, jobs: d.Jobs, chat: d.Chat,
+		st: d.Store, health: d.Health, keys: d.Auth, host: d.Host, jobs: d.Jobs, chat: d.Chat, queues: d.Queues,
 		login: template.Must(template.New("login.html").Funcs(fm).ParseFS(web.FS, "templates/login.html")),
 		pages: map[string]*template.Template{
 			"dash":   must("templates/layout.html", "templates/dash.html"),
@@ -52,21 +57,22 @@ func New(d Deps) *UI {
 			"keys":   must("templates/layout.html", "templates/keys.html"),
 			"chat":   must("templates/layout.html", "templates/chat.html"),
 			"logs":   must("templates/layout.html", "templates/logs.html"),
+			"queues": must("templates/layout.html", "templates/queues.html"),
 		},
 	}
 }
 
 func (u *UI) Mount(mux *http.ServeMux) {
-	static := http.FileServer(http.FS(web.FS))
-	mux.Handle("GET /admin/static/", http.StripPrefix("/admin/", static))
+	mux.Handle("GET /admin/static/", staticHandler())
 	mux.HandleFunc("GET /admin/login", u.loginPage)
 	mux.HandleFunc("POST /admin/login", u.loginPost)
-	mux.HandleFunc("POST /admin/logout", u.logout)
+	mux.HandleFunc("POST /admin/logout", u.protect(u.logout))
 	mux.HandleFunc("GET /admin", u.protect(u.dash))
 	mux.HandleFunc("POST /admin/refresh", u.protect(u.refresh))
 	mux.HandleFunc("POST /admin/backends", u.protect(u.addBackend))
 	mux.HandleFunc("POST /admin/backends/{id}/delete", u.protect(u.delBackend))
 	mux.HandleFunc("POST /admin/password", u.protect(u.password))
+	mux.HandleFunc("POST /admin/mcp/token", u.protect(u.rotateMCP))
 	mux.HandleFunc("GET /admin/models", u.protect(u.models))
 	mux.HandleFunc("POST /admin/models", u.protect(u.saveModel))
 	mux.HandleFunc("POST /admin/models/connect", u.protect(u.connectModels))
@@ -85,6 +91,15 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/chat", u.protect(u.chatPage))
 	mux.HandleFunc("POST /admin/chat", u.protect(u.chatPost))
 	mux.HandleFunc("GET /admin/logs", u.protect(u.logs))
+	mux.HandleFunc("GET /admin/queues", u.protect(u.queuesPage))
+	mux.HandleFunc("GET /admin/queues/live", u.protect(u.queuesLive))
+	mux.HandleFunc("POST /admin/queues", u.protect(u.saveQueue))
+	mux.HandleFunc("POST /admin/queues/{id}/delete", u.protect(u.delQueue))
+	mux.HandleFunc("POST /admin/queues/{id}/steps", u.protect(u.addQueueStep))
+	mux.HandleFunc("POST /admin/queues/{id}/steps/{pos}/up", u.protect(u.upQueueStep))
+	mux.HandleFunc("POST /admin/queues/{id}/steps/{pos}/delete", u.protect(u.delQueueStep))
+	mux.HandleFunc("POST /admin/queues/{id}/aliases", u.protect(u.addQueueAlias))
+	mux.HandleFunc("POST /admin/queues/{id}/aliases/delete", u.protect(u.delQueueAlias))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			http.Redirect(w, r, "/admin", http.StatusFound)
@@ -92,16 +107,6 @@ func (u *UI) Mount(mux *http.ServeMux) {
 		}
 		http.NotFound(w, r)
 	})
-}
-
-func (u *UI) protect(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !u.keys.ValidSession(r) {
-			http.Redirect(w, r, "/admin/login", http.StatusFound)
-			return
-		}
-		next(w, r)
-	}
 }
 
 func (u *UI) loginPage(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +118,7 @@ func (u *UI) loginPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) loginPost(w http.ResponseWriter, r *http.Request) {
-	ip := r.RemoteAddr
+	ip := clientIP(r)
 	if u.keys.LoginBlocked(ip) {
 		http.Redirect(w, r, "/admin/login?err=too+many+attempts", http.StatusFound)
 		return
@@ -177,20 +182,36 @@ func (u *UI) dash(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	aliases, _ := u.st.ListModels()
-	u.render(w, "dash", map[string]any{
+	var qviews []domain.QueueView
+	if u.queues != nil {
+		qviews = u.queues.Snapshot()
+	}
+	waitN := 0
+	for _, q := range qviews {
+		waitN += q.Waiting + q.Running
+	}
+	prefix, _ := u.st.MCPTokenPrefix()
+	newMCP := ""
+	okCode := r.URL.Query().Get("ok")
+	if okCode == "mcp_token" {
+		newMCP = u.keys.TakeFlash(w, r)
+	}
+	flash := flashMsg(okCode)
+	if newMCP != "" {
+		flash = ""
+	}
+	u.render(w, r, "dash", map[string]any{
 		"Title": "Статус", "Nav": "dash", "Backends": vms,
 		"Up": up, "Total": len(vms), "AliasCount": len(aliases),
-		"Flash": flashMsg(r.URL.Query().Get("ok")), "Error": errMsg(r.URL.Query().Get("err")),
+		"Queues": qviews, "QueueLive": waitN,
+		"MCPPrefix": prefix, "NewMCPToken": newMCP,
+		"Flash": flash, "Error": errMsg(r.URL.Query().Get("err")),
 	})
 }
 
 func (u *UI) refresh(w http.ResponseWriter, r *http.Request) {
 	u.health.CheckOnce()
-	next := r.FormValue("next")
-	if next == "" {
-		next = "/admin"
-	}
-	http.Redirect(w, r, next+"?ok=refreshed", http.StatusFound)
+	http.Redirect(w, r, safeAdminPath(r.FormValue("next"), "/admin")+"?ok=refreshed", http.StatusFound)
 }
 
 func (u *UI) addBackend(w http.ResponseWriter, r *http.Request) {
@@ -198,8 +219,8 @@ func (u *UI) addBackend(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.FormValue("name"))
 	kind := strings.TrimSpace(r.FormValue("kind"))
 	token := strings.TrimSpace(r.FormValue("token"))
-	url := domain.CanonicalBaseURL(kind, r.FormValue("base_url"))
-	if name == "" || url == "" {
+	url, err := domain.SanitizeBackendURL(kind, r.FormValue("base_url"))
+	if name == "" || err != nil || url == "" {
 		http.Redirect(w, r, "/admin?err=name+and+url+required", http.StatusFound)
 		return
 	}
@@ -221,17 +242,32 @@ func (u *UI) delBackend(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin?ok=backend_deleted", http.StatusFound)
 }
 
+func (u *UI) rotateMCP(w http.ResponseWriter, r *http.Request) {
+	plain, _, _, err := auth.GenerateMCPToken()
+	if err != nil {
+		http.Redirect(w, r, "/admin?err="+err.Error(), http.StatusFound)
+		return
+	}
+	if _, err := u.st.SetMCPToken(plain); err != nil {
+		http.Redirect(w, r, "/admin?err="+err.Error(), http.StatusFound)
+		return
+	}
+	u.keys.PutFlash(w, plain)
+	http.Redirect(w, r, "/admin?ok=mcp_token", http.StatusFound)
+}
+
 func (u *UI) password(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	pw := r.FormValue("password")
-	if len(pw) < 6 {
-		http.Redirect(w, r, "/admin?err=min+6+chars", http.StatusFound)
+	if len(pw) < 8 {
+		http.Redirect(w, r, "/admin?err=min+8+chars", http.StatusFound)
 		return
 	}
 	if err := u.st.SetAdminPassword(pw); err != nil {
 		http.Redirect(w, r, "/admin?err="+err.Error(), http.StatusFound)
 		return
 	}
+	_ = u.keys.IssueCookie(w, r)
 	http.Redirect(w, r, "/admin?ok=password_updated", http.StatusFound)
 }
 
@@ -375,7 +411,7 @@ func (u *UI) models(w http.ResponseWriter, r *http.Request) {
 		providers = append(providers, p)
 	}
 	sort.Strings(providers)
-	u.render(w, "models", map[string]any{
+	u.render(w, r, "models", map[string]any{
 		"Title": "Модели", "Nav": "models", "Models": vms, "Backends": bs,
 		"PullBackends": pullers, "HasVLLM": hasVLLM, "HasCloud": hasCloud,
 		"Catalog": cat, "Available": available, "Providers": providers,
@@ -542,9 +578,9 @@ func (u *UI) keysPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	opts, providers := u.keyModelOpts(selected)
-	u.render(w, "keys", map[string]any{
+	u.render(w, r, "keys", map[string]any{
 		"Title": "Ключи", "Nav": "keys", "Keys": vms, "KeyModels": opts, "Providers": providers,
-		"EditKey": edit, "NewKey": r.URL.Query().Get("new"),
+		"EditKey": edit, "NewKey": u.keys.TakeFlash(w, r),
 		"Flash": flashMsg(r.URL.Query().Get("ok")), "Error": errMsg(r.URL.Query().Get("err")),
 	})
 }
@@ -586,7 +622,19 @@ func (u *UI) keyModelOpts(selected map[string]bool) ([]keyModelOpt, []string) {
 		})
 		return true
 	}
-	head := "Alias в шлюзе"
+	head := "Очереди"
+	qs, _ := u.st.ListQueues()
+	for _, q := range qs {
+		if !q.Enabled {
+			continue
+		}
+		for _, a := range q.AllAliases() {
+			if add(a, "очередь", head, 0, domain.CatalogEntry{Provider: "Очередь"}) {
+				head = ""
+			}
+		}
+	}
+	head = "Alias в шлюзе"
 	for _, m := range ms {
 		if !m.Enabled || m.Alias == "" {
 			continue
@@ -599,10 +647,30 @@ func (u *UI) keyModelOpts(selected map[string]bool) ([]keyModelOpt, []string) {
 			head = ""
 		}
 	}
-	head = "На серверах"
+	byProv := map[string][]domain.CatalogEntry{}
 	for _, e := range cat {
-		if add(e.Name, strings.Join(e.BackendNames, ", "), head, e.Context, e) {
-			head = ""
+		if e.Name == "" || seen[e.Name] {
+			continue
+		}
+		p := e.Provider
+		if p == "" {
+			p = "Другие"
+		}
+		byProv[p] = append(byProv[p], e)
+	}
+	provOrder := make([]string, 0, len(byProv))
+	for p := range byProv {
+		provOrder = append(provOrder, p)
+	}
+	sort.Strings(provOrder)
+	for _, p := range provOrder {
+		items := byProv[p]
+		sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+		head := fmt.Sprintf("%s · %d", p, len(items))
+		for _, e := range items {
+			if add(e.Name, p, head, e.Context, e) {
+				head = ""
+			}
 		}
 	}
 	providers := make([]string, 0, len(provSet))
@@ -663,7 +731,8 @@ func (u *UI) createKey(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/keys?err="+err.Error(), http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, "/admin/keys?new="+plain, http.StatusFound)
+	u.keys.PutFlash(w, plain)
+	http.Redirect(w, r, "/admin/keys?ok=key_created", http.StatusFound)
 }
 
 func (u *UI) updateKey(w http.ResponseWriter, r *http.Request) {
@@ -698,9 +767,65 @@ func (u *UI) delKey(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/keys?ok=revoked", http.StatusFound)
 }
 
+type logRow struct {
+	domain.RequestLog
+	Kind      string
+	TimeLabel string
+	TimeFull  string
+	SizeLabel string
+}
+
 func (u *UI) logs(w http.ResponseWriter, r *http.Request) {
-	ls, _ := u.st.ListLogs(200)
-	u.render(w, "logs", map[string]any{"Title": "Лог", "Nav": "logs", "Logs": ls})
+	ls, _ := u.st.ListLogs(500)
+	rows := make([]logRow, 0, len(ls))
+	var models, backends, keys []string
+	for _, l := range ls {
+		ts := l.TS.Local()
+		label := ts.Format("15:04:05")
+		if ts.Format("2006-01-02") != time.Now().Format("2006-01-02") {
+			label = ts.Format("02.01 15:04:05")
+		}
+		rows = append(rows, logRow{
+			RequestLog: l, Kind: logStatusKind(l.Status),
+			TimeLabel: label, TimeFull: ts.Format("02.01.2006 15:04:05"),
+			SizeLabel: humanSize(l.BytesOut),
+		})
+		models = append(models, l.Model)
+		backends = append(backends, l.Backend)
+		keys = append(keys, l.KeyPrefix)
+	}
+	u.render(w, r, "logs", map[string]any{
+		"Title": "Лог", "Nav": "logs", "Logs": rows, "Q": r.URL.Query().Get("q"),
+		"Models": uniqueSorted(models), "Backends": uniqueSorted(backends), "Keys": uniqueSorted(keys),
+	})
+}
+
+func logStatusKind(status int) string {
+	switch {
+	case status >= 200 && status < 300:
+		return "2"
+	case status >= 400 && status < 500:
+		return "4"
+	case status >= 500:
+		return "5"
+	default:
+		return "0"
+	}
+}
+
+func uniqueSorted(ss []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range ss {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func flashMsg(code string) string {
@@ -731,14 +856,22 @@ func flashMsg(code string) string {
 		return "Модель выгружена из RAM."
 	case "busy":
 		return "На этом сервере уже идёт другая задача."
+	case "key_created":
+		return "Ключ создан. Скопируйте его сейчас."
 	case "key_updated":
 		return "Доступ ключа обновлён."
 	case "context_saved":
 		return "Контекст модели сохранён."
 	case "fallback_saved":
 		return "Запасная модель сохранена."
+	case "queue_saved":
+		return "Очередь сохранена."
+	case "queue_deleted":
+		return "Очередь удалена."
+	case "mcp_token":
+		return "MCP-токен выпущен. Скопируйте его сейчас."
 	default:
-		return code
+		return ""
 	}
 }
 
@@ -752,9 +885,12 @@ func errMsg(code string) string {
 		return "Нужны имя и URL."
 	case "token+required":
 		return "Для OpenRouter и Ollama Cloud нужен API-ключ."
-	case "min+6+chars":
-		return "Пароль не короче 6 символов."
+	case "min+6+chars", "min+8+chars":
+		return "Пароль не короче 8 символов."
 	default:
+		if len(code) > 200 {
+			code = code[:200]
+		}
 		return code
 	}
 }
@@ -772,7 +908,7 @@ func (u *UI) runningPull() *domain.Job {
 	return nil
 }
 
-func (u *UI) render(w http.ResponseWriter, name string, data map[string]any) {
+func (u *UI) render(w http.ResponseWriter, r *http.Request, name string, data map[string]any) {
 	t := u.pages[name]
 	if t == nil {
 		http.Error(w, "template "+name, 500)
@@ -784,7 +920,11 @@ func (u *UI) render(w http.ResponseWriter, name string, data map[string]any) {
 	if _, ok := data["PullJob"]; !ok {
 		data["PullJob"] = u.runningPull()
 	}
+	if _, ok := data["CSRF"]; !ok && u.keys != nil {
+		data["CSRF"] = u.keys.CSRF(r)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	if err := t.ExecuteTemplate(w, "layout.html", data); err != nil {
 		http.Error(w, err.Error(), 500)
 	}

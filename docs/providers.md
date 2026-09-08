@@ -166,7 +166,8 @@ curl https://openrouter.ai/api/v1/key \
 1. Ключ: [ollama.com/settings/keys](https://ollama.com/settings/keys).
 2. Админка → тип **Ollama Cloud**. URL `https://ollama.com`. Вставьте ключ.
 3. Список: `GET https://ollama.com/api/tags` (имена **без** суффикса `-cloud`, например `gpt-oss:120b`).
-4. Подключите нужные в шлюз. Pull/load/delete в админке скрыты: качать некуда.
+4. Цены $/1M (вход / выход) — с [ollama.com/pricing](https://ollama.com/pricing); если модели нет в таблице — со страницы `/library/<модель>` (как у [glm-5.3](https://ollama.com/library/glm-5.3)). Имена в tags могут быть с тегом (`gemma4:31b`), в таблице — семейство (`gemma4`).
+5. Подключите нужные в шлюз. Pull/load/delete в админке скрыты: качать некуда.
 
 Чат с MikroLLM:
 

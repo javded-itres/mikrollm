@@ -1,4 +1,22 @@
 (function () {
+  function escHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+    });
+  }
+  function csrfToken() {
+    var m = document.querySelector('meta[name="csrf-token"]');
+    return m ? (m.getAttribute("content") || "") : "";
+  }
+  document.querySelectorAll("form[method='post'], form[method='POST']").forEach(function (f) {
+    if (f.querySelector("input[name=csrf]")) return;
+    var i = document.createElement("input");
+    i.type = "hidden";
+    i.name = "csrf";
+    i.value = csrfToken();
+    f.appendChild(i);
+  });
+
   document.querySelectorAll("[data-toggle]").forEach(function (el) {
     el.addEventListener("change", function () {
       var root = document.querySelector(el.getAttribute("data-toggle"));
@@ -53,6 +71,10 @@
   if (all && box) {
     function sync() {
       box.classList.toggle("is-disabled", all.checked);
+      var picked = document.getElementById("key-picked");
+      var filters = document.querySelector(".key-filters");
+      if (picked) picked.classList.toggle("is-disabled", all.checked);
+      if (filters) filters.classList.toggle("is-disabled", all.checked);
       box.querySelectorAll("input").forEach(function (cb) {
         cb.disabled = all.checked;
       });
@@ -79,20 +101,24 @@
     var provEl = document.getElementById(provId);
     var priceEl = document.getElementById(priceId);
     if (!nameEl && !provEl && !priceEl) return;
+    var onlyEl = document.getElementById(rowSel.indexOf("#key-models") >= 0 ? "key-only-picked" : "");
     function apply() {
       var q = (nameEl && nameEl.value ? nameEl.value : "").trim().toLowerCase();
       var prov = provEl ? provEl.value : "";
       var price = priceEl ? priceEl.value : "";
+      var only = onlyEl && onlyEl.checked;
       var vis = 0, total = 0;
       document.querySelectorAll(rowSel).forEach(function (el) {
         total++;
         var name = (el.getAttribute("data-name") || "").toLowerCase();
         var title = (el.getAttribute("data-title") || "").toLowerCase();
         var provider = el.getAttribute("data-provider") || "";
+        var cb = el.querySelector("input[name=model]");
         var ok = true;
         if (q && name.indexOf(q) < 0 && title.indexOf(q) < 0 && provider.toLowerCase().indexOf(q) < 0) ok = false;
         if (prov && provider !== prov) ok = false;
         if (!matchBand(el.getAttribute("data-band") || "none", el.getAttribute("data-prompt"), price)) ok = false;
+        if (only && (!cb || !cb.checked)) ok = false;
         el.classList.toggle("is-hidden", !ok);
         if (ok) vis++;
       });
@@ -107,15 +133,147 @@
       var cnt = document.getElementById(countId);
       if (cnt && total) cnt.textContent = vis + " из " + total;
     }
-    [nameEl, provEl, priceEl].forEach(function (el) {
+    [nameEl, provEl, priceEl, onlyEl].forEach(function (el) {
       if (!el) return;
       el.addEventListener("input", apply);
       el.addEventListener("change", apply);
     });
     apply();
+    return apply;
   }
   bindModelFilters("model-filter", "model-provider", "model-price", ".model-tr", "catalog-count");
-  bindModelFilters("key-model-filter", "key-provider", "key-price", "#key-models .pick", "key-count");
+  var applyKeyFilters = bindModelFilters("key-model-filter", "key-provider", "key-price", "#key-models .pick", "key-count");
+
+  (function keyPicker() {
+    var list = document.getElementById("key-models");
+    var chips = document.getElementById("key-picked-chips");
+    var nEl = document.getElementById("key-picked-n");
+    var empty = document.getElementById("key-picked-empty");
+    if (!list || !chips) return;
+    function syncPicked() {
+      var selected = [];
+      list.querySelectorAll("input[name=model]:checked").forEach(function (cb) {
+        selected.push(cb.value);
+      });
+      if (nEl) nEl.textContent = String(selected.length);
+      if (empty) empty.hidden = selected.length > 0;
+      chips.textContent = "";
+      selected.forEach(function (name) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "chip";
+        btn.title = "убрать " + name;
+        btn.textContent = name + " ×";
+        btn.addEventListener("click", function () {
+          list.querySelectorAll("input[name=model]").forEach(function (cb) {
+            if (cb.value === name) cb.checked = false;
+          });
+          syncPicked();
+          if (applyKeyFilters) applyKeyFilters();
+        });
+        chips.appendChild(btn);
+      });
+    }
+    list.addEventListener("change", function () {
+      syncPicked();
+      if (applyKeyFilters) applyKeyFilters();
+    });
+    var clearBtn = document.getElementById("key-picked-clear");
+    if (clearBtn) {
+      clearBtn.addEventListener("click", function () {
+        list.querySelectorAll("input[name=model]:checked").forEach(function (cb) { cb.checked = false; });
+        syncPicked();
+        if (applyKeyFilters) applyKeyFilters();
+      });
+    }
+    document.querySelectorAll("[data-group-check]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var g = btn.getAttribute("data-group-check");
+        list.querySelectorAll(".pick[data-group=\"" + g + "\"]:not(.is-hidden) input[name=model]:not(:disabled)").forEach(function (cb) {
+          cb.checked = true;
+        });
+        syncPicked();
+        if (applyKeyFilters) applyKeyFilters();
+      });
+    });
+    syncPicked();
+  })();
+
+  (function logFilters() {
+    var bar = document.getElementById("log-filters");
+    if (!bar) return;
+    var qEl = document.getElementById("log-q");
+    var stEl = document.getElementById("log-status");
+    var modelEl = document.getElementById("log-model");
+    var backEl = document.getElementById("log-backend");
+    var keyEl = document.getElementById("log-key");
+    var msEl = document.getElementById("log-ms");
+    var cnt = document.getElementById("log-count");
+    var empty = document.getElementById("log-empty");
+    var params = new URLSearchParams(location.search);
+    function setSel(el, v) {
+      if (!el || !v) return;
+      for (var i = 0; i < el.options.length; i++) {
+        if (el.options[i].value === v) { el.selectedIndex = i; return; }
+      }
+    }
+    if (qEl && params.get("q")) qEl.value = params.get("q");
+    setSel(stEl, params.get("status"));
+    setSel(modelEl, params.get("model"));
+    setSel(backEl, params.get("backend"));
+    setSel(keyEl, params.get("key"));
+    setSel(msEl, params.get("ms"));
+    function apply() {
+      var q = (qEl && qEl.value ? qEl.value : "").trim().toLowerCase();
+      var st = stEl ? stEl.value : "";
+      var model = modelEl ? modelEl.value : "";
+      var backend = backEl ? backEl.value : "";
+      var key = keyEl ? keyEl.value : "";
+      var ms = msEl ? msEl.value : "";
+      var vis = 0, total = 0;
+      document.querySelectorAll(".log-tr").forEach(function (tr) {
+        total++;
+        var ok = true;
+        var hay = (tr.getAttribute("data-q") || "").toLowerCase();
+        if (q && hay.indexOf(q) < 0) ok = false;
+        if (st && tr.getAttribute("data-kind") !== st) ok = false;
+        if (model && tr.getAttribute("data-model") !== model) ok = false;
+        if (backend && tr.getAttribute("data-backend") !== backend) ok = false;
+        if (key && tr.getAttribute("data-key") !== key) ok = false;
+        var n = parseInt(tr.getAttribute("data-ms") || "0", 10) || 0;
+        if (ms === "fast" && n >= 100) ok = false;
+        if (ms === "mid" && (n < 100 || n >= 1000)) ok = false;
+        if (ms === "slow" && n < 1000) ok = false;
+        tr.classList.toggle("is-hidden", !ok);
+        if (ok) vis++;
+      });
+      if (cnt) cnt.textContent = vis + " из " + total;
+      if (empty) empty.hidden = vis > 0 || total === 0;
+      var usp = new URLSearchParams();
+      if (q) usp.set("q", qEl.value.trim());
+      if (st) usp.set("status", st);
+      if (model) usp.set("model", model);
+      if (backend) usp.set("backend", backend);
+      if (key) usp.set("key", key);
+      if (ms) usp.set("ms", ms);
+      var next = location.pathname + (usp.toString() ? "?" + usp.toString() : "");
+      if (next !== location.pathname + location.search) history.replaceState(null, "", next);
+    }
+    [qEl, stEl, modelEl, backEl, keyEl, msEl].forEach(function (el) {
+      if (!el) return;
+      el.addEventListener("input", apply);
+      el.addEventListener("change", apply);
+    });
+    var clear = document.getElementById("log-clear");
+    if (clear) {
+      clear.addEventListener("click", function () {
+        if (qEl) qEl.value = "";
+        [stEl, modelEl, backEl, keyEl, msEl].forEach(function (el) { if (el) el.selectedIndex = 0; });
+        apply();
+      });
+    }
+    apply();
+  })();
 
   var keyListFilter = document.getElementById("key-list-filter");
   if (keyListFilter) {
@@ -235,7 +393,7 @@
       var body = new URLSearchParams({ name: name });
       fetch("/admin/ollama/" + id + "/" + action, {
         method: "POST",
-        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrfToken() },
         body: body,
         credentials: "same-origin"
       }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
@@ -265,7 +423,7 @@
       btn.disabled = true;
       fetch("/admin/ollama/" + id + "/pull", {
         method: "POST",
-        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrfToken() },
         body: new URLSearchParams({ name: name }),
         credentials: "same-origin"
       }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
@@ -336,9 +494,9 @@
           bar = "<progress></progress>";
         }
         banner.innerHTML =
-          "<div class=\"job-title\">" + title + " · " + host + " · " + latest.model +
-          (pct ? " · " + pct : "") + "</div>" +
-          "<div class=\"muted\">" + (latest.error || latest.message || "") +
+          "<div class=\"job-title\">" + escHtml(title) + " · " + escHtml(host) + " · " + escHtml(latest.model) +
+          (pct ? " · " + escHtml(pct) : "") + "</div>" +
+          "<div class=\"muted\">" + escHtml(latest.error || latest.message || "") +
           (latest.status === "running" ? " · можно обновить страницу — задача не прервётся" : "") +
           "</div>" + bar;
       }
@@ -392,6 +550,55 @@
   }
 
   pollJobs();
+
+  (function queueBoard() {
+    var board = document.getElementById("q-board");
+    if (!board || !board.getAttribute("data-live")) return;
+    var box = document.getElementById("q-list");
+    if (!box) return;
+    function esc(s) {
+      return String(s || "").replace(/[&<>"]/g, function (c) {
+        return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c];
+      });
+    }
+    function stLabel(s) {
+      return ({ waiting: "ждет", running: "идёт", done: "готово", error: "ошибка", dropped: "сброшен", overflow: "запас", canceled: "отмена" })[s] || s;
+    }
+    function render(data) {
+      var qs = (data && data.queues) || [];
+      if (!qs.length) {
+        box.innerHTML = "<p class=\"muted\">Очередь пуста. Создайте её на вкладке «Очереди».</p>";
+        return;
+      }
+      box.innerHTML = qs.map(function (q) {
+        var lanes = (q.steps || []).map(function (s) {
+          var full = s.cap && s.busy >= s.cap;
+          return "<div class=\"q-lane" + (full ? " is-full" : "") + (s.healthy ? "" : " is-down") + "\">" +
+            "<div class=\"q-lane-h\">" + esc(s.alias) + "</div>" +
+            "<div class=\"q-lane-p\">" + esc(s.provider || "—") + (s.healthy ? "" : " · нет связи") + "</div>" +
+            "<div class=\"q-bar\"><span style=\"width:" + (s.percent || 0) + "%\"></span></div>" +
+            "<div class=\"q-lane-n\">" + s.busy + "/" + s.cap + "</div></div>";
+        }).join("");
+        var jobs = (q.jobs || []).slice(0, 12).map(function (j) {
+          var where = j.status === "waiting" ? "в очереди" : esc([j.provider, j.backend, j.model].filter(Boolean).join(" · "));
+          return "<li><span class=\"seq\">#" + j.seq + "</span><span class=\"st-" + esc(j.status) + "\">" + stLabel(j.status) + "</span>" +
+            "<span>" + where + "</span><span class=\"muted\">" + (j.key_prefix || "") + "</span></li>";
+        }).join("");
+        return "<article class=\"q-card\"><div class=\"q-title\"><span class=\"host-name\">" + esc(q.name) + "</span> <code>" + esc(q.alias) + "</code>" +
+          "<span class=\"pill\">ждет " + q.waiting + "</span><span class=\"pill ram\">идёт " + q.running + "</span></div>" +
+          "<div class=\"q-lanes\">" + (lanes || "<p class=\"muted\">нет шагов</p>") + "</div>" +
+          (jobs ? "<ul class=\"q-jobs\">" + jobs + "</ul>" : "") + "</article>";
+      }).join("");
+    }
+    function tick() {
+      fetch("/admin/queues/live", { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then(function (r) { return r.json(); })
+        .then(render)
+        .catch(function () {})
+        .then(function () { setTimeout(tick, 1000); });
+    }
+    tick();
+  })();
 
   (function chatPlayground() {
     var form = document.getElementById("chat-form");
@@ -526,7 +733,7 @@
         method: "POST",
         credentials: "same-origin",
         signal: ac.signal,
-        headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+        headers: { "Content-Type": "application/json", "Accept": "text/event-stream", "X-CSRF-Token": csrfToken() },
         body: JSON.stringify({
           model: model,
           stream: true,

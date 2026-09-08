@@ -8,7 +8,7 @@ import (
 
 func (u *UI) chatPage(w http.ResponseWriter, r *http.Request) {
 	aliases, catalog := u.chatModelOpts()
-	u.render(w, "chat", map[string]any{
+	u.render(w, r, "chat", map[string]any{
 		"Title": "Чат", "Nav": "chat", "Aliases": aliases, "Catalog": catalog,
 	})
 }
@@ -41,6 +41,19 @@ func (u *UI) chatModelOpts() (aliases, catalog []chatOpt) {
 			s += " · " + p
 		}
 		return s
+	}
+	qs, _ := u.st.ListQueues()
+	for _, q := range qs {
+		if !q.Enabled {
+			continue
+		}
+		for _, a := range q.AllAliases() {
+			if a == "" || seen[a] {
+				continue
+			}
+			aliases = append(aliases, chatOpt{Value: a, Label: "очередь · " + a})
+			seen[a] = true
+		}
 	}
 	ms, _ := u.st.ListModels()
 	for _, m := range ms {

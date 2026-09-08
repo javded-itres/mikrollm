@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/javded-itres/mikrollm/internal/domain"
 )
 
 func TestListModelsNoDeadlock(t *testing.T) {
@@ -126,5 +128,38 @@ func TestModelContextAndKeyUpdate(t *testing.T) {
 	k2, _ := st.GetKey(id)
 	if k2.RPM != 10 || k2.AllowedModels[0] != "*" {
 		t.Fatalf("%+v", k2)
+	}
+}
+
+func TestQueueCRUDAndAlias(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	id, err := st.SaveQueue(domain.Queue{
+		Name: "home", Alias: "chat", Enabled: true, OverflowAfter: 5, OverflowAlias: "paid",
+		Steps: []domain.QueueStep{{ModelAlias: "local", MaxConcurrent: 2}, {ModelAlias: "free-cloud", MaxConcurrent: 4}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := st.GetQueueByAlias("chat")
+	if err != nil || len(q.Steps) != 2 || q.OverflowAfter != 5 {
+		t.Fatalf("%+v %v", q, err)
+	}
+	if err := st.AddQueueAlias(id, "fast"); err != nil {
+		t.Fatal(err)
+	}
+	q2, err := st.GetQueueByAlias("fast")
+	if err != nil || q2.ID != id {
+		t.Fatalf("%+v %v", q2, err)
+	}
+	taken, _ := st.AliasTaken("chat", 0, 0)
+	if !taken {
+		t.Fatal("chat should be taken")
+	}
+	if _, err := st.SaveModel(Model{Alias: "chat", UpstreamName: "x", Enabled: true}); err == nil {
+		t.Fatal("model alias clash")
 	}
 }

@@ -33,6 +33,15 @@ func TestPerMillionAndPriceLabel(t *testing.T) {
 	if g := PriceLabel(true, 10, 50); g != "$10 / $50" {
 		t.Fatalf("got %q", g)
 	}
+	if g := PriceLabel(true, 1.4, 4.4); g != "$1.40 / $4.40" {
+		t.Fatalf("got %q", g)
+	}
+	if g := FormatUSD(0.015); g != "$0.015" {
+		t.Fatalf("0.015 got %q", g)
+	}
+	if g := FormatUSD(0.007); g != "$0.007" {
+		t.Fatalf("0.007 got %q", g)
+	}
 	if PriceBand(true, 0) != "free" || PriceBand(false, 0) != "none" || PriceBand(true, 3) != "lt10" {
 		t.Fatal("band")
 	}

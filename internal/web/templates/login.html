@@ -4,15 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MikroLLM — вход</title>
-  <link rel="stylesheet" href="/admin/static/app.css">
+  <link rel="icon" href="/admin/static/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/admin/static/app.css?v=20">
 </head>
 <body>
   <form class="card login" method="post" action="/admin/login">
-    <h1>MikroLLM</h1>
+    <img class="login-logo" src="/admin/static/logo.svg" width="120" height="120" alt="MikroLLM">
     <p class="muted">Админка LLM-прокси</p>
     {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
     <label>Пароль</label>
-    <input type="password" name="password" autofocus required>
+    <input type="password" name="password" autofocus required autocomplete="current-password">
     <p><button type="submit">Войти</button></p>
   </form>
 </body>

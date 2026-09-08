@@ -77,6 +77,26 @@ func TestBackendCaps(t *testing.T) {
 	}
 }
 
+func TestSanitizeBackendURL(t *testing.T) {
+	ok, err := SanitizeBackendURL("ollama", "http://192.168.88.82:11434/")
+	if err != nil || ok != "http://192.168.88.82:11434" {
+		t.Fatalf("lan %q %v", ok, err)
+	}
+	if _, err := SanitizeBackendURL("ollama", "file:///etc/passwd"); err == nil {
+		t.Fatal("file")
+	}
+	if _, err := SanitizeBackendURL("ollama", "http://user:pass@evil"); err == nil {
+		t.Fatal("userinfo")
+	}
+	if _, err := SanitizeBackendURL("vllm", "javascript:alert(1)"); err == nil {
+		t.Fatal("js")
+	}
+	got, err := SanitizeBackendURL("openrouter", "")
+	if err != nil || got != DefaultOpenRouterURL {
+		t.Fatalf("openrouter default %q %v", got, err)
+	}
+}
+
 func TestSanitizeToken(t *testing.T) {
 	cases := map[string]string{
 		"  sk-or-v1-abc  ":      "sk-or-v1-abc",

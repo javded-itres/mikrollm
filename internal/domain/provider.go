@@ -78,18 +78,26 @@ func FormatUSD(n float64) string {
 	if n <= 0 {
 		return "$0"
 	}
-	if n < 0.01 {
-		s := strconv.FormatFloat(n, 'f', 4, 64)
-		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
-		return "$" + s
-	}
-	if n < 1 {
+	if n >= 1 {
+		if n == float64(int(n)) {
+			return fmt.Sprintf("$%.0f", n)
+		}
 		return fmt.Sprintf("$%.2f", n)
 	}
-	if n == float64(int(n)) {
-		return fmt.Sprintf("$%.0f", n)
+	prec := 2
+	if n < 0.01 {
+		prec = 4
+	} else if n < 0.1 {
+		prec = 3
 	}
-	return fmt.Sprintf("$%.2f", n)
+	s := strconv.FormatFloat(n, 'f', prec, 64)
+	s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	if !strings.Contains(s, ".") {
+		s += ".00"
+	} else if i := strings.IndexByte(s, '.'); len(s)-i-1 == 1 {
+		s += "0"
+	}
+	return "$" + s
 }
 
 func PriceLabel(priced bool, promptPerM, completionPerM float64) string {

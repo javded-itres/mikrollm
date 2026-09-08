@@ -39,6 +39,25 @@ type ModelRepo interface {
 	ConnectOllamaModel(name string, backendIDs []int64, policy string, maxContext int) error
 }
 
+type QueueRepo interface {
+	ListQueues() ([]domain.Queue, error)
+	GetQueue(id int64) (domain.Queue, error)
+	GetQueueByAlias(alias string) (domain.Queue, error)
+	SaveQueue(q domain.Queue) (int64, error)
+	DeleteQueue(id int64) error
+	AddQueueAlias(queueID int64, alias string) error
+	DeleteQueueAlias(queueID int64, alias string) error
+	InsertQueueJob(j *domain.QueueJob) error
+	UpdateQueueJob(j domain.QueueJob) error
+	GetQueueJob(id string) (domain.QueueJob, error)
+	ListQueueJobs(queueID int64, limit int) ([]domain.QueueJob, error)
+	WaitingStats() (jobs int, bytes int64, err error)
+	OldestWaiting(n int) ([]domain.QueueJob, error)
+	ResetStaleQueueJobs() error
+	PurgeFinishedQueueJobs(keep int, maxAge time.Duration) error
+	AliasTaken(alias string, exceptQueueID, exceptModelID int64) (bool, error)
+}
+
 type KeyRepo interface {
 	GetKeyByHash(hash string) (domain.APIKey, error)
 	GetKey(id int64) (domain.APIKey, error)
@@ -54,6 +73,10 @@ type SecretRepo interface {
 	SessionSecret() (string, error)
 	SetAdminPassword(password string) error
 	EnsureAdmin(password string, reset bool) error
+	MCPTokenHash() (string, error)
+	MCPTokenPrefix() (string, error)
+	SetMCPToken(plain string) (prefix string, err error)
+	EnsureMCPToken(plain string, reset bool) (generated string, err error)
 }
 
 type LogRepo interface {
@@ -70,12 +93,14 @@ type AuthStore interface {
 	GetKeyByHash(hash string) (domain.APIKey, error)
 	AdminHash() (string, error)
 	SessionSecret() (string, error)
+	MCPTokenHash() (string, error)
 }
 
 type Store interface {
 	BackendQuery
 	BackendCommand
 	ModelRepo
+	QueueRepo
 	KeyRepo
 	SecretRepo
 	LogRepo
@@ -98,11 +123,16 @@ type Auth interface {
 	Authenticate(plain string) (domain.APIKey, error)
 	AllowRPM(k domain.APIKey) bool
 	CheckPassword(pw string) bool
+	ValidMCP(token string) bool
 	LoginBlocked(ip string) bool
 	RecordLogin(ip string, ok bool)
 	IssueCookie(w http.ResponseWriter, r *http.Request) error
 	ClearCookie(w http.ResponseWriter)
 	ValidSession(r *http.Request) bool
+	CSRF(r *http.Request) string
+	ValidCSRF(r *http.Request, tok string) bool
+	PutFlash(w http.ResponseWriter, val string)
+	TakeFlash(w http.ResponseWriter, r *http.Request) string
 }
 
 type Host interface {

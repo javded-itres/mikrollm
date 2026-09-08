@@ -42,6 +42,7 @@ services:
       ADMIN_PASSWORD: "смените-на-свой"
       MIKROLLM_LISTEN: ":4000"
       MIKROLLM_DATA: "/data"
+      # MIKROLLM_MCP_TOKEN: "mcp-…"   # лучше выпустить из админки, не коммитить
 volumes:
   mikrollm-data:
 ```
@@ -89,7 +90,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now mikrollm
 ```
 
-Админка: `http://<сервер>:4000/admin`. Снаружи лучше закрыть `:4000` файрволом и пускать только LAN или reverse-proxy.
+Админка: `http://<сервер>:4000/admin`. MCP: `POST /mcp` — [mcp.md](mcp.md). Снаружи лучше закрыть `:4000` файрволом и пускать только LAN или reverse-proxy.
 
 ## Проверка
 

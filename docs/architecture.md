@@ -9,12 +9,14 @@ internal/domain       сущности (Backend, Model, APIKey, Job…)
 internal/ports        интерфейсы Store, Health, Auth, Host, Jobs, ChatGateway
 internal/store        SQLite (modernc.org/sqlite, без CGO)
 internal/health       опрос Ollama / Ollama Cloud / OpenRouter / vLLM / LM Studio
-internal/auth         bcrypt, cookie, ключи SHA-256
+internal/auth         bcrypt, cookie+CSRF, ключи SHA-256
 internal/host         pull / delete / load / unload по типу бэкенда
 internal/ollama       Ollama HTTP (pull NDJSON, generate keep_alive)
 internal/jobs         фон pull/load + прогресс
 internal/proxy        OpenAI/Ollama API, LB
+internal/queue        дисковая очередь запросов (SQLite WAL), слоты шагов, sticky HTTP
 internal/admin        HTML-админка
+internal/mcp          MCP Streamable HTTP (`/mcp`), JSON-RPC, без SDK
 internal/web          шаблоны и static (embed)
 ```
 
@@ -29,15 +31,18 @@ DI по-Go: конструкторы, без Wire/Fx.
 
 ```go
 ui := admin.New(admin.Deps{
-    Store: st, Health: checker, Auth: keys, Host: host, Jobs: tracker, Chat: px,
+    Store: st, Health: checker, Auth: keys, Host: host, Jobs: tracker, Chat: px, Queues: queues,
 })
+mcp.New(mcp.Deps{Store: st, Health: checker, Auth: keys, Host: host, Jobs: tracker, Queues: queues}).Mount(mux)
 ```
+
+MCP-токен — SHA-256 в `admin_meta` (`mcp_token_hash` / prefix). Сравнение constant-time; plaintext не хранится.
 
 ## Данные
 
 Файл `<data>/mikrollm.db`, WAL. `MaxOpenConns=1` (ограничение modernc/sqlite). Список моделей **не** держит курсор во время второго запроса — иначе логин и API клинят.
 
-Том `/data` на RouterOS переживает `container remove`.
+Том `/data` на RouterOS переживает `container remove`. Очереди — таблицы `queues` / `queue_steps` / `queue_aliases` / `queue_jobs`; тела ждущих запросов на диске, `ResponseWriter` живого HTTP — в памяти.
 
 ## Фоновые задачи
 

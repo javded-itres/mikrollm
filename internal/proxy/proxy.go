@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"github.com/javded-itres/mikrollm/internal/auth"
 	"github.com/javded-itres/mikrollm/internal/domain"
 	"github.com/javded-itres/mikrollm/internal/ports"
+	"github.com/javded-itres/mikrollm/internal/queue"
 )
 
 type Proxy struct {
@@ -21,13 +23,15 @@ type Proxy struct {
 	health ports.Health
 	keys   ports.Auth
 	client ports.HTTPDoer
+	queues *queue.Engine
 	rr     atomic.Uint64
 }
 
 func New(st ports.Store, h ports.Health, keys ports.Auth, client ports.HTTPDoer) *Proxy {
 	if client == nil {
 		client = &http.Client{
-			Timeout: 0,
+			Timeout:       0,
+			CheckRedirect: domain.NoRedirect,
 			Transport: &http.Transport{
 				ResponseHeaderTimeout: 10 * time.Minute,
 				IdleConnTimeout:       90 * time.Second,
@@ -37,6 +41,8 @@ func New(st ports.Store, h ports.Health, keys ports.Auth, client ports.HTTPDoer)
 	}
 	return &Proxy{st: st, health: h, keys: keys, client: client}
 }
+
+func (p *Proxy) SetQueue(e *queue.Engine) { p.queues = e }
 
 func (p *Proxy) Health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -123,6 +129,18 @@ func (p *Proxy) ListModels(w http.ResponseWriter, r *http.Request) {
 			it.OutputCostPerToken = meta.CompletionUSD / 1_000_000
 		}
 		out.Data = append(out.Data, it)
+	}
+	qs, _ := p.st.ListQueues()
+	for _, q := range qs {
+		if !q.Enabled {
+			continue
+		}
+		for _, a := range q.AllAliases() {
+			if a == "" || !auth.ModelAllowed(k, a) {
+				continue
+			}
+			out.Data = append(out.Data, item{ID: a, Object: "model", OwnedBy: "queue", Provider: "Очередь"})
+		}
 	}
 	if len(out.Data) == 0 {
 		for name := range p.unionTags() {
@@ -284,6 +302,17 @@ func (p *Proxy) unionTags() map[string]struct{} {
 			out[m.Alias] = struct{}{}
 		}
 	}
+	qs, _ := p.st.ListQueues()
+	for _, q := range qs {
+		if !q.Enabled {
+			continue
+		}
+		for _, a := range q.AllAliases() {
+			if a != "" {
+				out[a] = struct{}{}
+			}
+		}
+	}
 	return out
 }
 
@@ -313,17 +342,47 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, path string, nee
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"message": "model is required"}})
 		return
 	}
+	if k.ID != 0 {
+		p.st.TouchKey(k.ID)
+	}
+
+	if p.queues != nil {
+		if q, ok := p.queues.Lookup(mb.Model); ok {
+			if needKey && !queueAllowed(k, q, mb.Model) {
+				writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]any{"message": "model not allowed for this key"}})
+				return
+			}
+			p.queues.Handle(r.Context(), w, k, path, body, q.Alias)
+			return
+		}
+	}
+
 	if needKey && !auth.ModelAllowed(k, mb.Model) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]any{"message": "model not allowed for this key"}})
 		return
 	}
 
-	if k.ID != 0 {
-		p.st.TouchKey(k.ID)
+	_, _, status, err := p.Forward(r.Context(), w, k, path, body, mb.Model)
+	if err != nil && status == 0 {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"message": err.Error()}})
 	}
+}
 
-	model := mb.Model
-	requested := mb.Model
+func (p *Proxy) TryRoute(model string) (backend, provider, upstream string, err error) {
+	b, up, err := p.pick(model)
+	if err != nil {
+		return "", "", "", err
+	}
+	meta := p.catalogMeta(up, model)
+	provider = meta.Provider
+	if provider == "" {
+		provider = b.Label()
+	}
+	return b.Name, provider, up, nil
+}
+
+func (p *Proxy) Forward(ctx context.Context, w http.ResponseWriter, k domain.APIKey, path string, body []byte, model string) (backend, provider string, status int, err error) {
+	requested := model
 	tried := map[string]bool{}
 	var lastStatus int
 	var lastMsg string
@@ -332,7 +391,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, path string, nee
 			break
 		}
 		tried[model] = true
-		if needKey && hop > 0 && !auth.ModelAllowed(k, model) {
+		if hop > 0 && !auth.ModelAllowed(k, model) {
 			break
 		}
 		b, upstream, err := p.pick(model)
@@ -343,18 +402,18 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, path string, nee
 				continue
 			}
 			writeJSON(w, lastStatus, map[string]any{"error": map[string]any{"message": lastMsg}})
-			return
+			return "", "", lastStatus, err
 		}
 
 		start := time.Now()
 		p.health.Inc(b.ID)
 		upPath := rewriteUpstreamPath(b, path)
-		payload := rewriteModel(body, requested, upstream)
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, strings.TrimRight(b.BaseURL, "/")+upPath, bytes.NewReader(payload))
+		payload := rewriteModel(body, upstream)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(b.BaseURL, "/")+upPath, bytes.NewReader(payload))
 		if err != nil {
 			p.health.Dec(b.ID)
 			http.Error(w, err.Error(), 500)
-			return
+			return b.Name, p.providerOf(b, model, upstream), 500, err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		domain.ApplyUpstreamHeaders(req.Header, b)
@@ -370,7 +429,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, path string, nee
 				continue
 			}
 			writeJSON(w, lastStatus, map[string]any{"error": map[string]any{"message": lastMsg}})
-			return
+			return b.Name, p.providerOf(b, model, upstream), lastStatus, err
 		}
 
 		if resp.StatusCode >= 400 {
@@ -385,30 +444,16 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, path string, nee
 					continue
 				}
 			}
-			for hk, hv := range resp.Header {
-				if strings.EqualFold(hk, "Connection") || strings.EqualFold(hk, "Transfer-Encoding") {
-					continue
-				}
-				for _, v := range hv {
-					w.Header().Add(hk, v)
-				}
-			}
+			copySafeHeaders(w.Header(), resp.Header)
 			w.WriteHeader(resp.StatusCode)
 			_, _ = w.Write(errBody)
-			return
+			return b.Name, p.providerOf(b, model, upstream), resp.StatusCode, nil
 		}
 
 		if hop > 0 {
 			w.Header().Set("X-MikroLLM-Fallback", requested+" -> "+model)
 		}
-		for hk, hv := range resp.Header {
-			if strings.EqualFold(hk, "Connection") || strings.EqualFold(hk, "Transfer-Encoding") {
-				continue
-			}
-			for _, v := range hv {
-				w.Header().Add(hk, v)
-			}
-		}
+		copySafeHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		flusher, _ := w.(http.Flusher)
 		buf := make([]byte, 32*1024)
@@ -429,7 +474,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, path string, nee
 		resp.Body.Close()
 		p.health.Dec(b.ID)
 		p.st.Log(k.Prefix, model, b.Name, resp.StatusCode, time.Since(start), nout)
-		return
+		return b.Name, p.providerOf(b, model, upstream), resp.StatusCode, nil
 	}
 	if lastStatus == 0 {
 		lastStatus = http.StatusBadGateway
@@ -438,6 +483,15 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, path string, nee
 		lastMsg = "no healthy backend for model " + requested
 	}
 	writeJSON(w, lastStatus, map[string]any{"error": map[string]any{"message": lastMsg}})
+	return "", "", lastStatus, errors.New(lastMsg)
+}
+
+func (p *Proxy) providerOf(b domain.Backend, model, upstream string) string {
+	meta := p.catalogMeta(upstream, model)
+	if meta.Provider != "" {
+		return meta.Provider
+	}
+	return b.Label()
 }
 
 func (p *Proxy) fallbackOf(alias string) string {
@@ -492,20 +546,35 @@ func rewriteUpstreamPath(b domain.Backend, path string) string {
 	}
 }
 
-func rewriteModel(body []byte, alias, upstream string) []byte {
-	if upstream == "" || upstream == alias {
+func rewriteModel(body []byte, sendAs string) []byte {
+	if sendAs == "" {
 		return body
 	}
 	var raw map[string]any
 	if json.Unmarshal(body, &raw) != nil {
 		return body
 	}
-	raw["model"] = upstream
+	if cur, _ := raw["model"].(string); cur == sendAs {
+		return body
+	}
+	raw["model"] = sendAs
 	out, err := json.Marshal(raw)
 	if err != nil {
 		return body
 	}
 	return out
+}
+
+func queueAllowed(k domain.APIKey, q domain.Queue, requested string) bool {
+	if auth.ModelAllowed(k, requested) || auth.ModelAllowed(k, q.Alias) || auth.ModelAllowed(k, q.Name) {
+		return true
+	}
+	for _, a := range q.AllAliases() {
+		if auth.ModelAllowed(k, a) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Proxy) pick(alias string) (domain.Backend, string, error) {
@@ -569,6 +638,34 @@ func (p *Proxy) choose(list []domain.Backend, policy string) domain.Backend {
 			}
 		}
 		return best
+	}
+}
+
+func copySafeHeaders(dst, src http.Header) {
+	for hk, hv := range src {
+		if dropResponseHeader(hk) {
+			continue
+		}
+		for _, v := range hv {
+			dst.Add(hk, v)
+		}
+	}
+}
+
+func dropResponseHeader(name string) bool {
+	switch http.CanonicalHeaderKey(name) {
+	case "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization",
+		"Te", "Trailer", "Transfer-Encoding", "Upgrade",
+		"Set-Cookie", "Set-Cookie2", "Cookie", "Authorization", "Www-Authenticate",
+		"Location", "Refresh", "Clear-Site-Data",
+		"Access-Control-Allow-Origin", "Access-Control-Allow-Credentials",
+		"Access-Control-Allow-Headers", "Access-Control-Allow-Methods",
+		"Access-Control-Expose-Headers", "Access-Control-Max-Age",
+		"Content-Security-Policy", "Content-Security-Policy-Report-Only",
+		"X-Frame-Options", "X-Content-Type-Options":
+		return true
+	default:
+		return false
 	}
 }
 

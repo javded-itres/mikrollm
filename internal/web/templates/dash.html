@@ -23,7 +23,42 @@
     <div class="stat-val">{{.Total}}</div>
     <div class="stat-k">бэкендов</div>
   </div>
+  <div class="stat">
+    <div class="stat-val">{{if .QueueLive}}{{.QueueLive}}{{else}}0{{end}}</div>
+    <div class="stat-k">в очередях</div>
+  </div>
 </div>
+
+<section class="q-wrap card" id="q-board" data-live="1">
+  <div class="q-head">
+    <h2>Очереди запросов</h2>
+    <a class="btn-sm" href="/admin/queues">настроить</a>
+  </div>
+  <p class="muted small">Живая лента: кто пришёл и на какой шаг ушёл. Ответ всегда возвращается в то же HTTP-соединение.</p>
+  <div class="q-list" id="q-list">
+    {{if .Queues}}
+    {{range .Queues}}
+    <article class="q-card" data-id="{{.ID}}">
+      <div class="q-title"><span class="host-name">{{.Name}}</span> <code>{{.Alias}}</code>
+        <span class="pill">ждет {{.Waiting}}</span> <span class="pill ram">идёт {{.Running}}</span>
+      </div>
+      <div class="q-lanes">
+        {{range .Steps}}
+        <div class="q-lane {{if ge .Busy .Cap}}is-full{{end}}">
+          <div class="q-lane-h">{{.Alias}}</div>
+          <div class="q-lane-p">{{if .Provider}}{{.Provider}}{{else}}—{{end}}</div>
+          <div class="q-bar"><span style="width:{{.Percent}}%"></span></div>
+          <div class="q-lane-n">{{.Busy}}/{{.Cap}}</div>
+        </div>
+        {{end}}
+      </div>
+    </article>
+    {{end}}
+    {{else}}
+    <p class="muted" id="q-empty">Очередей нет. Создайте на вкладке «Очереди»: локальные → бесплатное облако → платное.</p>
+    {{end}}
+  </div>
+</section>
 
 {{if not .Backends}}
 <div class="card empty">
@@ -148,8 +183,30 @@
 <details class="card">
   <summary>Пароль админки</summary>
   <form method="post" action="/admin/password" class="row" style="margin-top:.8rem">
-    <input type="password" name="password" placeholder="новый пароль" minlength="6" required>
+    <input type="password" name="password" placeholder="новый пароль (от 8 символов)" minlength="8" required autocomplete="new-password">
     <button type="submit">Сменить</button>
+  </form>
+</details>
+
+{{if .NewMCPToken}}
+<div class="flash secret-card">
+  <div>
+    <div class="job-title">MCP-токен</div>
+    <p class="muted" style="margin:.15rem 0 0">Скопируйте сейчас — повторно не покажем. В агенте: <code>Authorization: Bearer …</code> на <code>/mcp</code>.</p>
+  </div>
+  <div class="secret-row">
+    <code class="secret" id="new-mcp">{{.NewMCPToken}}</code>
+    <button type="button" class="ghost" data-copy="#new-mcp">Копировать</button>
+  </div>
+</div>
+{{end}}
+
+<details class="card">
+  <summary>MCP для агента</summary>
+  <p class="muted small" style="margin-top:.7rem">Эндпоинт <code>/mcp</code> (JSON-RPC, Streamable HTTP). Токен — Bearer, как ключ API, но с правами админки: модели, очереди, провайдеры, ключи, логи.</p>
+  <p class="muted small">Prefix: <code>{{if .MCPPrefix}}{{.MCPPrefix}}…{{else}}ещё не выпускали{{end}}</code></p>
+  <form method="post" action="/admin/mcp/token" style="margin-top:.5rem" onsubmit="return confirm('Старый MCP-токен перестанет работать. Продолжить?')">
+    <button type="submit">{{if .MCPPrefix}}Сменить токен{{else}}Выпустить токен{{end}}</button>
   </form>
 </details>
 {{end}}
