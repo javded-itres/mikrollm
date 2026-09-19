@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/javded-itres/mikrollm/internal/domain"
@@ -155,6 +156,74 @@ func TestProbeOpenRouterForbidden(t *testing.T) {
 	}
 	if st.Error == "" || st.Error == "403 Forbidden" {
 		t.Fatalf("want parsed 403, got %q", st.Error)
+	}
+}
+
+func TestDecodeImageAndVideoPrices(t *testing.T) {
+	img := decodeOpenAICatalog(strings.NewReader(`{"data":[
+		{"id":"google/gemini-flash-image","architecture":{"output_modalities":["image"]},
+		 "pricing":{"prompt":"0.00000025","completion":"0.0000015","image_output":"0.00003"}},
+		{"id":"recraft/recraft-v4","architecture":{"output_modalities":["image"]},
+		 "pricing":{"prompt":"0","completion":"0","image_token":"0.04"}}
+	]}`))
+	if img.ImageTok["google/gemini-flash-image"] < 20 {
+		t.Fatalf("gemini img tok %+v", img.ImageTok)
+	}
+	if img.ImageUSD["recraft/recraft-v4"] != 0.04 {
+		t.Fatalf("recraft per image %+v", img.ImageUSD)
+	}
+	vid := decodeOpenAICatalog(strings.NewReader(`{"data":[
+		{"id":"minimax/hailuo-3","pricing_skus":{"duration_seconds":"0.08","duration_seconds_480p":"0.05"}},
+		{"id":"bfl/flux-video","pricing_skus":{"cents_per_second_output":"3"}}
+	]}`))
+	if vid.VideoSec["minimax/hailuo-3"] != 0.08 {
+		t.Fatalf("hailuo %+v", vid.VideoSec)
+	}
+	if vid.VideoSec["bfl/flux-video"] != 0.03 {
+		t.Fatalf("cents %+v", vid.VideoSec)
+	}
+}
+
+func TestMergeDecodedAddsVideo(t *testing.T) {
+	a := decodeOpenAICatalog(strings.NewReader(`{"data":[{"id":"openai/gpt-4o-mini"}]}`))
+	b := decodeOpenAICatalog(strings.NewReader(`{"data":[{"id":"google/veo-3.1","architecture":{"output_modalities":["video"]}}]}`))
+	m := mergeDecoded(a, b)
+	if len(m.Names) != 2 {
+		t.Fatalf("names %+v", m.Names)
+	}
+	if !domain.HasMedia(m.Media["google/veo-3.1"], domain.MediaVideo) {
+		t.Fatalf("media %+v", m.Media)
+	}
+}
+
+func TestDecodeOpenRouterImageModality(t *testing.T) {
+	raw := `{"data":[{"id":"google/gemini-2.5-flash-image","architecture":{"output_modalities":["text","image"]}}]}`
+	d := decodeOpenAICatalog(strings.NewReader(raw))
+	if !domain.HasMedia(d.Media["google/gemini-2.5-flash-image"], domain.MediaImage) {
+		t.Fatalf("%+v", d.Media)
+	}
+}
+
+func TestProbeDisabledSkipsNetwork(t *testing.T) {
+	hits := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(up.Close)
+	b := domain.Backend{ID: 9, Name: "off", BaseURL: up.URL, Kind: "ollama", Enabled: false}
+	c := New(staticBackends{b}, up.Client())
+	c.CheckOnce()
+	st := c.Get(9)
+	if st.Healthy || st.Error != "disabled" {
+		t.Fatalf("%+v", st)
+	}
+	if hits != 0 {
+		t.Fatalf("probed disabled backend %d times", hits)
+	}
+	cat := c.Catalog([]domain.Backend{b, {ID: 9, Name: "off", Enabled: false}})
+	if len(cat) != 0 {
+		t.Fatalf("catalog %+v", cat)
 	}
 }
 

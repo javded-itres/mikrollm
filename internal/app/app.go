@@ -88,6 +88,10 @@ func New(cfg Config) (*App, error) {
 	mux.HandleFunc("GET /health", px.Health)
 	mux.HandleFunc("GET /ready", px.Ready)
 	mux.HandleFunc("POST /v1/chat/completions", px.ChatCompletions)
+	mux.HandleFunc("POST /v1/images/generations", px.ImagesGenerations)
+	mux.HandleFunc("POST /v1/videos", px.VideosCreate)
+	mux.HandleFunc("GET /v1/videos/{id}", px.VideosGet)
+	mux.HandleFunc("GET /v1/videos/{id}/content", px.VideosContent)
 	mux.HandleFunc("GET /v1/models", px.ListModels)
 	mux.HandleFunc("GET /v1/model/info", px.ModelInfo)
 	mux.HandleFunc("GET /model/info", px.ModelInfo)
@@ -107,7 +111,7 @@ func limitBody(next http.Handler) http.Handler {
 		if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
 			n := int64(32 << 20)
 			p := r.URL.Path
-			if (strings.HasPrefix(p, "/admin") && p != "/admin/chat") || p == "/mcp" || strings.HasPrefix(p, "/mcp/") {
+			if (strings.HasPrefix(p, "/admin") && p != "/admin/chat" && p != "/admin/images" && p != "/admin/videos") || p == "/mcp" || strings.HasPrefix(p, "/mcp/") {
 				n = 1 << 20
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, n)
@@ -125,7 +129,7 @@ func secureHeaders(next http.Handler) http.Handler {
 		h.Set("X-Robots-Tag", "noindex, nofollow")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		if strings.HasPrefix(r.URL.Path, "/admin") {
-			h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+			h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 			h.Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)

@@ -45,6 +45,10 @@ type catalogSnap struct {
 	prompt     map[string]float64
 	completion map[string]float64
 	priced     map[string]bool
+	media      map[string][]string
+	imageUSD   map[string]float64
+	imageTok   map[string]float64
+	videoSec   map[string]float64
 }
 
 type decodedCatalog struct {
@@ -56,9 +60,14 @@ type decodedCatalog struct {
 	Prompt     map[string]float64
 	Completion map[string]float64
 	Priced     map[string]bool
+	Media      map[string][]string
+	ImageUSD   map[string]float64
+	ImageTok   map[string]float64
+	VideoSec   map[string]float64
 }
 
 const openRouterCatalogTTL = 5 * time.Minute
+const openRouterCatalogMax = 16 << 20
 
 func New(backends ports.BackendQuery, doer ports.HTTPDoer) *Checker {
 	if doer == nil {
@@ -95,6 +104,30 @@ func (c *Checker) CheckOnce() {
 		c.stat[b.ID] = st
 		c.mu.Unlock()
 	}
+}
+
+func (c *Checker) RefreshAll() {
+	c.orMu.Lock()
+	c.orCache = map[int64]catalogSnap{}
+	c.orMu.Unlock()
+	c.CheckOnce()
+}
+
+func (c *Checker) RefreshBackend(id int64) {
+	if id <= 0 {
+		return
+	}
+	c.orMu.Lock()
+	delete(c.orCache, id)
+	c.orMu.Unlock()
+	b, err := c.backends.GetBackend(id)
+	if err != nil {
+		return
+	}
+	st := c.probe(b)
+	c.mu.Lock()
+	c.stat[b.ID] = st
+	c.mu.Unlock()
 }
 
 func (c *Checker) probe(b domain.Backend) Status {
@@ -232,6 +265,8 @@ func applyDecoded(st *Status, d decodedCatalog) {
 	st.Models, st.Sizes, st.Contexts = d.Names, d.Sizes, d.Contexts
 	st.Providers, st.Titles = d.Providers, d.Titles
 	st.Prompt, st.Completion, st.Priced = d.Prompt, d.Completion, d.Priced
+	st.Media = d.Media
+	st.ImageUSD, st.ImageTok, st.VideoSec = d.ImageUSD, d.ImageTok, d.VideoSec
 }
 
 func (c *Checker) applyDecoded(st *Status, d decodedCatalog) { applyDecoded(st, d) }
@@ -254,7 +289,8 @@ func (c *Checker) openRouterCatalog(b domain.Backend) decodedCatalog {
 	c.orMu.Lock()
 	c.orCache[b.ID] = catalogSnap{
 		at: time.Now(), names: d.Names, sizes: d.Sizes, ctx: d.Contexts,
-		providers: d.Providers, titles: d.Titles, prompt: d.Prompt, completion: d.Completion, priced: d.Priced,
+		providers: d.Providers, titles: d.Titles, prompt: d.Prompt, completion: d.Completion, priced: d.Priced, media: d.Media,
+		imageUSD: d.ImageUSD, imageTok: d.ImageTok, videoSec: d.VideoSec,
 	}
 	c.orMu.Unlock()
 	return d
@@ -263,12 +299,33 @@ func (c *Checker) openRouterCatalog(b domain.Backend) decodedCatalog {
 func (s catalogSnap) decoded() decodedCatalog {
 	return decodedCatalog{
 		Names: s.names, Sizes: s.sizes, Contexts: s.ctx, Providers: s.providers,
-		Titles: s.titles, Prompt: s.prompt, Completion: s.completion, Priced: s.priced,
+		Titles: s.titles, Prompt: s.prompt, Completion: s.completion, Priced: s.priced, Media: s.media,
+		ImageUSD: s.imageUSD, ImageTok: s.imageTok, VideoSec: s.videoSec,
 	}
 }
 
 func (c *Checker) fetchOpenRouterModels(b domain.Backend) (decodedCatalog, error) {
-	resp, err := c.doGET(b, b.ModelsPath())
+	d, err := c.fetchOpenRouterPath(b, b.ModelsPath())
+	if err != nil {
+		return decodedCatalog{}, err
+	}
+	if v, e := c.fetchOpenRouterPath(b, "/models?output_modalities=image"); e == nil {
+		d = mergeDecoded(d, v)
+	}
+	if v, e := c.fetchOpenRouterPath(b, "/models?output_modalities=video"); e == nil {
+		d = mergeDecoded(d, v)
+	}
+	if v, e := c.fetchOpenRouterPath(b, "/videos/models"); e == nil {
+		for _, name := range v.Names {
+			v.Media[name] = domain.MergeMedia(v.Media[name], []string{domain.MediaVideo})
+		}
+		d = mergeDecoded(d, v)
+	}
+	return d, nil
+}
+
+func (c *Checker) fetchOpenRouterPath(b domain.Backend, path string) (decodedCatalog, error) {
+	resp, err := c.doGET(b, path)
 	if err != nil {
 		return decodedCatalog{}, err
 	}
@@ -276,7 +333,103 @@ func (c *Checker) fetchOpenRouterModels(b domain.Backend) (decodedCatalog, error
 	if resp.StatusCode >= 400 {
 		return decodedCatalog{}, fmt.Errorf("%s", openRouterStatusError(resp.StatusCode, io.LimitReader(resp.Body, 4096)))
 	}
-	return decodeOpenAICatalog(resp.Body), nil
+	return decodeOpenAICatalog(io.LimitReader(resp.Body, openRouterCatalogMax)), nil
+}
+
+func mergeDecoded(a, b decodedCatalog) decodedCatalog {
+	if a.Names == nil {
+		a = emptyDecoded()
+	}
+	if a.Media == nil {
+		a.Media = map[string][]string{}
+	}
+	seen := map[string]bool{}
+	for _, n := range a.Names {
+		seen[n] = true
+	}
+	for _, n := range b.Names {
+		if n == "" {
+			continue
+		}
+		if !seen[n] {
+			a.Names = append(a.Names, n)
+			seen[n] = true
+		}
+		if b.Sizes != nil && b.Sizes[n] > a.Sizes[n] {
+			if a.Sizes == nil {
+				a.Sizes = map[string]int64{}
+			}
+			a.Sizes[n] = b.Sizes[n]
+		}
+		if b.Contexts != nil && b.Contexts[n] > a.Contexts[n] {
+			if a.Contexts == nil {
+				a.Contexts = map[string]int{}
+			}
+			a.Contexts[n] = b.Contexts[n]
+		}
+		if b.Providers != nil && b.Providers[n] != "" {
+			if a.Providers == nil {
+				a.Providers = map[string]string{}
+			}
+			if a.Providers[n] == "" {
+				a.Providers[n] = b.Providers[n]
+			}
+		}
+		if b.Titles != nil && b.Titles[n] != "" {
+			if a.Titles == nil {
+				a.Titles = map[string]string{}
+			}
+			if a.Titles[n] == "" {
+				a.Titles[n] = b.Titles[n]
+			}
+		}
+		if b.Priced != nil && b.Priced[n] {
+			if a.Priced == nil {
+				a.Priced = map[string]bool{}
+				a.Prompt = map[string]float64{}
+				a.Completion = map[string]float64{}
+			}
+			a.Priced[n] = true
+			a.Prompt[n] = b.Prompt[n]
+			a.Completion[n] = b.Completion[n]
+		}
+		if b.ImageUSD != nil && b.ImageUSD[n] > 0 {
+			if a.ImageUSD == nil {
+				a.ImageUSD = map[string]float64{}
+			}
+			a.ImageUSD[n] = b.ImageUSD[n]
+			a.Priced[n] = true
+		}
+		if b.ImageTok != nil && b.ImageTok[n] > 0 {
+			if a.ImageTok == nil {
+				a.ImageTok = map[string]float64{}
+			}
+			a.ImageTok[n] = b.ImageTok[n]
+			a.Priced[n] = true
+		}
+		if b.VideoSec != nil && b.VideoSec[n] > 0 {
+			if a.VideoSec == nil {
+				a.VideoSec = map[string]float64{}
+			}
+			a.VideoSec[n] = b.VideoSec[n]
+			a.Priced[n] = true
+		}
+		if b.Media != nil && len(b.Media[n]) > 0 {
+			if a.Media == nil {
+				a.Media = map[string][]string{}
+			}
+			a.Media[n] = domain.MergeMedia(a.Media[n], b.Media[n])
+		}
+	}
+	return a
+}
+
+func emptyDecoded() decodedCatalog {
+	return decodedCatalog{
+		Sizes: map[string]int64{}, Contexts: map[string]int{}, Providers: map[string]string{},
+		Titles: map[string]string{}, Prompt: map[string]float64{}, Completion: map[string]float64{}, Priced: map[string]bool{},
+		Media: map[string][]string{}, ImageUSD: map[string]float64{}, ImageTok: map[string]float64{}, VideoSec: map[string]float64{},
+	}
 }
 
 func openRouterStatusError(status int, r io.Reader) string {
@@ -486,17 +639,16 @@ func decodeOpenAICatalog(r io.Reader) decodedCatalog {
 			Name          string `json:"name"`
 			ContextLength int    `json:"context_length"`
 			MaxModelLen   int    `json:"max_model_len"`
-			Pricing       *struct {
-				Prompt     any `json:"prompt"`
-				Completion any `json:"completion"`
-			} `json:"pricing"`
+			Architecture  *struct {
+				OutputModalities []string `json:"output_modalities"`
+			} `json:"architecture"`
+			OutputModalities []string       `json:"output_modalities"`
+			Pricing          *orPricing     `json:"pricing"`
+			PricingSKUs      map[string]any `json:"pricing_skus"`
 		} `json:"data"`
 	}
-	empty := decodedCatalog{
-		Sizes: map[string]int64{}, Contexts: map[string]int{}, Providers: map[string]string{},
-		Titles: map[string]string{}, Prompt: map[string]float64{}, Completion: map[string]float64{}, Priced: map[string]bool{},
-	}
-	if json.NewDecoder(io.LimitReader(r, 8<<20)).Decode(&payload) != nil {
+	empty := emptyDecoded()
+	if json.NewDecoder(r).Decode(&payload) != nil {
 		return empty
 	}
 	out := empty
@@ -517,13 +669,98 @@ func decodeOpenAICatalog(r io.Reader) decodedCatalog {
 			out.Titles[m.ID] = m.Name
 		}
 		out.Providers[m.ID] = domain.ProviderOf(m.ID, domain.KindOpenRouter)
-		if m.Pricing != nil {
-			out.Priced[m.ID] = true
-			out.Prompt[m.ID] = domain.PerMillion(anyFloat(m.Pricing.Prompt))
-			out.Completion[m.ID] = domain.PerMillion(anyFloat(m.Pricing.Completion))
+		applyOpenRouterPricing(&out, m.ID, m.Pricing, m.PricingSKUs)
+		mods := append([]string{}, m.OutputModalities...)
+		if m.Architecture != nil {
+			mods = append(mods, m.Architecture.OutputModalities...)
+		}
+		if media := domain.InferMedia(m.ID, mods); len(media) > 0 {
+			out.Media[m.ID] = media
 		}
 	}
 	return out
+}
+
+type orPricing struct {
+	Prompt      any `json:"prompt"`
+	Completion  any `json:"completion"`
+	Image       any `json:"image"`
+	ImageOutput any `json:"image_output"`
+	ImageToken  any `json:"image_token"`
+}
+
+func applyOpenRouterPricing(out *decodedCatalog, id string, p *orPricing, skus map[string]any) {
+	if p == nil && len(skus) == 0 {
+		return
+	}
+	if out.Priced == nil {
+		out.Priced = map[string]bool{}
+		out.Prompt = map[string]float64{}
+		out.Completion = map[string]float64{}
+	}
+	if p != nil {
+		out.Priced[id] = true
+		out.Prompt[id] = domain.PerMillion(anyFloat(p.Prompt))
+		out.Completion[id] = domain.PerMillion(anyFloat(p.Completion))
+		n := anyFloat(p.ImageOutput)
+		if t := anyFloat(p.ImageToken); t > n {
+			n = t
+		}
+		if t := anyFloat(p.Image); t > n {
+			n = t
+		}
+		if n >= 0.001 {
+			if out.ImageUSD == nil {
+				out.ImageUSD = map[string]float64{}
+			}
+			out.ImageUSD[id] = n
+		} else if n > 0 {
+			if out.ImageTok == nil {
+				out.ImageTok = map[string]float64{}
+			}
+			out.ImageTok[id] = domain.PerMillion(n)
+		}
+	}
+	if s := videoSecFromSKUs(skus); s > 0 {
+		if out.VideoSec == nil {
+			out.VideoSec = map[string]float64{}
+		}
+		out.VideoSec[id] = s
+		out.Priced[id] = true
+	}
+}
+
+func videoSecFromSKUs(skus map[string]any) float64 {
+	if len(skus) == 0 {
+		return 0
+	}
+	prefer := []string{"duration_seconds", "per-video-second", "duration_seconds_720p", "duration_seconds_768p", "duration_seconds_480p", "cents_per_second_output"}
+	for _, k := range prefer {
+		if v, ok := skus[k]; ok {
+			n := anyFloat(v)
+			if k == "cents_per_second_output" {
+				n /= 100
+			}
+			if n > 0 {
+				return n
+			}
+		}
+	}
+	var min float64
+	for k, v := range skus {
+		lk := strings.ToLower(k)
+		if !strings.Contains(lk, "second") && !strings.Contains(lk, "duration") {
+			continue
+		}
+		n := anyFloat(v)
+		if strings.Contains(lk, "cent") {
+			n /= 100
+		}
+		if n > 0 && (min == 0 || n < min) {
+			min = n
+		}
+	}
+	return min
 }
 
 func anyFloat(v any) float64 {
@@ -769,10 +1006,17 @@ func (c *Checker) Catalog(backends []domain.Backend) []CatalogEntry {
 		priced     bool
 		prompt     float64
 		completion float64
+		imageUSD   float64
+		imageTok   float64
+		videoSec   float64
+		media      []string
 	}
 	seen := map[string]*acc{}
 	var order []string
 	for _, b := range backends {
+		if !b.Enabled {
+			continue
+		}
 		st := c.Get(b.ID)
 		for _, name := range st.Models {
 			a := seen[name]
@@ -804,6 +1048,23 @@ func (c *Checker) Catalog(backends []domain.Backend) []CatalogEntry {
 				a.prompt = st.Prompt[name]
 				a.completion = st.Completion[name]
 			}
+			if st.ImageUSD[name] > 0 {
+				a.imageUSD = st.ImageUSD[name]
+				a.priced = true
+			}
+			if st.ImageTok[name] > 0 {
+				a.imageTok = st.ImageTok[name]
+				a.priced = true
+			}
+			if st.VideoSec[name] > 0 {
+				a.videoSec = st.VideoSec[name]
+				a.priced = true
+			}
+			if len(st.Media[name]) > 0 {
+				a.media = domain.MergeMedia(a.media, st.Media[name])
+			} else {
+				a.media = domain.MergeMedia(a.media, domain.InferMedia(name, nil))
+			}
 		}
 		for _, name := range st.Running {
 			a := seen[name]
@@ -822,6 +1083,7 @@ func (c *Checker) Catalog(backends []domain.Backend) []CatalogEntry {
 			BackendIDs: a.ids, BackendNames: a.names, BackendCSV: joinIDs(a.ids),
 			Size: a.size, LoadedOn: a.loaded, Context: a.ctx,
 			Priced: a.priced, PromptUSD: a.prompt, CompletionUSD: a.completion,
+			ImageUSD: a.imageUSD, ImageTokUSD: a.imageTok, VideoSecUSD: a.videoSec, Media: a.media,
 		})
 	}
 	return out

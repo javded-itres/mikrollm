@@ -2,6 +2,7 @@ package admin
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/javded-itres/mikrollm/internal/domain"
 )
@@ -21,8 +22,40 @@ func (u *UI) chatPost(w http.ResponseWriter, r *http.Request) {
 	u.chat.ServeChat(w, r)
 }
 
+func (u *UI) imagesPost(w http.ResponseWriter, r *http.Request) {
+	if u.chat == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "chat gateway unavailable")
+		return
+	}
+	u.chat.ServeImages(w, r)
+}
+
+func (u *UI) videosPost(w http.ResponseWriter, r *http.Request) {
+	if u.chat == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "chat gateway unavailable")
+		return
+	}
+	u.chat.ServeVideos(w, r)
+}
+
+func (u *UI) videoStatus(w http.ResponseWriter, r *http.Request) {
+	if u.chat == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "chat gateway unavailable")
+		return
+	}
+	u.chat.ServeVideoStatus(w, r)
+}
+
+func (u *UI) videoContent(w http.ResponseWriter, r *http.Request) {
+	if u.chat == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "chat gateway unavailable")
+		return
+	}
+	u.chat.ServeVideoContent(w, r)
+}
+
 type chatOpt struct {
-	Value, Label string
+	Value, Label, Media string
 }
 
 func (u *UI) chatModelOpts() (aliases, catalog []chatOpt) {
@@ -37,7 +70,7 @@ func (u *UI) chatModelOpts() (aliases, catalog []chatOpt) {
 		if e.Provider != "" {
 			s = e.Provider + " · " + id
 		}
-		if p := domain.PriceLabel(e.Priced, e.PromptUSD, e.CompletionUSD); p != "" {
+		if p := domain.FormatCatalogPrice(e.Priced, e.PromptUSD, e.CompletionUSD, e.ImageUSD, e.ImageTokUSD, e.VideoSecUSD); p != "" {
 			s += " · " + p
 		}
 		return s
@@ -51,7 +84,7 @@ func (u *UI) chatModelOpts() (aliases, catalog []chatOpt) {
 			if a == "" || seen[a] {
 				continue
 			}
-			aliases = append(aliases, chatOpt{Value: a, Label: "очередь · " + a})
+			aliases = append(aliases, chatOpt{Value: a, Label: "очередь · " + a, Media: ""})
 			seen[a] = true
 		}
 	}
@@ -64,14 +97,31 @@ func (u *UI) chatModelOpts() (aliases, catalog []chatOpt) {
 		if meta.Name == "" {
 			meta = byName[m.Alias]
 		}
-		aliases = append(aliases, chatOpt{Value: m.Alias, Label: label(m.Alias, meta)})
+		media := domain.MergeMedia(m.Media, meta.Media)
+		if len(media) == 0 {
+			media = domain.InferMedia(m.Alias, nil)
+			if m.UpstreamName != "" {
+				media = domain.MergeMedia(media, domain.InferMedia(m.UpstreamName, nil))
+			}
+		}
+		ml := domain.MediaLabel(media)
+		lb := label(m.Alias, meta)
+		if ml != "" {
+			lb += " · " + ml
+		}
+		aliases = append(aliases, chatOpt{Value: m.Alias, Label: lb, Media: strings.Join(media, ",")})
 		seen[m.Alias] = true
 	}
 	for _, e := range u.health.Catalog(bs) {
 		if e.Name == "" || seen[e.Name] {
 			continue
 		}
-		catalog = append(catalog, chatOpt{Value: e.Name, Label: label(e.Name, e)})
+		ml := domain.MediaLabel(e.Media)
+		lb := label(e.Name, e)
+		if ml != "" {
+			lb += " · " + ml
+		}
+		catalog = append(catalog, chatOpt{Value: e.Name, Label: lb, Media: strings.Join(e.Media, ",")})
 		seen[e.Name] = true
 	}
 	return aliases, catalog

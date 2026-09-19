@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -81,6 +82,28 @@ func TestSessionCSRFRoundtrip(t *testing.T) {
 	}
 	if s.ValidCSRF(req2, "deadbeefdeadbeefdeadbeefdeadbeef") {
 		t.Fatal("bad csrf")
+	}
+}
+
+func TestSessionCookieSecureOnTLS(t *testing.T) {
+	s := New(&stubStore{secret: "s3cret-bytes"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	req.TLS = &tls.ConnectionState{}
+	if err := s.IssueCookie(rec, req); err != nil {
+		t.Fatal(err)
+	}
+	c := rec.Result().Cookies()[0]
+	if !c.Secure {
+		t.Fatal("want Secure on TLS")
+	}
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	if err := s.IssueCookie(rec2, req2); err != nil {
+		t.Fatal(err)
+	}
+	if rec2.Result().Cookies()[0].Secure {
+		t.Fatal("plain HTTP cookie must not be Secure")
 	}
 }
 

@@ -1,97 +1,117 @@
-# Админка
+# Admin
 
-URL: `http://<хост>:4000/admin`  
-Вход — пароль (cookie `mikrollm_session`, 12 часов, HttpOnly, SameSite=Lax, путь `/admin`). После пяти неверных попыток с одного IP пауза 10 минут. Состояние меняется только POST с CSRF-токеном. Новый API-ключ показывается один раз, в URL не попадает.
+**English** · [Русский](ru/admin.md)
 
-Меню: **Статус · Очереди · Модели · Ключи · Чат · Лог**.
+URL: `http://<host>:4000/admin` (or `https://…`, [tls.md](tls.md)).  
+Login is a password (cookie `mikrollm_session`, 12 hours, HttpOnly, SameSite=Lax, path `/admin`; on HTTPS also `Secure`). After five failed attempts from one IP, a 10-minute pause. State changes only via POST with a CSRF token. A new API key is shown once and never put in the URL.
 
-## Статус
+Menu: **Status · Queues · Models · Security · Keys · Chat · Log · Billing**.
 
-Карточки серверов: онлайн/офлайн, тип (Ollama / vLLM / LM Studio), задержка, модели на диске, что сейчас в RAM.
+## Status
 
-- **Добавить сервер** — имя, **тип**, базовый URL без хвоста `/`, токен (для облака обязателен).
-  - Ollama локальный: `http://192.168.88.82:11434`
-  - Ollama Cloud: `https://ollama.com` + ключ с [ollama.com/settings/keys](https://ollama.com/settings/keys)
-  - OpenRouter: `https://openrouter.ai/api/v1` + ключ с [openrouter.ai/keys](https://openrouter.ai/settings/keys)
+Server cards: online/offline, kind (Ollama / vLLM / LM Studio), latency, on-disk models, what is in RAM now.
+
+- **Enable / Disable** — the card stays; health is not polled; requests and catalog skip this backend. No need to delete.
+- **Refresh models** on a card — force-download that provider’s catalog (no cache). OpenRouter: `/models` + video (`/models?output_modalities=video`, `/videos/models`).
+- On **Models**, **Refresh catalogs** does the same for every backend. Catalog list: 10 rows by default, options 20 / 50 / 100 / all.
+  - Local Ollama: `http://192.168.88.82:11434`
+  - Ollama Cloud: `https://ollama.com` + key from [ollama.com/settings/keys](https://ollama.com/settings/keys)
+  - OpenRouter: `https://openrouter.ai/api/v1` + key from [openrouter.ai/keys](https://openrouter.ai/settings/keys)
   - vLLM: `http://192.168.88.82:8000`
   - LM Studio: `http://192.168.88.82:1234`
-- **Обновить статусы** — внеочередной опрос health API выбранного типа.
-- Смена пароля админки — внизу страницы (минимум 8 символов). Старые сессии сразу недействительны.
-- **MCP для агента** — выпустить Bearer-токен для `POST /mcp`. Секрет один раз. Подробности: [mcp.md](mcp.md).
+- **Refresh status** — extra health poll for the chosen kind.
+- Change admin password at the bottom (min 8 characters). Old sessions die immediately.
+- **MCP for agents** — issue a Bearer token for `POST /mcp`. Secret shown once. Details: [mcp.md](mcp.md).
 
-Health-check сам повторяется каждые 10 секунд.
+Health itself repeats every 10 seconds.
 
-На дашборде блок **Очереди запросов**: шаги (занято/лимит), лента «ждет / идёт / готово» с провайдером, куда ушёл запрос. Обновляется раз в секунду.
+Dashboard **Request queues**: steps (busy/cap), strip “waiting / running / done” with the provider the job went to. Updates once a second.
 
-## Очереди
+## Queues
 
-`/admin/queues`. Клиент ставит в `model` одно из:
+`/admin/queues`. The client puts one of these in `model`:
 
-| Что шлёт клиент | Пример (очередь имя `itres`, alias `coder`) |
+| Client sends | Example (queue name `itres`, alias `coder`) |
 |---|---|
-| основной alias | `coder` |
-| имя очереди | `itres` |
-| `имя-alias` / `имя/alias` | `itres-coder`, `itres/coder` |
-| дополнительный alias | любой, который повесили на очередь |
+| primary alias | `coder` |
+| queue name | `itres` |
+| `name-alias` / `name/alias` | `itres-coder`, `itres/coder` |
+| extra alias | any alias attached to the queue |
 
-1. Создайте очередь (имя + alias, порог переполнения, запасной alias).
-2. Добавьте шаги **в нужном порядке**: alias модели + сколько запросов сразу (например 2 на локальную).
-3. Можно повесить дополнительные alias на ту же очередь.
+1. Create a queue (name + alias, overflow threshold, overflow alias).
+2. Add steps **in order**: model alias + how many concurrent (e.g. 2 on local).
+3. Extra aliases can hang on the same queue.
 
-Разбор: свободный слот на шаге 1, иначе шаг 2… Если все слоты заняты — запрос ждёт в SQLite, HTTP-соединение держится, ответ всегда в него. Если ждущих ≥ порога — новый запрос сразу на запасной alias. Потолок диска: `MIKROLLM_QUEUE_MAX_BYTES` / `MIKROLLM_QUEUE_MAX_JOBS` (старые ждущие сбрасываются с 503). В апстрим уходит **имя модели на сервере**, не клиентский alias очереди.
+Routing: a free slot on step 1, else step 2… If every slot is busy the request waits in SQLite, the HTTP connection is held, and the reply always uses it. If waiters ≥ threshold, a new request goes straight to the overflow alias. Disk caps: `MIKROLLM_QUEUE_MAX_BYTES` / `MIKROLLM_QUEUE_MAX_JOBS` (old waiters dropped with 503). Upstream gets the **server model name**, not the client queue alias.
 
-Как поднять модель на самом GPU-сервере (особенно vLLM, где нет load через API) — [providers.md](providers.md).
+Loading a model on the GPU host (especially vLLM, which has no load API): [providers.md](providers.md).
 
-## Модели
+## Security
 
-Один список с дисков всех живых бэкендов.
+`/admin/security`. Named filters (LiteLLM-style guardrails): system prompt, stop words, PII, prompt injection, categories, regex. Attach to an **alias**, a **queue**, and/or an **upstream model name**. The same filter on several layers still runs once. Details: [security.md](security.md).
 
-Фильтры каталога: имя, **провайдер** (`openai/…` → OpenAI, локальные → Ollama / vLLM / …), **цена** входа за 1M токенов. OpenRouter — из `GET /models` (`pricing.prompt` / `pricing.completion`). Ollama Cloud — с [ollama.com/pricing](https://ollama.com/pricing) (и страницы `/library/<модель>`, если модели нет в таблице). В строке — провайдер и «вход / выход».
+## Models
 
-1. Отметьте модели → **В шлюз** — появится alias с тем же именем и выбранной политикой LB.
-2. **RAM**: `82 · в RAM` загружает веса (Ollama `keep_alive: -1`, LM Studio `/api/v1/models/load`), `выгрузить` снимает. Большая модель может грузиться несколько минут. У vLLM кнопок нет: модель задана процессом `vllm serve`.
-3. **Диск**: `✕` удаляет файл только на Ollama. LM Studio — в его UI; vLLM — смена команды запуска.
-4. Блок **Скачать модель** — Ollama `pull` или LM Studio `download`. Полоса прогресса **не сбрасывается** при обновлении страницы: задача идёт на шлюзе и пишется в SQLite. После рестарта контейнера незавершённый pull подхватывается снова.
-5. **Свой alias** — другое имя для клиентов (например `fast` → `qwen3.8:27b-mlx`).
-6. **Контекст** — колонка в каталоге (с сервера: OpenRouter `context_length`, Ollama `/api/show`). У alias можно задать своё число (токены); `0` = взять с сервера. Клиентам: `GET /v1/models` и `GET /v1/model/info` (`max_input_tokens`).
-7. **Запасная модель** у alias: если апстрим вернул 402 / «кончились кредиты / подписка / квота», шлюз повторяет запрос на выбранный alias (ключ должен его разрешать). Цепочка до 4 шагов, без циклов.
+One list from the disks of all live backends.
 
-Политики балансировки:
+Catalog filters: name, **provider** (`openai/…` → OpenAI, local → Ollama / vLLM / …), **input price** per 1M tokens. OpenRouter from `GET /models` (`pricing.prompt` / `pricing.completion`). Ollama Cloud from [ollama.com/pricing](https://ollama.com/pricing) (and `/library/<model>` if missing from the table). Each row shows provider and “in / out”.
 
-| Политика | Поведение |
+1. Check models → **To gateway** — an alias with the same name and the chosen LB policy.
+2. **RAM**: `82 · in RAM` loads weights (Ollama `keep_alive: -1`, LM Studio `/api/v1/models/load`); unload takes them out. A large model can take minutes. vLLM has no buttons: the model is the `vllm serve` process.
+3. **Disk**: `✕` deletes the file on Ollama only. LM Studio — its UI; vLLM — change the serve command.
+4. **Download model** — Ollama `pull` or LM Studio `download`. The progress bar **survives** a page refresh: the job runs on the gateway and is stored in SQLite. After a container restart an unfinished pull resumes.
+5. **Custom alias** — another name for clients (e.g. `fast` → `qwen3.8:27b-mlx`).
+6. **Context** — catalog column (from the server: OpenRouter `context_length`, Ollama `/api/show`). An alias can override the token count; `0` = take from the server. Clients: `GET /v1/models` and `GET /v1/model/info` (`max_input_tokens`).
+7. **Fallback model** on an alias: if upstream returns 402 / “out of credits / subscription / quota”, the gateway retries the chosen alias (the key must allow it). Chain up to 4 hops, no cycles.
+8. **Prompt cache** (global above the alias table and the Cache column): `auto` injects Claude `cache_control` (first turn 1.25× write). `off` disables inject. Dashboard sums `cached_tokens` and a $ estimate. [providers.md](providers.md#prompt-cache).
+
+LB policies:
+
+| Policy | Behavior |
 |---|---|
-| `least_conn` | меньше активных запросов (по умолчанию) |
-| `round_robin` | по кругу |
-| `failover` | первый живой из списка |
+| `least_conn` | fewer active requests (default) |
+| `round_robin` | round-robin |
+| `failover` | first healthy in the list |
 
-Убрать alias из шлюза ≠ удалить файл на сервере.
+Removing an alias from the gateway ≠ deleting the file on the server.
 
-## Ключи
+## Keys
 
-Клиенты ходят с `Authorization: Bearer sk-…`.
+Clients send `Authorization: Bearer sk-…`.
 
-- Имя, RPM (`0` = без лимита), список **alias и моделей с серверов** (провайдер, контекст, цена) или «Все модели». Фильтры те же, что на вкладке моделей.
-- Секрет показывается **один раз** — сразу копируйте.
-- **Изменить** — тот же список моделей у уже выпущенного ключа (секрет не меняется).
-- В таблице: prefix, пилюли доступа, счётчик запросов, время последнего вызова, отзыв.
+- Name, RPM (`0` = no limit), list of **aliases and server models** (provider, context, price) or “All models”. Same filters as the models tab.
+- The secret is shown **once** — copy it immediately.
+- **Edit** — same model list on an already issued key (secret unchanged).
+- Table: prefix, access pills, request count, last used, revoke.
 
-Пустой allowlist и `*` означают все модели. Иначе сверяется alias, который клиент передал в `model`.
+Empty allowlist and `*` mean all models. Otherwise the alias the client put in `model` is checked.
 
-## Чат (playground)
+## Chat (playground)
 
-Как LiteLLM Playground: выбрать alias или имя модели на сервере, писать в формате чата.
+Like LiteLLM Playground: pick a **type** (chat / image / video) or an endpoint, then a model.
 
-- Запросы идут через тот же шлюз (`/v1/chat/completions`), API-ключ не нужен — только сессия админки.
-- Стрим токенов, Stop, новый чат, temperature, max_tokens.
-- Enter — отправить, Shift+Enter — новая строка.
-- У thinking-моделей блок рассуждения показывается отдельно.
+- Chat: `/v1/chat/completions`, stream, Stop, temperature, max_tokens.
+- Image: `/v1/images/generations` (OpenRouter via chat + `modalities`).
+- Video: `/v1/videos`, status is polled.
+- Image/video models are tagged in the catalog and selector. No API key — admin session only.
+- Left **history**: first request is the task, later messages are edits. The model gets the whole thread (for OpenRouter, the previous frame too), not only the last line.
+- Enter sends, Shift+Enter is a new line.
+- Thinking models show the reasoning block separately.
 
-Если модель не в RAM, первый ответ может занять минуту (Ollama/LM Studio поднимают веса). vLLM уже держит модель в процессе.
+If the model is not in RAM, the first reply can take a minute (Ollama/LM Studio load weights). vLLM already holds the model in the process.
 
-## Лог
+## Log
 
-Последние запросы API: ключ (prefix), модель, бэкенд, статус, задержка, байты. Хранится до 500 записей, ротация автоматически.
+Last API requests: key prefix, model, backend, status, latency, bytes. Up to 500 rows, rotated automatically.
 
-На странице: поиск по тексту, фильтры **2xx / 4xx / 5xx**, модель, бэкенд, ключ, полоса задержки. Выбор пишется в query URL — можно скопировать ссылку. Широкая таблица прокручивается, шапка фильтров закреплена.
+On the page: text search, **2xx / 4xx / 5xx**, model, backend, key, latency band. The selection is written to the query URL — you can copy the link. Wide table scrolls; filter header is sticky.
 
-Запросы из админского чата пишутся с prefix `admin` и не крутят счётчик ключей.
+Admin-chat requests are logged with prefix `admin` and do not bump the key counter.
+
+## Billing
+
+`/admin/billing`. Large `$` for the selected period — **Hour / Day / Week / Month / Year** (links, no extra buttons). Bars are spend per bucket; empty hours still appear.
+
+The number is the sum of cloud `usage.cost`. Local Ollama is $0. “Cache saved” is a prompt-cache estimate, not an invoice.
+
+The log keeps 500 rows; billing is hourly totals in `billing_hour` (not trimmed with the log). Existing log rows are backfilled on migrate.

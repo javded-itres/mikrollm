@@ -1,31 +1,35 @@
 # HTTP API
 
-База: `http://<хост>:4000`.
+**English** · [Русский](ru/api.md)
 
-Ключ: заголовок `Authorization: Bearer sk-…` или `X-Api-Key: sk-…`.
+Base: `http://<host>:4000` or `https://<host>:4000` if TLS is on ([tls.md](tls.md)).
 
-Без ключа (кроме health/ready и админки) — `401`. Модель не из allowlist ключа — `403`. Превышен RPM — `429`.
+Key: `Authorization: Bearer sk-…` or `X-Api-Key: sk-…`.
 
-## Эндпоинты
+Without a key (except health/ready and admin) — `401`. Model not on the key allowlist — `403`. RPM exceeded — `429`.
 
-| Метод | Путь | Авторизация | Назначение |
+## Endpoints
+
+| Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/health` | нет | процесс жив |
-| GET | `/ready` | нет | есть хотя бы один живой бэкенд |
-| GET | `/v1/models` | ключ | список alias; `context_length` / `max_input_tokens` |
-| GET | `/v1/model/info` | ключ | как LiteLLM: `model_info.max_input_tokens` |
-| GET | `/model/info` | ключ | то же, без префикса `/v1` |
-| POST | `/v1/chat/completions` | ключ | OpenAI Chat Completions, в т.ч. `stream: true` |
-| POST | `/api/chat` | ключ | Ollama `/api/chat` |
-| GET | `/api/tags` | ключ | имена моделей |
-| GET | `/admin` | cookie | HTML-админка |
-| POST | `/mcp` | MCP-токен | MCP JSON-RPC (модели, очереди, ключи, логи). [mcp.md](mcp.md) |
+| GET | `/health` | none | process is up |
+| GET | `/ready` | none | at least one healthy backend |
+| GET | `/v1/models` | key | alias list; `context_length` / `max_input_tokens` |
+| GET | `/v1/model/info` | key | LiteLLM-style `model_info.max_input_tokens` |
+| GET | `/model/info` | key | same, without `/v1` |
+| POST | `/v1/chat/completions` | key | OpenAI Chat Completions, including `stream: true`. Optional `X-Session-Id` (OpenRouter). Non-stream: `X-MikroLLM-Cache-Tokens` |
+| POST | `/v1/images/generations` | key | OpenAI Images API. OpenRouter: chat + `modalities: ["image","text"]`, response `{data:[{url\|b64_json}]}` |
+| POST | `/v1/videos` | key | OpenAI Videos API (Sora-style). `GET /v1/videos/{id}` and `/content` — status and file (`?model=` if the id is unknown to the gateway) |
+| POST | `/api/chat` | key | Ollama `/api/chat` |
+| GET | `/api/tags` | key | model names |
+| GET | `/admin` | cookie | HTML admin |
+| POST | `/mcp` | MCP token | MCP JSON-RPC (models, queues, keys, logs). [mcp.md](mcp.md) |
 
-`/` редиректит на `/admin`.
+`/` redirects to `/admin`.
 
 ## Chat Completions
 
-Тело как у OpenAI. Поле `model` — **alias шлюза** или имя модели на бэкенде, если alias нет, но health её видит.
+Body like OpenAI. `model` is a **gateway alias** or an upstream name if there is no alias but health has seen it.
 
 ```bash
 curl http://192.168.88.1:4000/v1/chat/completions \
@@ -33,24 +37,26 @@ curl http://192.168.88.1:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.8:27b-mlx",
-    "messages": [{"role": "user", "content": "привет"}],
+    "messages": [{"role": "user", "content": "hello"}],
     "stream": false,
     "temperature": 0.7,
     "max_tokens": 512
   }'
 ```
 
-Стрим — SSE (`data: {…}` / `data: [DONE]`), как у OpenAI. Шлюз проксирует байты апстрима, не буферизуя ответ целиком.
+Stream is SSE (`data: {…}` / `data: [DONE]`), like OpenAI. The gateway proxies upstream bytes and does not buffer the whole response.
 
-Шлюз подменяет `model` на `upstream_name` alias, если они различаются.
+The gateway rewrites `model` to the alias `upstream_name` when they differ.
 
-Если `model` — **очередь** (её alias, имя, `имя-alias`, `имя/alias` или extra alias), запрос идёт по шагам. Пока слоты заняты, соединение ждёт; ответ всегда в это же соединение. Переполнение (ждущих ≥ N) уводит на запасной alias; если запасного нет — `503`. Заголовок `X-MikroLLM-Queue` не обязателен — смотрите ленту на дашборде. Тело апстриму переписывается: в `"model"` подставляется имя модели выбранного шага, не клиентский alias.
+**Prompt cache (OpenRouter).** The client may send `X-Session-Id` and `session_id` / `cache_control` / `prompt_cache_key` — they reach upstream. With `prompt_cache=auto` the gateway injects top-level `cache_control` for Claude. Non-stream: `X-MikroLLM-Cache-Tokens` (and `X-MikroLLM-Cache-Write-Tokens` if write > 0). Stream: tokens only in the last SSE `usage` and in the log. Fallback to another model does not carry `cache_control`. Details: [providers.md](providers.md#prompt-cache).
 
-Если у alias задана **запасная модель** и апстрим ответил 402 или текстом про кредиты/квоту/подписку, запрос повторяется на запасной alias. В ответе будет заголовок `X-MikroLLM-Fallback: исходная -> запасная`.
+If `model` is a **queue** (its alias, name, `name-alias`, `name/alias`, or extra alias), the request walks the steps. While slots are busy the connection waits; the reply always uses that connection. Overflow (waiters ≥ N) goes to the overflow alias; if none — `503`. `X-MikroLLM-Queue` is optional — watch the dashboard strip. The upstream body is rewritten: `"model"` becomes the chosen step’s model name, not the client queue alias.
 
-`GET /v1/models` дополняет каждую модель полями `context_length`, `max_model_len`, `max_tokens`, `max_input_tokens` (если известен контекст), `provider`, `owned_by`, при наличии прайса OpenRouter — `input_cost_per_token` / `output_cost_per_token`.
+If an alias has a **fallback model** and upstream returned 402 or credit/quota/subscription text, the request is retried on the fallback alias. Response header: `X-MikroLLM-Fallback: original -> fallback`.
 
-`GET /v1/model/info` (и `/model/info`) — формат как у LiteLLM:
+`GET /v1/models` adds `context_length`, `max_model_len`, `max_tokens`, `max_input_tokens` (if known), `provider`, `owned_by`, and OpenRouter prices as `input_cost_per_token` / `output_cost_per_token`.
+
+`GET /v1/model/info` (and `/model/info`) — LiteLLM shape:
 
 ```json
 {
@@ -77,28 +83,28 @@ curl http://192.168.88.1:4000/api/chat \
   -d '{"model":"llama3.2","messages":[{"role":"user","content":"hi"}],"stream":false}'
 ```
 
-Проксируется в `POST <ollama>/api/chat` для локального Ollama и Ollama Cloud. Иначе путь меняется на OpenAI-чат провайдера (`/v1/chat/completions` или `/chat/completions` у OpenRouter).
+Proxied to `POST <ollama>/api/chat` for local Ollama and Ollama Cloud. Otherwise the path becomes the provider’s OpenAI chat (`/v1/chat/completions` or `/chat/completions` on OpenRouter).
 
-## Выбор бэкенда
+## Backend selection
 
-1. Ищется включённый alias с таким именем.
-2. Берутся его серверы, из них — **healthy**.
-3. Политика LB (см. [admin.md](admin.md)).
-4. Если alias нет — любой healthy бэкенд, у которого имя есть в каталоге (или список моделей ещё не подтянулся).
-5. Если у бэкенда задан токен, шлюз шлёт `Authorization: Bearer …` апстриму.
+1. Look up an enabled alias with that name.
+2. Take its servers, keep **healthy** ones.
+3. Apply the LB policy (see [admin.md](admin.md)).
+4. If there is no alias — any healthy backend that has the name in its catalog (or whose model list has not loaded yet).
+5. If the backend has a token, the gateway sends `Authorization: Bearer …` upstream.
 
-## Ошибки
+## Errors
 
-JSON в духе OpenAI:
+OpenAI-shaped JSON:
 
 ```json
 {"error": {"message": "no healthy backend for model llama3.2"}}
 ```
 
-Типичные коды: `400` нет `model`, `401` ключ, `403` allowlist, `429` RPM, `502` апстрим недоступен, `503` очередь переполнена / сброс ждущих.
+Typical codes: `400` no `model`, `401` key, `403` allowlist, `429` RPM, `502` upstream down, `503` queue full / dropped waiters.
 
-## Клиенты
+## Clients
 
-Любой OpenAI SDK: `base_url=http://<хост>:4000/v1`, `api_key=sk-…`.
+Any OpenAI SDK: `base_url=http://<host>:4000/v1`, `api_key=sk-…`.
 
-Open WebUI, Holix, Cursor и т.д. — тот же base URL и ключ из админки.
+Open WebUI, Holix, Cursor, etc. — same base URL and a key from admin.

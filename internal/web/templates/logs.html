@@ -48,6 +48,10 @@
         <th class="col-num">HTTP</th>
         <th class="col-num">Задержка</th>
         <th class="col-num">Ответ</th>
+        <th class="col-num">prompt</th>
+        <th class="col-num">cached</th>
+        <th class="col-num">write</th>
+        <th class="col-num">оценка $</th>
       </tr>
     </thead>
     <tbody>
@@ -60,6 +64,10 @@
         <td class="col-num"><span class="pill {{if eq .Kind "2"}}ok{{else if eq .Kind "4"}}warn{{else if eq .Kind "5"}}bad{{end}}">{{.Status}}</span></td>
         <td class="col-num muted {{if ge .LatencyMS 1000}}is-slow{{end}}">{{.LatencyMS}} мс</td>
         <td class="col-num muted">{{if .SizeLabel}}{{.SizeLabel}}{{else}}0{{end}}</td>
+        <td class="col-num muted">{{if .PromptTokens}}{{.PromptTokens}}{{else}}—{{end}}</td>
+        <td class="col-num muted">{{if .CachedTokens}}{{.CachedTokens}}{{else}}—{{end}}</td>
+        <td class="col-num muted">{{if .CacheWriteTokens}}{{.CacheWriteTokens}}{{else}}—{{end}}</td>
+        <td class="col-num muted" title="usage.cost={{.UsageCost}}">{{if .SavedUSD}}{{printf "%.4f" .SavedUSD}}{{else}}—{{end}}</td>
       </tr>
       {{end}}
     </tbody>

@@ -4,33 +4,36 @@
 
 # MikroLLM
 
-Лёгкий шлюз к [Ollama](https://ollama.com) (локальный и Cloud), [OpenRouter](https://openrouter.ai), [vLLM](https://docs.vllm.ai) и [LM Studio](https://lmstudio.ai) в духе LiteLLM: OpenAI-совместимый API, виртуальные ключи `sk-…`, HTML-админка, playground-чат, pull/load моделей там, где API это умеет.
+**English** · [Русский](README.ru.md)
 
-Пишется на Go, без Python и без CGO. Бинарь ~12 МБ, в работе обычно 8–20 МБ RAM. Удобно ставить:
+A small LLM gateway for [Ollama](https://ollama.com) (local and Cloud), [OpenRouter](https://openrouter.ai), [vLLM](https://docs.vllm.ai), and [LM Studio](https://lmstudio.ai), in the spirit of LiteLLM: OpenAI-compatible API, virtual `sk-…` keys, HTML admin, playground chat, and pull/load where the backend API allows it.
 
-- в **контейнер RouterOS 7** на MikroTik (hAP ax³ и другие ARM64);
-- на **обычный сервер** (Linux amd64/arm64, Docker или systemd);
-- локально для разработки.
+Written in Go, no Python, no CGO. Binary ~12 MB, typically 8–20 MB RAM in use. Fits:
 
-Документация: [docs/](docs/README.md).
+- a **RouterOS 7 container** on MikroTik (hAP ax³ and other ARM64);
+- a **normal server** (Linux amd64/arm64, Docker or systemd);
+- local development.
 
-## Что умеет
+Docs: [docs/](docs/README.md) (English default). Russian: [docs/ru/](docs/ru/README.md).
 
-- Несколько бэкендов: **Ollama**, **Ollama Cloud**, **OpenRouter**, **vLLM**, **LM Studio**; health-check каждые 10 с.
-- Alias для клиентов, балансировка `least_conn` / `round_robin` / `failover`, запасная модель при конце кредитов.
-- Очереди: шаги (локальные → бесплатное облако → платное), визуализация на дашборде, ожидание на диске без Kafka/Redis. Клиент может слать alias, имя очереди или `имя-alias`.
-- Виртуальные ключи с ограничением моделей и RPM.
-- Админка: серверы, модели (фильтр по провайдеру и цене), ключи, очереди, лог с фильтрами, чат.
-- **MCP** на `POST /mcp`: агент настраивает провайдеры, модели, очереди и ключи, читает логи и статус. [docs/mcp.md](docs/mcp.md)
-- Скачивание модели (`pull`) с полосой прогресса на Ollama и LM Studio; F5 не обрывает задачу.
-- Загрузка / выгрузка весов в RAM (Ollama `keep_alive`, LM Studio `/api/v1/models/load|unload`).
-- vLLM: модель задаётся на сервере (`vllm serve <HuggingFace-id>`) — [инструкция](docs/providers.md#vllm).
-- OpenRouter и Ollama Cloud — напрямую по HTTPS, без промежуточного GPU-сервера; нужен API-ключ. Цены $/1M в каталоге: OpenRouter из `/models`, Ollama Cloud с [ollama.com/pricing](https://ollama.com/pricing).
-- Playground: выбрать alias или имя модели и писать в чат без ключа (нужна сессия админки).
+## Features
 
-## Быстрый старт (локально)
+- Multiple backends: **Ollama**, **Ollama Cloud**, **OpenRouter**, **vLLM**, **LM Studio**; health check every 10 s. Disable a provider in admin or MCP without deleting it.
+- Client aliases, `least_conn` / `round_robin` / `failover`, credit fallback when the primary runs out of quota.
+- Queues: steps (local → free cloud → paid), dashboard visualization, disk-backed wait without Kafka/Redis. Clients may send an alias, queue name, or `name-alias`.
+- Virtual keys with model allowlists and RPM.
+- Admin: servers, models (provider and price filters), keys, queues, filtered logs, chat, **billing** (hour/day/week/month/year), **security** (system prompt, injection, PII).
+- **MCP** at `POST /mcp`: an agent can configure providers, models, queues, and keys, and read logs/status. [docs/mcp.md](docs/mcp.md)
+- Model download (`pull`) with a progress bar on Ollama and LM Studio; refresh does not abort the job.
+- Load / unload weights in RAM (Ollama `keep_alive`, LM Studio `/api/v1/models/load|unload`).
+- vLLM: the model is bound to the process (`vllm serve <HuggingFace-id>`) — [guide](docs/providers.md#vllm).
+- OpenRouter and Ollama Cloud over HTTPS, no extra GPU server; API key required. $/1M prices in the catalog: OpenRouter from `/models`, Ollama Cloud from [ollama.com/pricing](https://ollama.com/pricing).
+- OpenRouter prompt cache: `auto` injects Claude `cache_control`; logs show `cached_tokens` and a $ estimate. [docs/providers.md](docs/providers.md#prompt-cache).
+- Playground: pick an alias or upstream name and chat without an API key (admin session required).
 
-Нужны Go 1.23+ и хотя бы один Ollama на `localhost:11434` или в LAN.
+## Quick start (local)
+
+Need Go 1.23+ and at least one Ollama on `localhost:11434` or on the LAN.
 
 ```bash
 git clone https://github.com/javded-itres/mikrollm.git
@@ -39,64 +42,73 @@ go test ./...
 make run
 ```
 
-`make run` слушает `:4000`, пароль админки `admin`, каталог данных `./data`.
+`make run` listens on `:4000`, admin password `admin`, data dir `./data`.
 
-Откройте http://127.0.0.1:4000/admin → **Статус** → добавьте Ollama / vLLM / LM Studio → **Модели** → подключите нужные → **Ключи** → выпустите `sk-…`.
+Open http://127.0.0.1:4000/admin → **Status** → add Ollama / vLLM / LM Studio → **Models** → connect what you need → **Keys** → issue `sk-…`.
 
 ```bash
 curl http://127.0.0.1:4000/v1/chat/completions \
   -H "Authorization: Bearer sk-…" \
   -H "Content-Type: application/json" \
-  -d '{"model":"llama3.2","messages":[{"role":"user","content":"привет"}],"stream":false}'
+  -d '{"model":"llama3.2","messages":[{"role":"user","content":"hello"}],"stream":false}'
 ```
 
-Пустой каталог данных при первом запуске **сеет** два бэкенда `mac-82` / `mac-80` на `192.168.88.80/82`. Если у вас другие адреса — удалите их в админке и добавьте свои. На уже существующей базе seed не выполняется.
+An empty data dir **seeds** two backends `mac-82` / `mac-80` at `192.168.88.80/82` on first start. If those are not your hosts, delete them in admin and add your own. Existing databases are not seeded.
 
-## Куда ставить
+## Where to install
 
-| Сценарий | Документ |
+| Scenario | Doc |
 |---|---|
-| Разработка на машине с Go | [docs/install-local.md](docs/install-local.md) |
-| Linux-сервер, Docker или systemd | [docs/install-docker.md](docs/install-docker.md) |
-| Контейнер MikroTik RouterOS 7 | [docs/install-mikrotik.md](docs/install-mikrotik.md) |
-| Админка: модели, RAM, ключи, чат | [docs/admin.md](docs/admin.md) |
+| Dev machine with Go | [docs/install-local.md](docs/install-local.md) |
+| Linux server, Docker or systemd | [docs/install-docker.md](docs/install-docker.md) |
+| MikroTik RouterOS 7 container | [docs/install-mikrotik.md](docs/install-mikrotik.md) |
+| HTTPS | [docs/tls.md](docs/tls.md) |
+| Admin: models, RAM, keys, chat | [docs/admin.md](docs/admin.md) |
 | Ollama / Cloud / OpenRouter / vLLM / LM Studio | [docs/providers.md](docs/providers.md) |
 | HTTP API | [docs/api.md](docs/api.md) |
-| MCP для агента | [docs/mcp.md](docs/mcp.md) |
-| Устройство кода | [docs/architecture.md](docs/architecture.md) |
+| MCP for an agent | [docs/mcp.md](docs/mcp.md) |
+| Code layout | [docs/architecture.md](docs/architecture.md) |
 
-## Требования
+## Requirements
 
-- Хотя бы один бэкенд: локальный Ollama / vLLM / LM Studio **или** облако OpenRouter / Ollama Cloud (HTTPS + API-ключ). Сеть должна быть доступна из процесса MikroLLM.
-- Для образа RouterOS: Docker Buildx, Python 3, USB-диск на роутере желателен.
-- Порт **4000/tcp** (меняется флагом `-listen` / `MIKROLLM_LISTEN`).
+- At least one backend: local Ollama / vLLM / LM Studio **or** OpenRouter / Ollama Cloud (HTTPS + API key). The MikroLLM process must be able to reach it.
+- For the RouterOS image: Docker Buildx, Python 3; USB storage on the router is recommended.
+- Port **4000/tcp** (override with `-listen` / `MIKROLLM_LISTEN`). HTTPS — [docs/tls.md](docs/tls.md).
 
-## Конфигурация
+## Configuration
 
-| Флаг | Переменная | По умолчанию |
+| Flag | Env | Default |
 |---|---|---|
 | `-listen` | `MIKROLLM_LISTEN` | `:4000` |
 | `-data` | `MIKROLLM_DATA` | `./data` |
-| `-admin-password` | `ADMIN_PASSWORD` | пусто: пароль генерируется и пишется в лог при **первом** старте |
-| `-admin-password-reset` | `ADMIN_PASSWORD_RESET=1` | не сбрасывать |
-| `-mcp-token` | `MIKROLLM_MCP_TOKEN` | Bearer для `/mcp`; если пусто — генерируется при первом старте |
-| `-mcp-token-reset` | `MIKROLLM_MCP_TOKEN_RESET=1` | выпустить новый MCP-токен |
-|  | `MIKROLLM_QUEUE_MAX_BYTES` | `16777216` — потолок тела очереди на диске, старше ждущие сбрасываются |
-|  | `MIKROLLM_QUEUE_MAX_JOBS` | `200` — максимум ждущих+идущих |
-|  | `MIKROLLM_QUEUE_MAX_WAIT` | `3m` — сколько HTTP-соединение может ждать слот |
+| `-admin-password` | `ADMIN_PASSWORD` | empty: generated and printed on **first** start |
+| `-admin-password-reset` | `ADMIN_PASSWORD_RESET=1` | do not reset |
+| `-mcp-token` | `MIKROLLM_MCP_TOKEN` | Bearer for `/mcp`; empty → generated on first start |
+| `-mcp-token-reset` | `MIKROLLM_MCP_TOKEN_RESET=1` | issue a new MCP token |
+| `-tls-cert` | `MIKROLLM_TLS_CERT` | certificate PEM; with `-tls-key` enables HTTPS on `-listen` |
+| `-tls-key` | `MIKROLLM_TLS_KEY` | key PEM |
+| `-tls-auto` | `MIKROLLM_TLS_AUTO=1` | self-signed in `<data>/tls` if no files |
+| `-tls-hosts` | `MIKROLLM_TLS_HOSTS` | SANs for `-tls-auto` (comma-separated IPs and names) |
+| `-acme-hosts` | `MIKROLLM_ACME_HOSTS` | Let's Encrypt FQDNs; issue and renew (needs port 80) |
+| `-acme-email` | `MIKROLLM_ACME_EMAIL` | LE account email |
+| `-acme-http` | `MIKROLLM_ACME_HTTP` | HTTP-01, default `:80`; `off` disables it |
+| `-acme-staging` | `MIKROLLM_ACME_STAGING=1` | staging CA |
+|  | `MIKROLLM_QUEUE_MAX_BYTES` | `16777216` — max queued body on disk; older waiters dropped |
+|  | `MIKROLLM_QUEUE_MAX_JOBS` | `200` — max waiting+running |
+|  | `MIKROLLM_QUEUE_MAX_WAIT` | `3m` — how long an HTTP connection may wait for a slot |
 
-Пароль хранится в SQLite (`data/mikrollm.db`) как bcrypt. Сброс — только с `ADMIN_PASSWORD_RESET=1`.
+The password is bcrypt in SQLite (`data/mikrollm.db`). Reset only with `ADMIN_PASSWORD_RESET=1`.
 
-## Сборка
+## Build
 
 ```bash
 make test
 make build-arm64          # dist/mikrollm (linux/arm64)
-make tar-ros              # dist/mikrollm-ros-legacy.tar для RouterOS
+make tar-ros              # dist/mikrollm-ros-legacy.tar for RouterOS
 ```
 
-Релизы GitHub содержат готовые бинарники и tar для MikroTik.
+GitHub Releases ship binaries and the MikroTik tar. Release notes are **English** — see [docs/releasing.md](docs/releasing.md).
 
-## Лицензия
+## License
 
 [MIT](LICENSE)

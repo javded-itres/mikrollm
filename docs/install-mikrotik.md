@@ -1,53 +1,55 @@
-# Установка в контейнер MikroTik RouterOS 7
+# Install in a MikroTik RouterOS 7 container
 
-Проверено на **RouterOS 7.22**, hAP ax³, **linux/arm64**. Python в контейнере нет: только статический Go в scratch. RAM контейнера держите скромной (`memory-high=64M` достаточно).
+**English** · [Русский](ru/install-mikrotik.md)
 
-Нужны: пакет **container** в RouterOS, Docker Buildx и Python 3 **на машине сборки**, место на USB (рекомендуется).
+Verified on **RouterOS 7.22**, hAP ax³, **linux/arm64**. No Python in the container: static Go on scratch. Keep container RAM modest (`memory-high=64M` is enough).
 
-## 1. Собрать tar для RouterOS
+Need: the **container** package on RouterOS, Docker Buildx and Python 3 **on the build machine**, USB space (recommended).
 
-RouterOS понимает **docker-save v1** (`manifest.json` + `Config` + `Layers`). `docker buildx` по умолчанию отдаёт OCI — его надо конвертировать.
+## 1. Build the RouterOS tar
+
+RouterOS wants **docker-save v1** (`manifest.json` + `Config` + `Layers`). `docker buildx` defaults to OCI — convert it.
 
 ```bash
 make tar-ros
-# dist/mikrollm          — бинарь linux/arm64
-# dist/mikrollm-ros-legacy.tar — то, что грузить на роутер
+# dist/mikrollm          — linux/arm64 binary
+# dist/mikrollm-ros-legacy.tar — what you upload to the router
 ```
 
-Скрипт конвертации: [`scripts/oci_to_legacy_docker.py`](../scripts/oci_to_legacy_docker.py).
+Conversion script: [`scripts/oci_to_legacy_docker.py`](../scripts/oci_to_legacy_docker.py).
 
-Готовый tar также лежит в [GitHub Releases](https://github.com/javded-itres/mikrollm/releases).
+A ready tar is also on [GitHub Releases](https://github.com/javded-itres/mikrollm/releases).
 
-## 2. Сеть контейнера
+## 2. Container network
 
-Типовая схема: bridge для docker-сетей, veth MikroLLM в этой подсети, бэкенды (Ollama / vLLM / LM Studio) — хосты LAN (`192.168.88.0/24` в примере).
+Typical layout: a bridge for docker nets, MikroLLM veth on that subnet, backends (Ollama / vLLM / LM Studio) as LAN hosts (`192.168.88.0/24` in the example).
 
 ```routeros
 /interface veth add name=LLM address=192.168.254.5/24 gateway=192.168.254.1
 /interface bridge port add bridge=Bridge-Docker interface=LLM
 ```
 
-Подставьте свой docker-bridge, если он называется иначе. Шлюз `192.168.254.1` должен быть адресом роутера на этом bridge (чтобы контейнер ходил в LAN к Ollama и наружу за слоями pull).
+Use your docker-bridge name if it differs. Gateway `192.168.254.1` must be the router’s address on that bridge (so the container can reach LAN Ollama and the internet for pull layers).
 
-DNS контейнеру задайте явно: `192.168.88.1` или публичный резолвер.
+Set DNS explicitly: `192.168.88.1` or a public resolver.
 
-## 3. Тома и переменные
+## 3. Volumes and env
 
 ```routeros
 /container mounts add name=mikrollm-data src=/usb1/docker/mikrollm-data dst=/data
-/container envs add name=mikrollm key=ADMIN_PASSWORD value="смените-на-свой"
+/container envs add name=mikrollm key=ADMIN_PASSWORD value="change-me"
 ```
 
-Каталог `src` создайте заранее (`/file make-dir` или с компьютера по SMB/FTP). База SQLite живёт в этом томе и **переживает** удаление контейнера.
+Create `src` first (`/file make-dir` or from a PC over SMB/FTP). SQLite lives on this volume and **survives** container remove.
 
-## 4. Загрузить tar на роутер
+## 4. Upload the tar
 
-Скопируйте `mikrollm-ros-legacy.tar` в `/usb1/docker/mikrollm-ros.tar` (WinBox, SMB, `/tool fetch` с HTTP в LAN).
+Copy `mikrollm-ros-legacy.tar` to `/usb1/docker/mikrollm-ros.tar` (WinBox, SMB, `/tool fetch` from HTTP on the LAN).
 
-Пример с HTTP на машине в LAN:
+HTTP from a LAN machine:
 
 ```bash
-# на ПК
+# on the PC
 python3 -m http.server 8766
 ```
 
@@ -55,9 +57,9 @@ python3 -m http.server 8766
 /tool fetch url="http://192.168.88.10:8766/mikrollm-ros-legacy.tar" dst-path=usb1/docker/mikrollm-ros.tar
 ```
 
-## 5. Создать контейнер
+## 5. Create the container
 
-Команды лучше разбить: длинная строка в CLI RouterOS переносится и ломается.
+Split commands: a long RouterOS CLI line wraps and breaks.
 
 ```routeros
 /container add name=mikrollm file=usb1/docker/mikrollm-ros.tar interface=LLM
@@ -71,11 +73,11 @@ python3 -m http.server 8766
 /container start [find name=mikrollm]
 ```
 
-`root-dir` можно указать на USB (`/usb1/docker/mikrollm`), чтобы слои не занимали внутреннюю NAND.
+You can put `root-dir` on USB (`/usb1/docker/mikrollm`) so layers do not eat internal NAND.
 
-## 6. Проброс порта на LAN
+## 6. LAN port forward
 
-Чтобы открывать `http://192.168.88.1:4000` с компьютеров LAN:
+To open `http://192.168.88.1:4000` from LAN PCs:
 
 ```routeros
 /ip firewall nat add chain=dstnat dst-address=192.168.88.1 dst-port=4000 \
@@ -83,47 +85,49 @@ python3 -m http.server 8766
   comment="mikrollm"
 ```
 
-Прямой заход на `http://192.168.254.5:4000` тоже работает, если маршрут до docker-сети есть.
+Direct `http://192.168.254.5:4000` also works if you have a route to the docker net.
 
-Не выставляйте `:4000` в интернет без нужды. Админка защищена паролем, API — ключами, MCP — отдельным токеном, но это не замена VPN. MCP-токен лучше выпустить в админке (**Статус → MCP для агента**), а не класть в envlist.
+Do not publish `:4000` to the internet unless you must. Admin is password-protected, API uses keys, MCP uses a separate token — that is not a VPN. Issue the MCP token in admin (**Status → MCP for agents**), not in envlist.
 
-## 7. Проверка
+## 7. Check
 
 ```bash
 curl -sS http://192.168.88.1:4000/health
 ```
 
-Админка: http://192.168.88.1:4000/admin  
-MCP: `POST http://192.168.88.1:4000/mcp` с Bearer — [mcp.md](mcp.md).
+Admin: http://192.168.88.1:4000/admin  
+MCP: `POST http://192.168.88.1:4000/mcp` with Bearer — [mcp.md](mcp.md).
 
-Лог контейнера (если `logging=yes`) попадает в `/log` RouterOS. При первом старте после обновления там будет `generated MCP token:`, если токена ещё не было.
+HTTPS on the same `:4000` (no second container): [tls.md](tls.md). Self-signed — `MIKROLLM_TLS_AUTO=1`. Let's Encrypt — `MIKROLLM_ACME_HOSTS` and dst-nat WAN **80 only** to the container; DNS name, from LAN a static DNS to `192.168.88.1`.
 
-## Обновление версии
+Container logs (if `logging=yes`) go to RouterOS `/log`. On first start after an upgrade you will see `generated MCP token:` if none existed yet.
 
-1. Собрать новый `mikrollm-ros-legacy.tar` и залить поверх файла.
+## Upgrade
+
+1. Build a new `mikrollm-ros-legacy.tar` and overwrite the file.
 2. `/container stop [find name=mikrollm]`
 3. `/container remove [find name=mikrollm]`
-4. Снова `/container add` + `set` из шага 5 (mount/env те же).
+4. `/container add` + `set` from step 5 again (same mount/env).
 5. `/container start`
 
-Том `/data` не трогайте — ключи, серверы и прогресс pull сохранятся. После обновления **снимите** `ADMIN_PASSWORD_RESET`, если включали его для отладки.
+Leave the `/data` volume alone — keys, servers, and pull progress survive. After an upgrade **remove** `ADMIN_PASSWORD_RESET` if you used it for debugging.
 
-## Типичные ошибки
+## Typical failures
 
-| Симптом | Что проверить |
+| Symptom | Check |
 |---|---|
-| `no config found in manifest` | tar не сконвертирован из OCI, нужен `oci_to_legacy_docker.py` |
-| контейнер Start, сразу Stop | `cmd`/`entrypoint`, смотрите log; часто обрезанная длинная команда |
-| админка висит на POST login | устаревшие сборки: вложенный SQLite-запрос; нужна версия ≥ 0.0.1 |
-| Ollama «недоступен» | с контейнера должен пинговаться `192.168.88.x`; gateway veth, firewall |
-| pull с админки не идёт в интернет | DNS контейнера, маршруты, не помечать src контейнера в `main` целиком, если это ломает VPN |
-| OpenRouter **403 Forbidden** | API с IP РФ режется. Контейнер `192.168.254.5` не в правиле LAN 88 → VPN, см. [ниже](#openrouter-403) |
+| `no config found in manifest` | tar was not converted from OCI; need `oci_to_legacy_docker.py` |
+| Start then immediate Stop | `cmd`/`entrypoint`, read the log; often a truncated long command |
+| Admin hangs on POST login | old builds: nested SQLite query; need ≥ 0.0.1 |
+| Ollama “unreachable” | container must ping `192.168.88.x`; veth gateway, firewall |
+| Admin pull has no internet | container DNS, routes; do not mark the whole container src into `main` if that breaks VPN |
+| OpenRouter **403 Forbidden** | API from a Russian IP is blocked. Container `192.168.254.5` is not in the LAN 88 → VPN rule, see [below](#openrouter-403) |
 
 ## OpenRouter 403
 
-OpenRouter отвечает 403 на `GET /api/v1/key` и `/models` с адреса ISP РФ; тот же ключ с LAN через AMS WG проходит. Ollama Cloud с ISP при этом может быть жив.
+OpenRouter returns 403 on `GET /api/v1/key` and `/models` from a Russian ISP address; the same key via LAN through AMS WG works. Ollama Cloud on the ISP can still be fine.
 
-Контейнер в `192.168.254.5` **не** совпадает с `src-address=192.168.88.0/24`, поэтому его HTTPS уходит в `main` (ISP). Пометьте только этот адрес в таблицу `vpn` (после `ru-domains` / `novpn`), и сделайте src-nat на **свободный** адрес LAN, который AMS уже маршрутизирует — не `.1` роутера и не адрес WG (`10.88.97.2`), иначе ответ попадает в INPUT и health зависает до timeout.
+The container at `192.168.254.5` **does not** match `src-address=192.168.88.0/24`, so its HTTPS uses `main` (ISP). Mark only this address into table `vpn` (after `ru-domains` / `novpn`), and src-nat to a **free** LAN address that AMS already routes — not the router `.1` and not the WG address (`10.88.97.2`), or the reply hits INPUT and health hangs until timeout.
 
 ```routeros
 /ip firewall mangle add chain=prerouting action=mark-routing new-routing-mark=vpn \
@@ -135,8 +139,8 @@ OpenRouter отвечает 403 на `GET /api/v1/key` и `/models` с адре�
   out-interface=wireguard-ams comment="mikrollm via AMS WG"
 ```
 
-`192.168.88.9` должен быть вне DHCP pool и не назначен на интерфейс. Локальный Ollama (`192.168.88.x`) правилом не трогается (`dst-address=!192.168.0.0/16`). Не помечайте весь `192.168.254.0/24`: там mihomo / wstunnel, их увод в VPN зациклит туннель.
+`192.168.88.9` must be outside the DHCP pool and not assigned to an interface. Local Ollama (`192.168.88.x`) is untouched (`dst-address=!192.168.0.0/16`). Do not mark all of `192.168.254.0/24`: mihomo / wstunnel live there; sending them into VPN loops the tunnel.
 
-## Память и CPU
+## Memory and CPU
 
-MikroLLM сам лёгкий. Тяжёлые локальные модели живут на Mac/PC с Ollama, vLLM или LM Studio, не на роутере. OpenRouter и Ollama Cloud ходят из контейнера в интернет по HTTPS — в образе есть `ca-certificates`. Не поднимайте `memory-high` «на всякий случай» до сотен мегабайт — ax³ и так тесный. Как подключить облако или загрузить модель на GPU — [providers.md](providers.md).
+MikroLLM itself is light. Heavy local models live on a Mac/PC with Ollama, vLLM, or LM Studio, not on the router. OpenRouter and Ollama Cloud leave the container over HTTPS — the image has `ca-certificates`. Do not raise `memory-high` “just in case” to hundreds of megabytes — ax³ is already tight. Cloud connect or GPU load: [providers.md](providers.md).

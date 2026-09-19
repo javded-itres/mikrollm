@@ -1,10 +1,12 @@
-# Установка на сервер (Docker и systemd)
+# Server install (Docker and systemd)
 
-Образ — scratch + один статический бинарь. Сначала соберите бинарь под целевую архитектуру, затем Docker-слой.
+**English** · [Русский](ru/install-docker.md)
+
+The image is scratch + one static binary. Build the binary for the target arch first, then the Docker layer.
 
 ## Docker
 
-На машине сборки (нужен Docker Buildx):
+On the build machine (needs Docker Buildx):
 
 ```bash
 # linux/amd64
@@ -14,20 +16,20 @@ docker buildx build --platform linux/amd64 -t mikrollm:amd64 --load .
 docker run --name mikrollm --restart unless-stopped \
   -p 4000:4000 \
   -v mikrollm-data:/data \
-  -e ADMIN_PASSWORD='смените-на-свой' \
+  -e ADMIN_PASSWORD='change-me' \
   mikrollm:amd64
 ```
 
-ARM64 (Raspberry Pi, Ampere и т.п.):
+ARM64 (Raspberry Pi, Ampere, etc.):
 
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o dist/mikrollm ./cmd/mikrollm
 docker buildx build --platform linux/arm64 -t mikrollm:arm64 --load .
 ```
 
-Контейнер слушает `:4000`. Данные — том `/data`. DNS контейнера должен резолвить хосты Ollama / vLLM / LM Studio (часто достаточно `--network host` в домашней сети или явные IP в админке).
+The container listens on `:4000`. Data is the `/data` volume. Container DNS must resolve Ollama / vLLM / LM Studio hosts (often `--network host` on a home LAN, or raw IPs in admin).
 
-Пример compose:
+Compose example:
 
 ```yaml
 services:
@@ -39,27 +41,29 @@ services:
     volumes:
       - mikrollm-data:/data
     environment:
-      ADMIN_PASSWORD: "смените-на-свой"
+      ADMIN_PASSWORD: "change-me"
       MIKROLLM_LISTEN: ":4000"
       MIKROLLM_DATA: "/data"
-      # MIKROLLM_MCP_TOKEN: "mcp-…"   # лучше выпустить из админки, не коммитить
+      # MIKROLLM_MCP_TOKEN: "mcp-…"   # prefer issuing from admin, do not commit
+      # MIKROLLM_TLS_CERT: /data/tls/cert.pem
+      # MIKROLLM_TLS_KEY: /data/tls/key.pem
 volumes:
   mikrollm-data:
 ```
 
-Сброс пароля в уже существующем томе:
+Reset the password in an existing volume:
 
 ```bash
 docker run --rm -v mikrollm-data:/data \
-  -e ADMIN_PASSWORD='новый' -e ADMIN_PASSWORD_RESET=1 \
+  -e ADMIN_PASSWORD='newpass' -e ADMIN_PASSWORD_RESET=1 \
   mikrollm:amd64
 ```
 
-Затем запустите обычный контейнер **без** `ADMIN_PASSWORD_RESET`.
+Then start the normal container **without** `ADMIN_PASSWORD_RESET`.
 
-## systemd (без Docker)
+## systemd (no Docker)
 
-Скопируйте бинарь, например в `/usr/local/bin/mikrollm`. Каталог данных — `/var/lib/mikrollm`.
+Copy the binary, e.g. to `/usr/local/bin/mikrollm`. Data dir: `/var/lib/mikrollm`.
 
 `/etc/systemd/system/mikrollm.service`:
 
@@ -72,7 +76,7 @@ After=network.target
 Type=simple
 User=mikrollm
 Group=mikrollm
-Environment=ADMIN_PASSWORD=смените-на-свой
+Environment=ADMIN_PASSWORD=change-me
 ExecStart=/usr/local/bin/mikrollm -listen :4000 -data /var/lib/mikrollm
 Restart=on-failure
 RestartSec=3
@@ -90,9 +94,9 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now mikrollm
 ```
 
-Админка: `http://<сервер>:4000/admin`. MCP: `POST /mcp` — [mcp.md](mcp.md). Снаружи лучше закрыть `:4000` файрволом и пускать только LAN или reverse-proxy.
+Admin: `http://<server>:4000/admin`. MCP: `POST /mcp` — [mcp.md](mcp.md). Prefer a firewall on `:4000` and LAN or a reverse proxy only.
 
-## Проверка
+## Check
 
 ```bash
 curl -sS http://127.0.0.1:4000/health

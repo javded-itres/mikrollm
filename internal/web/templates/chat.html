@@ -1,15 +1,20 @@
 {{define "content"}}
 <div class="chat-shell">
   <div class="toolbar chat-toolbar">
+    <select id="gen-mode" class="sel-sm" title="Тип контента">
+      <option value="chat" data-path="/v1/chat/completions">Чат · /v1/chat/completions</option>
+      <option value="image" data-path="/v1/images/generations">Изображение · /v1/images/generations</option>
+      <option value="video" data-path="/v1/videos">Видео · /v1/videos</option>
+    </select>
     <select id="chat-model" class="chat-model" required>
       {{if .Aliases}}
       <optgroup label="Alias в шлюзе">
-        {{range .Aliases}}<option value="{{.Value}}">{{.Label}}</option>{{end}}
+        {{range .Aliases}}<option value="{{.Value}}" data-media="{{.Media}}">{{.Label}}</option>{{end}}
       </optgroup>
       {{end}}
       {{if .Catalog}}
       <optgroup label="На серверах">
-        {{range .Catalog}}<option value="{{.Value}}">{{.Label}}</option>{{end}}
+        {{range .Catalog}}<option value="{{.Value}}" data-media="{{.Media}}">{{.Label}}</option>{{end}}
       </optgroup>
       {{end}}
       {{if and (not .Aliases) (not .Catalog)}}
@@ -18,12 +23,20 @@
     </select>
     <input id="chat-temp" type="number" min="0" max="2" step="0.1" value="0.7" title="temperature" class="sel-sm">
     <input id="chat-max" type="number" min="16" max="8192" step="16" value="1024" title="max_tokens" class="sel-sm">
-    <span class="muted grow chat-toolbar-note">без ключа, через шлюз</span>
+    <span class="muted grow chat-toolbar-note" id="gen-path">без ключа · /v1/chat/completions</span>
     <button type="button" class="ghost" id="chat-clear">Новый чат</button>
   </div>
 
-  <div class="chat-log card flush" id="chat-log">
-    <div class="chat-empty muted" id="chat-empty">Выберите модель и напишите сообщение — как в LiteLLM Playground.</div>
+  <div class="chat-main">
+    <aside class="chat-hist card" id="chat-hist">
+      <div class="chat-hist-h">История</div>
+      <div class="chat-task muted" id="chat-task" hidden></div>
+      <ol class="chat-hist-list" id="chat-hist-list"></ol>
+      <p class="muted small" id="chat-hist-empty">Пока пусто. Первый запрос станет задачей, дальше — правки к нему.</p>
+    </aside>
+    <div class="chat-log card flush" id="chat-log">
+      <div class="chat-empty muted" id="chat-empty">Выберите модель и напишите сообщение — как в LiteLLM Playground.</div>
+    </div>
   </div>
 
   <form class="chat-composer" id="chat-form">

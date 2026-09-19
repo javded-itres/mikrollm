@@ -1,0 +1,133 @@
+{{define "content"}}
+<div class="pagehead">
+  <div>
+    <h1>Безопасность</h1>
+    <p class="muted">Фильтры и системные промпты вешаются на alias, очередь или имя модели на сервере. Один и тот же фильтр на нескольких уровнях срабатывает <strong>один раз</strong>.</p>
+  </div>
+</div>
+
+<div class="card add-box" data-kind-form>
+  {{if .HasEdit}}<h2>Изменить «{{.Edit.Name}}»</h2>{{else}}<h2>Новый фильтр</h2>{{end}}
+  <form method="post" action="/admin/security" class="grid2" style="margin-top:.6rem">
+    {{if .HasEdit}}<input type="hidden" name="id" value="{{.Edit.ID}}">{{end}}
+    <div>
+      <label>Имя</label>
+      <input name="name" value="{{.Edit.Name}}" required placeholder="corp-prompt, no-jailbreak…">
+    </div>
+    <div>
+      <label>Тип</label>
+      <select name="kind" required>
+        {{range .Kinds}}
+        <option value="{{.ID}}" {{if eq $.Edit.Kind .ID}}selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+    </div>
+    <div data-for-kind="block_words regex pii prompt_injection category nsfw">
+      <label>Действие</label>
+      <select name="action">
+        <option value="block" {{if ne .Edit.Action "mask"}}selected{{end}}>Блокировать запрос</option>
+        <option value="mask" {{if eq .Edit.Action "mask"}}selected{{end}}>Маскировать</option>
+      </select>
+    </div>
+    <div data-for-kind="block_words regex pii prompt_injection category nsfw">
+      <label>Когда</label>
+      <select name="mode">
+        <option value="pre" {{if or (eq .Edit.Mode "pre") (eq .Edit.Mode "")}}selected{{end}}>На входе (до модели)</option>
+        <option value="post" {{if eq .Edit.Mode "post"}}selected{{end}}>На выходе (ответ, без stream)</option>
+        <option value="both" {{if eq .Edit.Mode "both"}}selected{{end}}>Вход и выход</option>
+      </select>
+    </div>
+    <div class="span2" data-for-kind="system_prompt">
+      <label>Системный промпт — добавится к каждому запросу</label>
+      <textarea name="prompt" rows="4" placeholder="Ты ассистент компании…">{{.Edit.Config.Prompt}}</textarea>
+    </div>
+    <div class="span2" data-for-kind="block_words prompt_injection nsfw category">
+      <label>{{if eq .Edit.Kind "prompt_injection"}}Дополнительные фразы{{else}}Свои слова (к плагину){{end}} — по одному на строку</label>
+      <textarea name="words" rows="4" placeholder="конфиденциально">{{.EditWords}}</textarea>
+    </div>
+    <div class="span2" data-for-kind="regex">
+      <label>Регулярное выражение (RE2, без учёта регистра)</label>
+      <input name="pattern" value="{{.Edit.Config.Pattern}}" placeholder="secret[-_]?key">
+    </div>
+    <div class="span2" data-for-kind="pii">
+      <label>Что искать</label>
+      <div class="checks">
+        {{range .PII}}
+        <label class="inline"><input type="checkbox" name="pii" value="{{.ID}}" {{if hasval $.Edit.Config.PII .ID}}checked{{end}}> {{.Label}}</label>
+        {{end}}
+      </div>
+    </div>
+    <div class="span2" data-for-kind="category nsfw">
+      <label>Плагины (как категории LiteLLM content_filter). NSFW / 18+ без галочек включает оба.</label>
+      <div class="checks">
+        {{range .Plugins}}
+        <label class="inline"><input type="checkbox" name="plugin" value="{{.ID}}" {{if or (hasval $.Edit.Config.Plugins .ID) (hasval $.Edit.Config.Categories .ID)}}checked{{end}}> {{.Label}} <code class="muted">{{.ID}}</code></label>
+        {{end}}
+      </div>
+    </div>
+    <div class="span2">
+      <label>Применить к alias шлюза</label>
+      <div class="checks">
+        {{range .Models}}
+        <label class="inline"><input type="checkbox" name="alias" value="{{.Alias}}" {{if hastarget $.Edit.Targets "alias" .Alias}}checked{{end}}> {{.Alias}}</label>
+        {{else}}<span class="muted">Пока нет alias — вкладка «Модели».</span>{{end}}
+      </div>
+    </div>
+    <div class="span2">
+      <label>Применить к очередям</label>
+      <div class="checks">
+        {{range .Queues}}
+        <label class="inline"><input type="checkbox" name="queue" value="{{.Alias}}" {{if hastarget $.Edit.Targets "queue" .Alias}}checked{{end}}> {{.Name}} <code>{{.Alias}}</code></label>
+        {{else}}<span class="muted">Очередей нет.</span>{{end}}
+      </div>
+    </div>
+    <div class="span2">
+      <label>Имена моделей на сервере (upstream), по одному на строку</label>
+      <textarea name="models" rows="3" placeholder="ornith-1.5:35b">{{.EditModels}}</textarea>
+      <p class="hint">Если фильтр повешен и на очередь, и на alias, и на это имя — сработает один раз.</p>
+    </div>
+    <div class="span2 row">
+      <label class="inline"><input type="checkbox" name="enabled" value="1" {{if or (not .HasEdit) .Edit.Enabled}}checked{{end}}> Включён</label>
+      <button type="submit">{{if .HasEdit}}Сохранить{{else}}Создать{{end}}</button>
+      {{if .HasEdit}}<a class="btn ghost" href="/admin/security">Отмена</a>{{end}}
+    </div>
+  </form>
+</div>
+
+{{if .Policies}}
+<div class="host-list">
+{{range .Policies}}
+  <article class="host-row {{if .Enabled}}is-up{{else}}is-off{{end}}">
+    <div class="host-status">{{if .Enabled}}<span class="badge ok">Вкл</span>{{else}}<span class="badge off">Выкл</span>{{end}}</div>
+    <div class="host-main">
+      <div class="host-title">
+        <span class="host-name">{{.Name}}</span>
+        <span class="pill">{{.Kind}}</span>
+        {{if ne .Kind "system_prompt"}}<span class="pill">{{.Action}}</span><span class="pill">{{.Mode}}</span>{{end}}
+      </div>
+      <div class="chips">
+        {{range .Targets}}<span class="chip">{{.Kind}}: {{.Key}}</span>{{else}}<span class="muted small">Никуда не привязан — не сработает.</span>{{end}}
+      </div>
+    </div>
+    <div class="host-del">
+      <a class="btn-sm" href="/admin/security?id={{.ID}}">Изменить</a>
+      <form method="post" action="/admin/security/{{.ID}}/enabled">
+        {{if .Enabled}}
+        <input type="hidden" name="enabled" value="0">
+        <button class="ghost" type="submit">Выключить</button>
+        {{else}}
+        <input type="hidden" name="enabled" value="1">
+        <button class="ghost" type="submit">Включить</button>
+        {{end}}
+      </form>
+      <form method="post" action="/admin/security/{{.ID}}/delete" onsubmit="return confirm('Удалить фильтр {{.Name}}?')">
+        <button class="ghost danger-text" type="submit">Удалить</button>
+      </form>
+    </div>
+  </article>
+{{end}}
+</div>
+{{else}}
+<div class="card empty"><p>Фильтров нет. Создайте системный промпт или защиту от injection.</p></div>
+{{end}}
+{{end}}

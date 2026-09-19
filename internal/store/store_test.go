@@ -86,6 +86,65 @@ func TestBackendKindAndToken(t *testing.T) {
 	}
 }
 
+func TestSetBackendEnabled(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	id, err := st.UpsertBackend("mac", "http://127.0.0.1:11434", true, 3, "ollama", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetBackendEnabled(id, false); err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.GetBackend(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Enabled || b.Weight != 3 || b.Token != "tok" {
+		t.Fatalf("toggle must not touch other fields: %+v", b)
+	}
+	if err := st.SetBackendEnabled(id, true); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = st.GetBackend(id)
+	if !b.Enabled {
+		t.Fatal("want enabled")
+	}
+	if err := st.SetBackendEnabled(id+99, false); err == nil {
+		t.Fatal("missing id")
+	}
+}
+
+func TestPoliciesForDedup(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	id, err := st.SavePolicy(domain.Policy{
+		Name: "once", Kind: domain.GuardBlockWords, Action: domain.GuardBlock, Mode: domain.GuardPre, Enabled: true,
+		Config: domain.PolicyConfig{Words: []string{"x"}},
+		Targets: []domain.PolicyTarget{
+			{Kind: domain.GuardTargetAlias, Key: "coder"},
+			{Kind: domain.GuardTargetQueue, Key: "coder"},
+			{Kind: domain.GuardTargetModel, Key: "ornith-1.5:35b"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps, err := st.PoliciesFor("coder", "coder", "ornith-1.5:35b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 1 || ps[0].ID != id {
+		t.Fatalf("want 1 policy, got %+v", ps)
+	}
+}
+
 func TestModelContextAndKeyUpdate(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -111,6 +170,9 @@ func TestModelContextAndKeyUpdate(t *testing.T) {
 	got, _ := st.GetModel(m.ID)
 	if got.MaxContext != 65536 || got.Fallback != "llama" {
 		t.Fatalf("%+v", got)
+	}
+	if got.PromptCache != "inherit" {
+		t.Fatalf("connect/save inherit, got %q", got.PromptCache)
 	}
 	id, err := st.InsertKey(APIKey{Name: "k", Prefix: "sk-abc", KeyHash: "h1", AllowedModels: []string{"qwen"}, Enabled: true})
 	if err != nil {
@@ -161,5 +223,60 @@ func TestQueueCRUDAndAlias(t *testing.T) {
 	}
 	if _, err := st.SaveModel(Model{Alias: "chat", UpstreamName: "x", Enabled: true}); err == nil {
 		t.Fatal("model alias clash")
+	}
+}
+
+func TestPromptCacheSettings(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.EnsureAdmin("x", true); err != nil {
+		t.Fatal(err)
+	}
+	if st.PromptCacheMode() != "auto" {
+		t.Fatalf("global %q", st.PromptCacheMode())
+	}
+	if err := st.SetPromptCacheMode("off"); err != nil {
+		t.Fatal(err)
+	}
+	if st.PromptCacheMode() != "off" {
+		t.Fatal(st.PromptCacheMode())
+	}
+	bid, err := st.UpsertBackend("mac", "http://127.0.0.1:11434", true, 1, "ollama", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.SaveModel(Model{Alias: "claude", UpstreamName: "anthropic/claude-sonnet-4", Enabled: true, BackendIDs: []int64{bid}, PromptCache: "on"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := st.GetModel(id)
+	if m.PromptCache != "on" {
+		t.Fatalf("%+v", m)
+	}
+	m.Fallback = "cheap"
+	if _, err := st.SaveModel(m); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.GetModel(id)
+	if got.PromptCache != "on" || got.Fallback != "cheap" {
+		t.Fatalf("round-trip %+v", got)
+	}
+	if err := st.ConnectOllamaModel("qwen", []int64{bid}, "", 0); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := st.GetModelByAlias("qwen")
+	if q.PromptCache != "inherit" {
+		t.Fatalf("connect %q", q.PromptCache)
+	}
+	st.Log("sk-x", "claude", "or", 200, time.Millisecond, 10, domain.TokenUsage{
+		PromptTokens: 100, CachedTokens: 80, Upstream: "anthropic/claude-sonnet-4",
+		HasSaved: true, SavedUSD: 0.2, HasCost: true, Cost: 0.05,
+	})
+	ls, err := st.ListLogs(10)
+	if err != nil || len(ls) != 1 || ls[0].CachedTokens != 80 || ls[0].SavedUSD != 0.2 || ls[0].UsageCost != 0.05 {
+		t.Fatalf("%+v %v", ls, err)
 	}
 }

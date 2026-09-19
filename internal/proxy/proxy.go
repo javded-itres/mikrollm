@@ -8,13 +8,16 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/javded-itres/mikrollm/internal/auth"
 	"github.com/javded-itres/mikrollm/internal/domain"
+	"github.com/javded-itres/mikrollm/internal/guard"
 	"github.com/javded-itres/mikrollm/internal/ports"
+	"github.com/javded-itres/mikrollm/internal/promptcache"
 	"github.com/javded-itres/mikrollm/internal/queue"
 )
 
@@ -89,16 +92,18 @@ func (p *Proxy) ListModels(w http.ResponseWriter, r *http.Request) {
 	detected := p.detectedContexts()
 	models, _ := p.st.ListModels()
 	type item struct {
-		ID                 string  `json:"id"`
-		Object             string  `json:"object"`
-		OwnedBy            string  `json:"owned_by"`
-		ContextLength      int     `json:"context_length,omitempty"`
-		MaxModelLen        int     `json:"max_model_len,omitempty"`
-		MaxTokens          int     `json:"max_tokens,omitempty"`
-		MaxInputTokens     int     `json:"max_input_tokens,omitempty"`
-		Provider           string  `json:"provider,omitempty"`
-		InputCostPerToken  float64 `json:"input_cost_per_token,omitempty"`
-		OutputCostPerToken float64 `json:"output_cost_per_token,omitempty"`
+		ID                  string   `json:"id"`
+		Object              string   `json:"object"`
+		OwnedBy             string   `json:"owned_by"`
+		ContextLength       int      `json:"context_length,omitempty"`
+		MaxModelLen         int      `json:"max_model_len,omitempty"`
+		MaxTokens           int      `json:"max_tokens,omitempty"`
+		MaxInputTokens      int      `json:"max_input_tokens,omitempty"`
+		Provider            string   `json:"provider,omitempty"`
+		InputCostPerToken   float64  `json:"input_cost_per_token,omitempty"`
+		OutputCostPerToken  float64  `json:"output_cost_per_token,omitempty"`
+		SupportedGeneration []string `json:"supported_generation,omitempty"`
+		Mode                string   `json:"mode,omitempty"`
 	}
 	out := struct {
 		Object string `json:"object"`
@@ -127,6 +132,17 @@ func (p *Proxy) ListModels(w http.ResponseWriter, r *http.Request) {
 		if meta.Priced {
 			it.InputCostPerToken = meta.PromptUSD / 1_000_000
 			it.OutputCostPerToken = meta.CompletionUSD / 1_000_000
+		}
+		media := domain.MergeMedia(m.Media, meta.Media)
+		if len(media) == 0 {
+			media = domain.InferMedia(m.Alias, nil)
+			media = domain.MergeMedia(media, domain.InferMedia(m.UpstreamName, nil))
+		}
+		it.SupportedGeneration = media
+		if domain.HasMedia(media, domain.MediaVideo) {
+			it.Mode = "video_generation"
+		} else if domain.HasMedia(media, domain.MediaImage) {
+			it.Mode = "image_generation"
 		}
 		out.Data = append(out.Data, it)
 	}
@@ -346,13 +362,15 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, path string, nee
 		p.st.TouchKey(k.ID)
 	}
 
+	ctx := domain.WithSessionID(r.Context(), r.Header.Get("X-Session-Id"))
+
 	if p.queues != nil {
 		if q, ok := p.queues.Lookup(mb.Model); ok {
 			if needKey && !queueAllowed(k, q, mb.Model) {
 				writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]any{"message": "model not allowed for this key"}})
 				return
 			}
-			p.queues.Handle(r.Context(), w, k, path, body, q.Alias)
+			p.queues.Handle(ctx, w, k, path, body, q.Alias)
 			return
 		}
 	}
@@ -362,7 +380,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, path string, nee
 		return
 	}
 
-	_, _, status, err := p.Forward(r.Context(), w, k, path, body, mb.Model)
+	_, _, status, err := p.Forward(ctx, w, k, path, body, mb.Model)
 	if err != nil && status == 0 {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"message": err.Error()}})
 	}
@@ -386,6 +404,9 @@ func (p *Proxy) Forward(ctx context.Context, w http.ResponseWriter, k domain.API
 	tried := map[string]bool{}
 	var lastStatus int
 	var lastMsg string
+	filtered := body
+	guarded := false
+	var policies []domain.Policy
 	for hop := 0; hop < 4; hop++ {
 		if model == "" || tried[model] {
 			break
@@ -405,24 +426,73 @@ func (p *Proxy) Forward(ctx context.Context, w http.ResponseWriter, k domain.API
 			return "", "", lastStatus, err
 		}
 
+		if !guarded {
+			aliasName := ""
+			if m, e := p.st.GetModelByAlias(model); e == nil && m.Enabled {
+				aliasName = m.Alias
+			}
+			policies, _ = p.st.PoliciesFor(aliasName, domain.QueueAliasFrom(ctx), upstream)
+			pre := guard.Apply(body, policies, domain.GuardPre)
+			if pre.Block != nil {
+				p.st.Log(k.Prefix, requested, "guard", 400, 0, 0, domain.TokenUsage{})
+				w.Header().Set("X-MikroLLM-Guardrail", pre.Block.Policy)
+				writeJSON(w, http.StatusBadRequest, guard.WriteError(pre.Block.Policy, pre.Block.Kind, pre.Block.Message))
+				return "guard", "guard", 400, errors.New(pre.Block.Message)
+			}
+			filtered = pre.Body
+			guarded = true
+		}
+
 		start := time.Now()
 		p.health.Inc(b.ID)
 		upPath := rewriteUpstreamPath(b, path)
-		payload := rewriteModel(body, upstream)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(b.BaseURL, "/")+upPath, bytes.NewReader(payload))
+		mode := promptcache.ModeOff
+		if b.KindNorm() == domain.KindOpenRouter {
+			aliasMode := ""
+			if m, e := p.st.GetModelByAlias(model); e == nil {
+				aliasMode = m.PromptCache
+			}
+			mode = promptcache.Resolve(p.st.PromptCacheMode(), aliasMode)
+		}
+		meta := p.catalogMeta(upstream, model, requested)
+		payload, _ := promptcache.Prepare(promptcache.PrepInput{
+			Body:      filtered,
+			SendAs:    upstream,
+			OrigModel: model,
+			Kind:      b.KindNorm(),
+			Provider:  meta.Provider,
+			Mode:      mode,
+		})
+		method := http.MethodPost
+		if strings.HasPrefix(path, "/v1/videos/") {
+			method = http.MethodGet
+			payload = nil
+		}
+		var rdr io.Reader
+		if payload != nil {
+			rdr = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(b.BaseURL, "/")+upPath, rdr)
 		if err != nil {
 			p.health.Dec(b.ID)
 			http.Error(w, err.Error(), 500)
 			return b.Name, p.providerOf(b, model, upstream), 500, err
 		}
-		req.Header.Set("Content-Type", "application/json")
+		if method != http.MethodGet {
+			req.Header.Set("Content-Type", "application/json")
+			req.ContentLength = int64(len(payload))
+		}
 		domain.ApplyUpstreamHeaders(req.Header, b)
-		req.ContentLength = int64(len(payload))
+		if b.KindNorm() == domain.KindOpenRouter {
+			if sid := domain.SessionIDFrom(ctx); sid != "" {
+				req.Header.Set("X-Session-Id", sid)
+			}
+		}
 
 		resp, err := p.client.Do(req)
 		if err != nil {
 			p.health.Dec(b.ID)
-			p.st.Log(k.Prefix, model, b.Name, 502, time.Since(start), 0)
+			p.st.Log(k.Prefix, model, b.Name, 502, time.Since(start), 0, domain.TokenUsage{})
 			lastStatus, lastMsg = http.StatusBadGateway, err.Error()
 			if next := p.fallbackOf(model); next != "" && !tried[next] {
 				model = next
@@ -436,7 +506,7 @@ func (p *Proxy) Forward(ctx context.Context, w http.ResponseWriter, k domain.API
 			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 			resp.Body.Close()
 			p.health.Dec(b.ID)
-			p.st.Log(k.Prefix, model, b.Name, resp.StatusCode, time.Since(start), int64(len(errBody)))
+			p.st.Log(k.Prefix, model, b.Name, resp.StatusCode, time.Since(start), int64(len(errBody)), domain.TokenUsage{})
 			lastStatus, lastMsg = resp.StatusCode, strings.TrimSpace(string(errBody))
 			if isBillingError(resp.StatusCode, errBody) {
 				if next := p.fallbackOf(model); next != "" && !tried[next] {
@@ -453,27 +523,15 @@ func (p *Proxy) Forward(ctx context.Context, w http.ResponseWriter, k domain.API
 		if hop > 0 {
 			w.Header().Set("X-MikroLLM-Fallback", requested+" -> "+model)
 		}
-		copySafeHeaders(w.Header(), resp.Header)
-		w.WriteHeader(resp.StatusCode)
-		flusher, _ := w.(http.Flusher)
-		buf := make([]byte, 32*1024)
-		var nout int64
-		for {
-			n, rerr := resp.Body.Read(buf)
-			if n > 0 {
-				wn, _ := w.Write(buf[:n])
-				nout += int64(wn)
-				if flusher != nil {
-					flusher.Flush()
-				}
-			}
-			if rerr != nil {
-				break
-			}
-		}
-		resp.Body.Close()
+		usage, nout, block := writeUpstream(w, resp, filtered, policies)
 		p.health.Dec(b.ID)
-		p.st.Log(k.Prefix, model, b.Name, resp.StatusCode, time.Since(start), nout)
+		if block != nil {
+			p.st.Log(k.Prefix, model, "guard", 400, time.Since(start), 0, domain.TokenUsage{})
+			w.Header().Set("X-MikroLLM-Guardrail", block.Policy)
+			writeJSON(w, http.StatusBadRequest, guard.WriteError(block.Policy, block.Kind, block.Message))
+			return "guard", "guard", 400, errors.New(block.Message)
+		}
+		p.st.Log(k.Prefix, model, b.Name, resp.StatusCode, time.Since(start), nout, p.tokenUsage(usage, upstream, requested, p.providerOf(b, model, upstream)))
 		return b.Name, p.providerOf(b, model, upstream), resp.StatusCode, nil
 	}
 	if lastStatus == 0 {
@@ -541,7 +599,18 @@ func rewriteUpstreamPath(b domain.Backend, path string) string {
 		return b.OpenAIChatPath()
 	case "/v1/chat/completions":
 		return b.OpenAIChatPath()
+	case "/v1/images/generations":
+		if b.KindNorm() == domain.KindOpenRouter {
+			return "/images/generations"
+		}
+		return "/v1/images/generations"
 	default:
+		if strings.HasPrefix(path, "/v1/videos") {
+			if b.KindNorm() == domain.KindOpenRouter {
+				return strings.TrimPrefix(path, "/v1")
+			}
+			return path
+		}
 		return path
 	}
 }
@@ -639,6 +708,153 @@ func (p *Proxy) choose(list []domain.Backend, policy string) domain.Backend {
 		}
 		return best
 	}
+}
+
+const maxUsageBuffer = 1 << 20
+
+func (p *Proxy) tokenUsage(u promptcache.Usage, upstream, requested, provider string) domain.TokenUsage {
+	meta := p.catalogMeta(upstream, requested)
+	saved, ok := promptcache.EstimateSaved(u, meta.PromptUSD, provider)
+	return domain.TokenUsage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		CachedTokens:     u.CachedTokens,
+		CacheWriteTokens: u.CacheWriteTokens,
+		Upstream:         upstream,
+		PromptUSD:        meta.PromptUSD,
+		CacheDiscount:    u.CacheDiscount,
+		HasDiscount:      u.HasDiscount,
+		Cost:             u.Cost,
+		HasCost:          u.HasCost,
+		SavedUSD:         saved,
+		HasSaved:         ok,
+	}
+}
+
+func setCacheHeaders(h http.Header, u promptcache.Usage) {
+	if u.CachedTokens > 0 {
+		h.Set("X-MikroLLM-Cache-Tokens", strconv.Itoa(u.CachedTokens))
+	}
+	if u.CacheWriteTokens > 0 {
+		h.Set("X-MikroLLM-Cache-Write-Tokens", strconv.Itoa(u.CacheWriteTokens))
+	}
+}
+
+func writeUpstream(w http.ResponseWriter, resp *http.Response, filtered []byte, policies []domain.Policy) (promptcache.Usage, int64, *guard.Block) {
+	defer resp.Body.Close()
+	code := resp.StatusCode
+	tmp := make([]byte, 32*1024)
+	switch {
+	case guard.IsStream(filtered):
+		copySafeHeaders(w.Header(), resp.Header)
+		w.WriteHeader(code)
+		flusher, _ := w.(http.Flusher)
+		sc := &promptcache.Scanner{}
+		var nout int64
+		for {
+			n, rerr := resp.Body.Read(tmp)
+			if n > 0 {
+				wn, _ := w.Write(tmp[:n])
+				nout += int64(wn)
+				if flusher != nil {
+					flusher.Flush()
+				}
+				sc.Feed(tmp[:n])
+			}
+			if rerr != nil {
+				break
+			}
+		}
+		return promptcache.ParseJSON(sc.LastUsage()), nout, nil
+
+	case guard.HasPost(policies):
+		cap := &memWriter{h: http.Header{}}
+		copySafeHeaders(cap.Header(), resp.Header)
+		cap.WriteHeader(code)
+		for {
+			n, rerr := resp.Body.Read(tmp)
+			if n > 0 {
+				_, _ = cap.Write(tmp[:n])
+			}
+			if rerr != nil {
+				break
+			}
+		}
+		post := guard.Apply(cap.buf.Bytes(), policies, domain.GuardPost)
+		if post.Block != nil {
+			return promptcache.Usage{}, 0, post.Block
+		}
+		u := promptcache.ParseJSON(post.Body)
+		copySafeHeaders(w.Header(), cap.h)
+		setCacheHeaders(w.Header(), u)
+		outCode := cap.code
+		if outCode == 0 {
+			outCode = 200
+		}
+		w.WriteHeader(outCode)
+		wn, _ := w.Write(post.Body)
+		return u, int64(wn), nil
+
+	default:
+		var buf bytes.Buffer
+		overflow := false
+		flusher, _ := w.(http.Flusher)
+		var nout int64
+		for {
+			n, rerr := resp.Body.Read(tmp)
+			if n > 0 {
+				if !overflow && buf.Len()+n <= maxUsageBuffer {
+					buf.Write(tmp[:n])
+				} else {
+					if !overflow {
+						overflow = true
+						copySafeHeaders(w.Header(), resp.Header)
+						w.WriteHeader(code)
+						wn, _ := w.Write(buf.Bytes())
+						nout += int64(wn)
+						buf.Reset()
+					}
+					wn, _ := w.Write(tmp[:n])
+					nout += int64(wn)
+					if flusher != nil {
+						flusher.Flush()
+					}
+				}
+			}
+			if rerr != nil {
+				break
+			}
+		}
+		if overflow {
+			return promptcache.Usage{}, nout, nil
+		}
+		u := promptcache.ParseJSON(buf.Bytes())
+		copySafeHeaders(w.Header(), resp.Header)
+		setCacheHeaders(w.Header(), u)
+		w.WriteHeader(code)
+		wn, _ := w.Write(buf.Bytes())
+		return u, int64(wn), nil
+	}
+}
+
+type memWriter struct {
+	h    http.Header
+	code int
+	buf  bytes.Buffer
+}
+
+func (m *memWriter) Header() http.Header {
+	if m.h == nil {
+		m.h = http.Header{}
+	}
+	return m.h
+}
+func (m *memWriter) WriteHeader(code int) { m.code = code }
+func (m *memWriter) Write(p []byte) (int, error) {
+	if m.code == 0 {
+		m.code = 200
+	}
+	return m.buf.Write(p)
 }
 
 func copySafeHeaders(dst, src http.Header) {

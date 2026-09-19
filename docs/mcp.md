@@ -1,75 +1,77 @@
 # MCP
 
-MikroLLM поднимает [MCP](https://modelcontextprotocol.io) в том же процессе, что и шлюз: `POST /mcp`, без отдельного бинаря и без второго SQLite.
+**English** · [Русский](ru/mcp.md)
 
-Агент (Grok, Cursor, Claude) может смотреть статус, настраивать провайдеры, модели, очереди и ключи, читать логи.
+MikroLLM runs [MCP](https://modelcontextprotocol.io) in the same process as the gateway: `POST /mcp`, no extra binary and no second SQLite.
 
-## Транспорт
+An agent (Grok, Cursor, Claude) can read status, configure providers, models, queues, and keys, and read logs. `save_model.prompt_cache` = `inherit|off|auto|on`. `list_logs` / `log_stats` return `cached_tokens` and `saved_usd`.
+
+## Transport
 
 Streamable HTTP, JSON-RPC 2.0.
 
-| Метод | Путь | Назначение |
+| Method | Path | Purpose |
 |---|---|---|
 | POST | `/mcp` | initialize, tools/list, tools/call, ping |
-| GET | `/mcp` | `405` (серверных SSE-уведомлений нет, RAM на MikroTik) |
-| DELETE | `/mcp` | закрыть сессию (no-op, 200) |
+| GET | `/mcp` | `405` (no server SSE notifications — RAM on MikroTik) |
+| DELETE | `/mcp` | close session (no-op, 200) |
 
-`Accept: application/json, text/event-stream`. Ответ обычно `application/json`. Если клиент просит только SSE — одно событие `message`.
+`Accept: application/json, text/event-stream`. Reply is usually `application/json`. If the client asks for SSE only — one `message` event.
 
-Сессии **stateless**: заголовок `Mcp-Session-Id` на initialize выдаётся и зеркалится, но сервер его не хранит. После рестарта контейнера reconnect без потери состояния.
+Sessions are **stateless**: `Mcp-Session-Id` is issued on initialize and mirrored, but the server does not store it. After a container restart, reconnect without lost state.
 
-Тело запроса не больше 1 МБ.
+Request body max 1 MB.
 
-## Авторизация
+## Auth
 
-Только Bearer. Cookie админки на `/mcp` не уходит (`Path=/admin`).
+Bearer only. The admin cookie does not go to `/mcp` (`Path=/admin`).
 
 ```
 Authorization: Bearer mcp-…
 ```
 
-Принимается:
+Accepted:
 
-1. MCP-токен (SHA-256 в `admin_meta`, как у ключей `sk-`).
-2. Пароль админки — чтобы поднять доступ, если токен потеряли. bcrypt, лимит попыток с IP как на логине.
+1. MCP token (SHA-256 in `admin_meta`, like `sk-` keys).
+2. Admin password — to recover if the token is lost. bcrypt, same per-IP login limit.
 
-Обычные ключи `sk-` **не** открывают MCP: у них права клиента чата, не админки.
+Ordinary `sk-` keys **do not** open MCP: they are chat-client rights, not admin.
 
-Неверный токен — `401` и `WWW-Authenticate: Bearer`.
+Bad token — `401` and `WWW-Authenticate: Bearer`.
 
-## Как получить токен
+## How to get a token
 
-При **первом** старте, если токена ещё нет, он генерируется и пишется в лог:
+On **first** start, if none exists, one is generated and logged:
 
 ```
 generated MCP token: mcp-…
 ```
 
-Дальше — админка **Статус → MCP для агента**: выпустить / сменить. Секрет показывается один раз.
+Later — admin **Status → MCP for agents**: issue / rotate. Secret shown once.
 
-Или флаг / env (перезаписывает сохранённый, если задан):
+Or flag / env (overwrites the stored hash if set):
 
-| Флаг | Переменная | Смысл |
+| Flag | Env | Meaning |
 |---|---|---|
-| `-mcp-token` | `MIKROLLM_MCP_TOKEN` | задать токен (хранится хеш) |
-| `-mcp-token-reset` | `MIKROLLM_MCP_TOKEN_RESET=1` | сгенерировать новый, даже если уже есть |
+| `-mcp-token` | `MIKROLLM_MCP_TOKEN` | set the token (hash stored) |
+| `-mcp-token-reset` | `MIKROLLM_MCP_TOKEN_RESET=1` | generate a new one even if one exists |
 
-Не коммитьте токен в git. В envlist RouterOS он попадёт в конфиг роутера — лучше выпустить из админки.
+Do not commit the token. In a RouterOS envlist it lands in the router config — prefer issuing from admin.
 
 ## Grok
 
-`~/.grok/config.toml` или `.grok/config.toml` в репозитории:
+`~/.grok/config.toml` or `.grok/config.toml` in the repo:
 
 ```toml
 [mcp_servers.mikrollm]
-url = "http://192.168.88.1:4000/mcp"
+url = "http://192.168.88.1:4000/mcp"   # or https://… after TLS, see tls.md
 enabled = true
 headers = { "Authorization" = "Bearer ${MIKROLLM_MCP_TOKEN}" }
 ```
 
-Подставьте токен или экспортните `MIKROLLM_MCP_TOKEN`. LAN, без hairpin WSS: агент должен ходить на `192.168.88.1:4000` с хоста в LAN / split-tunnel, не через публичный hairpin.
+Paste the token or export `MIKROLLM_MCP_TOKEN`. LAN, no hairpin WSS: the agent should hit `192.168.88.1:4000` from a LAN host / split-tunnel, not public hairpin.
 
-Проверка:
+Check:
 
 ```bash
 curl -sS http://192.168.88.1:4000/mcp \
@@ -79,7 +81,7 @@ curl -sS http://192.168.88.1:4000/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
 ```
 
-Затем `"method":"tools/list"` и `"method":"tools/call","params":{"name":"get_status","arguments":{}}`.
+Then `"method":"tools/list"` and `"method":"tools/call","params":{"name":"get_status","arguments":{}}`.
 
 CLI:
 
@@ -88,26 +90,28 @@ grok mcp add --transport http mikrollm http://192.168.88.1:4000/mcp \
   --header "Authorization: Bearer mcp-…"
 ```
 
-## Инструменты
+## Tools
 
-Сначала `get_status`. Имена стабильные, описания на русском.
+Start with `get_status`. Names are stable; descriptions may be Russian in the live schema.
 
-| Tool | Действие |
+| Tool | Action |
 |---|---|
-| `get_status` | версия, RAM процесса, бэкенды, alias, живые очереди, jobs |
-| `refresh_health` | внеочередной опрос бэкендов + сводка |
-| `list_providers` / `upsert_provider` / `delete_provider` | Ollama, vLLM, LM Studio, OpenRouter, Ollama Cloud. Токен в ответах маскируется; пустой `token` не затирает ключ |
-| `list_models` / `list_catalog` / `connect_model` / `save_model` / `delete_model` | alias шлюза и каталог health |
-| `host_action` | `pull` / `load` (фон, смотрите `list_jobs`) или `unload` / `delete` |
-| `list_jobs` | прогресс pull/load |
-| `list_queues` / `save_queue` / `delete_queue` | очередь: `steps` (`model_alias`, `max_concurrent`), `extra_aliases`, overflow |
-| `list_keys` / `create_key` / `update_key` / `delete_key` | виртуальные `sk-`. Секрет только в ответе `create_key` |
-| `list_logs` / `log_stats` | фильтры q / model / backend / key / 2xx·4xx·5xx / latency; p50/p95 |
-| `rotate_mcp_token` | новый Bearer, старый сразу мёртв |
+| `get_status` | version, process RAM, backends, aliases, live queues, jobs |
+| `refresh_health` | full catalog refetch without cache (OpenRouter: chat + image + video) + summary |
+| `refresh_provider` | same for one backend by `id` |
+| `list_providers` / `upsert_provider` / `delete_provider` | Ollama, vLLM, LM Studio, OpenRouter, Ollama Cloud. Token is masked; empty `token` does not wipe the key. Omitted `enabled` and `weight` stay. Disable: `id` + `enabled: false` |
+| `list_models` / `list_catalog` / `connect_model` / `save_model` / `delete_model` | gateway aliases and health catalog |
+| `host_action` | `pull` / `load` (background, see `list_jobs`) or `unload` / `delete` |
+| `list_jobs` | pull/load progress |
+| `list_queues` / `save_queue` / `delete_queue` | queue: `steps` (`model_alias`, `max_concurrent`), `extra_aliases`, overflow |
+| `list_keys` / `create_key` / `update_key` / `delete_key` | virtual `sk-`. Secret only in `create_key` response |
+| `list_logs` / `log_stats` | filters q / model / backend / key / 2xx·4xx·5xx / latency; p50/p95 |
+| `rotate_mcp_token` | new Bearer, old one dies immediately |
+| `list_policies` / `list_plugins` / `save_policy` / `delete_policy` | filters; `kind=nsfw` or `plugins: ["nsfw","adult"]`. Targets alias/queue/model, each id once |
 
-`save_queue` с `steps` и `extra_aliases` заменяет соответствующие списки. Если поля нет — старое не трогается.
+`save_queue` with `steps` and `extra_aliases` replaces those lists. If the field is omitted, the old value stays.
 
-Сводка:
+Summary:
 
 ```json
 {
@@ -118,7 +122,7 @@ grok mcp add --transport http mikrollm http://192.168.88.1:4000/mcp \
 }
 ```
 
-Очередь «локальная → облако»:
+Queue “local → cloud”:
 
 ```json
 {
@@ -141,12 +145,12 @@ grok mcp add --transport http mikrollm http://192.168.88.1:4000/mcp \
 }
 ```
 
-Клиент чата тогда может слать `model: "coder"`, `itres` или `itres-coder`.
+A chat client can then send `model: "coder"`, `itres`, or `itres-coder`.
 
-## Безопасность
+## Security
 
-MCP = полная админка. Кто знает токен, может выпустить ключи и сменить провайдеров.
+MCP is full admin. Whoever has the token can issue keys and change providers.
 
-- Не публикуйте `/mcp` в интернет без TLS и фильтра.
-- На RouterOS оставляйте dst-nat :4000 в LAN.
-- Токены бэкендов и `sk-` в ответах инструментов не повторяются, кроме одноразового `create_key` / `rotate_mcp_token`.
+- Do not publish `/mcp` to the internet without TLS and a filter.
+- On RouterOS keep dst-nat :4000 on the LAN.
+- Backend tokens and `sk-` are not repeated in tool replies except one-shot `create_key` / `rotate_mcp_token`.

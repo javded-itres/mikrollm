@@ -112,8 +112,52 @@ CREATE TABLE IF NOT EXISTS ollama_jobs (
 	_, _ = s.DB.Exec(`ALTER TABLE backends ADD COLUMN token TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN max_context INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN fallback TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN prompt_cache TEXT NOT NULL DEFAULT 'inherit'`)
+	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN media TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN mcp_token_hash TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN mcp_token_prefix TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN prompt_cache TEXT NOT NULL DEFAULT 'auto'`)
+	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN upstream TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN prompt_usd REAL NOT NULL DEFAULT 0`)
+	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN cache_discount REAL NOT NULL DEFAULT 0`)
+	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN usage_cost REAL NOT NULL DEFAULT 0`)
+	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN saved_usd REAL NOT NULL DEFAULT 0`)
+	if _, err := s.DB.Exec(`
+CREATE TABLE IF NOT EXISTS billing_hour (
+  hour TEXT PRIMARY KEY,
+  n INTEGER NOT NULL DEFAULT 0,
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  cached_tokens INTEGER NOT NULL DEFAULT 0,
+  usage_cost REAL NOT NULL DEFAULT 0,
+  saved_usd REAL NOT NULL DEFAULT 0
+);`); err != nil {
+		return err
+	}
+	s.backfillBilling()
+	if _, err := s.DB.Exec(`
+CREATE TABLE IF NOT EXISTS security_policies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL,
+  action TEXT NOT NULL DEFAULT 'block',
+  mode TEXT NOT NULL DEFAULT 'pre',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  config TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS security_targets (
+  policy_id INTEGER NOT NULL REFERENCES security_policies(id) ON DELETE CASCADE,
+  target_kind TEXT NOT NULL,
+  target_key TEXT NOT NULL,
+  PRIMARY KEY (policy_id, target_kind, target_key)
+);
+`); err != nil {
+		return err
+	}
 	_, err = s.DB.Exec(`
 CREATE TABLE IF NOT EXISTS queues (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -326,25 +370,42 @@ ON CONFLICT(base_url) DO UPDATE SET name=excluded.name, enabled=excluded.enabled
 	return id, nil
 }
 
+func (s *Store) SetBackendEnabled(id int64, enabled bool) error {
+	en := 0
+	if enabled {
+		en = 1
+	}
+	res, err := s.DB.Exec(`UPDATE backends SET enabled=? WHERE id=?`, en, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) DeleteBackend(id int64) error {
 	_, err := s.DB.Exec(`DELETE FROM backends WHERE id=?`, id)
 	return err
 }
 
 func (s *Store) ListModels() ([]Model, error) {
-	rows, err := s.DB.Query(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback FROM models ORDER BY alias`)
+	rows, err := s.DB.Query(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media FROM models ORDER BY alias`)
 	if err != nil {
 		return nil, err
 	}
 	var out []Model
 	for rows.Next() {
-		var m Model
-		var en int
-		if err := rows.Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en, &m.MaxContext, &m.Fallback); err != nil {
+		m, err := scanModelRow(rows)
+		if err != nil {
 			rows.Close()
 			return nil, err
 		}
-		m.Enabled = en == 1
 		out = append(out, m)
 	}
 	qerr := rows.Err()
@@ -364,29 +425,33 @@ func (s *Store) ListModels() ([]Model, error) {
 }
 
 func (s *Store) GetModel(id int64) (Model, error) {
-	var m Model
-	var en int
-	err := s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback FROM models WHERE id=?`, id).
-		Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en, &m.MaxContext, &m.Fallback)
+	m, err := scanModelRow(s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media FROM models WHERE id=?`, id))
 	if err != nil {
 		return m, err
 	}
-	m.Enabled = en == 1
 	m.BackendIDs, err = s.modelBackendIDs(m.ID)
 	return m, err
 }
 
 func (s *Store) GetModelByAlias(alias string) (Model, error) {
-	var m Model
-	var en int
-	err := s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback FROM models WHERE alias=?`, alias).
-		Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en, &m.MaxContext, &m.Fallback)
+	m, err := scanModelRow(s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media FROM models WHERE alias=?`, alias))
 	if err != nil {
 		return m, err
 	}
-	m.Enabled = en == 1
 	m.BackendIDs, err = s.modelBackendIDs(m.ID)
 	return m, err
+}
+
+func scanModelRow(r rowScanner) (Model, error) {
+	var m Model
+	var en int
+	var media string
+	if err := r.Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en, &m.MaxContext, &m.Fallback, &m.PromptCache, &media); err != nil {
+		return m, err
+	}
+	m.Enabled = en == 1
+	m.Media = domain.ParseMedia(media)
+	return m, nil
 }
 
 func (s *Store) modelBackendIDs(modelID int64) ([]int64, error) {
@@ -410,6 +475,12 @@ func (s *Store) SaveModel(m Model) (int64, error) {
 	if m.LBPolicy == "" {
 		m.LBPolicy = "least_conn"
 	}
+	m.PromptCache = strings.ToLower(strings.TrimSpace(m.PromptCache))
+	switch m.PromptCache {
+	case "inherit", "off", "auto", "on":
+	default:
+		m.PromptCache = "inherit"
+	}
 	en := 0
 	if m.Enabled {
 		en = 1
@@ -429,16 +500,16 @@ func (s *Store) SaveModel(m Model) (int64, error) {
 		return 0, fmt.Errorf("alias %s already used", m.Alias)
 	}
 	if m.ID == 0 {
-		res, err := s.DB.Exec(`INSERT INTO models (alias, upstream_name, lb_policy, enabled, max_context, fallback) VALUES (?,?,?,?,?,?)`,
-			m.Alias, m.UpstreamName, m.LBPolicy, en, m.MaxContext, m.Fallback)
+		res, err := s.DB.Exec(`INSERT INTO models (alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media) VALUES (?,?,?,?,?,?,?,?)`,
+			m.Alias, m.UpstreamName, m.LBPolicy, en, m.MaxContext, m.Fallback, m.PromptCache, domain.JoinMedia(m.Media))
 		if err != nil {
 			return 0, err
 		}
 		id, _ := res.LastInsertId()
 		m.ID = id
 	} else {
-		_, err := s.DB.Exec(`UPDATE models SET alias=?, upstream_name=?, lb_policy=?, enabled=?, max_context=?, fallback=? WHERE id=?`,
-			m.Alias, m.UpstreamName, m.LBPolicy, en, m.MaxContext, m.Fallback, m.ID)
+		_, err := s.DB.Exec(`UPDATE models SET alias=?, upstream_name=?, lb_policy=?, enabled=?, max_context=?, fallback=?, prompt_cache=?, media=? WHERE id=?`,
+			m.Alias, m.UpstreamName, m.LBPolicy, en, m.MaxContext, m.Fallback, m.PromptCache, domain.JoinMedia(m.Media), m.ID)
 		if err != nil {
 			return 0, err
 		}
@@ -475,7 +546,7 @@ func (s *Store) ConnectOllamaModel(name string, backendIDs []int64, policy strin
 	}
 	m, err := s.GetModelByAlias(name)
 	if err != nil {
-		m = Model{Alias: name, UpstreamName: name, LBPolicy: policy, Enabled: true, BackendIDs: backendIDs, MaxContext: maxContext}
+		m = Model{Alias: name, UpstreamName: name, LBPolicy: policy, Enabled: true, BackendIDs: backendIDs, MaxContext: maxContext, Media: domain.InferMedia(name, nil)}
 	} else {
 		m.BackendIDs = backendIDs
 		m.Enabled = true
@@ -574,17 +645,55 @@ func (s *Store) TouchKey(id int64) {
 		time.Now().UTC().Format(time.RFC3339), id)
 }
 
-func (s *Store) Log(prefix, model, backend string, status int, latency time.Duration, bytesOut int64) {
-	_, _ = s.DB.Exec(`INSERT INTO request_log (ts, key_prefix, model, backend, status, latency_ms, bytes_out) VALUES (?,?,?,?,?,?,?)`,
-		time.Now().UTC().Format(time.RFC3339Nano), prefix, model, backend, status, latency.Milliseconds(), bytesOut)
+func (s *Store) PromptCacheMode() string {
+	var v string
+	_ = s.DB.QueryRow(`SELECT prompt_cache FROM admin_meta WHERE id=1`).Scan(&v)
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch v {
+	case "off", "auto", "on":
+		return v
+	default:
+		return "auto"
+	}
+}
+
+func (s *Store) SetPromptCacheMode(mode string) error {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "off", "auto", "on":
+	default:
+		return fmt.Errorf("prompt_cache must be off, auto or on")
+	}
+	_, err := s.DB.Exec(`UPDATE admin_meta SET prompt_cache=? WHERE id=1`, mode)
+	return err
+}
+
+func (s *Store) Log(prefix, model, backend string, status int, latency time.Duration, bytesOut int64, u domain.TokenUsage) {
+	cost, saved, disc := 0.0, 0.0, 0.0
+	if u.HasCost {
+		cost = u.Cost
+	}
+	if u.HasSaved {
+		saved = u.SavedUSD
+	}
+	if u.HasDiscount {
+		disc = u.CacheDiscount
+	} else {
+		disc = u.CacheDiscount
+	}
+	now := time.Now().UTC()
+	_, _ = s.DB.Exec(`INSERT INTO request_log (ts, key_prefix, model, backend, status, latency_ms, bytes_out, prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens, upstream, prompt_usd, cache_discount, usage_cost, saved_usd) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		now.Format(time.RFC3339Nano), prefix, model, backend, status, latency.Milliseconds(), bytesOut,
+		u.PromptTokens, u.CompletionTokens, u.CachedTokens, u.CacheWriteTokens, u.Upstream, u.PromptUSD, disc, cost, saved)
 	_, _ = s.DB.Exec(`DELETE FROM request_log WHERE id NOT IN (SELECT id FROM request_log ORDER BY id DESC LIMIT 500)`)
+	s.addBilling(now, 1, u.PromptTokens, u.CompletionTokens, u.CachedTokens, cost, saved)
 }
 
 func (s *Store) ListLogs(limit int) ([]RequestLog, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.DB.Query(`SELECT id, ts, key_prefix, model, backend, status, latency_ms, bytes_out FROM request_log ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := s.DB.Query(`SELECT id, ts, key_prefix, model, backend, status, latency_ms, bytes_out, prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens, upstream, prompt_usd, cache_discount, usage_cost, saved_usd FROM request_log ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -593,7 +702,8 @@ func (s *Store) ListLogs(limit int) ([]RequestLog, error) {
 	for rows.Next() {
 		var l RequestLog
 		var ts string
-		if err := rows.Scan(&l.ID, &ts, &l.KeyPrefix, &l.Model, &l.Backend, &l.Status, &l.LatencyMS, &l.BytesOut); err != nil {
+		if err := rows.Scan(&l.ID, &ts, &l.KeyPrefix, &l.Model, &l.Backend, &l.Status, &l.LatencyMS, &l.BytesOut,
+			&l.PromptTokens, &l.CompletionTokens, &l.CachedTokens, &l.CacheWriteTokens, &l.Upstream, &l.PromptUSD, &l.CacheDiscount, &l.UsageCost, &l.SavedUSD); err != nil {
 			return nil, err
 		}
 		l.TS, _ = time.Parse(time.RFC3339Nano, ts)

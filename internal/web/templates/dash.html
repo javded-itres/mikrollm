@@ -27,6 +27,18 @@
     <div class="stat-val">{{if .QueueLive}}{{.QueueLive}}{{else}}0{{end}}</div>
     <div class="stat-k">в очередях</div>
   </div>
+  <div class="stat">
+    <div class="stat-val">{{if .CacheTokens}}{{.CacheTokens}}{{else}}0{{end}}</div>
+    <div class="stat-k">кэш промпта, ток.</div>
+  </div>
+  <div class="stat" title="оценка экономии по cache_discount или мультипликатору, не инвойс">
+    <div class="stat-val">{{printf "%.2f" .SavedUSD}}</div>
+    <div class="stat-k">оценка $ кэша</div>
+  </div>
+  <div class="stat" title="сумма usage.cost с OpenRouter, billed fact">
+    <div class="stat-val">{{printf "%.2f" .UsageCost}}</div>
+    <div class="stat-k">billed (OR)</div>
+  </div>
 </div>
 
 <section class="q-wrap card" id="q-board" data-live="1">
@@ -69,9 +81,9 @@
 {{if .Backends}}
 <div class="host-list">
 {{range $b := .Backends}}
-  <article class="host-row {{if $b.Healthy}}is-up{{else}}is-down{{end}} {{if $b.Cloud}}is-cloud{{end}}">
+  <article class="host-row {{if not $b.Enabled}}is-off{{else if $b.Healthy}}is-up{{else}}is-down{{end}} {{if $b.Cloud}}is-cloud{{end}}">
     <div class="host-status">
-      {{if $b.Healthy}}<span class="badge ok">Онлайн</span>{{else}}<span class="badge bad">Нет связи</span>{{end}}
+      {{if not $b.Enabled}}<span class="badge off">Выкл</span>{{else if $b.Healthy}}<span class="badge ok">Онлайн</span>{{else}}<span class="badge bad">Нет связи</span>{{end}}
     </div>
     <div class="host-main">
       <div class="host-title">
@@ -81,30 +93,48 @@
         {{if $b.Token}}<span class="pill">ключ</span>{{end}}
       </div>
       <div class="host-url mono" title="{{$b.BaseURL}}">{{$b.BaseURL}}</div>
-      {{if not $b.Healthy}}
+      {{if and $b.Enabled (not $b.Healthy)}}
       <div class="host-err" title="{{$b.Err}}">{{if $b.ErrShort}}{{$b.ErrShort}}{{else}}недоступен{{end}}</div>
+      {{end}}
+      {{if not $b.Enabled}}
+      <p class="hint">Выключен: health не опрашивается, запросы на него не идут.</p>
       {{end}}
       {{if $b.UIHint}}<p class="hint">{{$b.UIHint}} · <a href="{{$b.DocsURL}}">как поднять модель</a></p>{{end}}
     </div>
     <div class="host-metrics" aria-label="метрики">
       <div class="metric">
         <span class="k">задержка</span>
-        <span class="v">{{if $b.Healthy}}{{$b.Latency}}{{else}}—{{end}}</span>
+        <span class="v">{{if and $b.Enabled $b.Healthy}}{{$b.Latency}}{{else}}—{{end}}</span>
       </div>
       <div class="metric">
         <span class="k">{{if $b.Cloud}}в каталоге{{else}}на диске{{end}}</span>
-        <span class="v">{{$b.NModels}}</span>
+        <span class="v">{{if $b.Enabled}}{{$b.NModels}}{{else}}—{{end}}</span>
       </div>
       <div class="metric">
         <span class="k">{{if $b.Cloud}}в облаке{{else}}в RAM{{end}}</span>
-        <span class="v">{{if $b.Cloud}}{{if $b.Healthy}}да{{else}}—{{end}}{{else}}{{$b.NRunning}}{{end}}</span>
+        <span class="v">{{if not $b.Enabled}}—{{else if $b.Cloud}}{{if $b.Healthy}}да{{else}}—{{end}}{{else}}{{$b.NRunning}}{{end}}</span>
       </div>
     </div>
-    <form class="host-del" method="post" action="/admin/backends/{{$b.ID}}/delete" onsubmit="return confirm('Удалить {{$b.Name}} из шлюза?')">
-      <button class="ghost danger-text" type="submit">Удалить</button>
-    </form>
+    <div class="host-del">
+      <form method="post" action="/admin/backends/{{$b.ID}}/refresh-models">
+        <input type="hidden" name="next" value="/admin">
+        <button class="ghost" type="submit" title="Скачать список моделей с этого сервера заново">Обновить модели</button>
+      </form>
+      <form method="post" action="/admin/backends/{{$b.ID}}/enabled">
+        {{if $b.Enabled}}
+        <input type="hidden" name="enabled" value="0">
+        <button class="ghost" type="submit">Выключить</button>
+        {{else}}
+        <input type="hidden" name="enabled" value="1">
+        <button class="ghost" type="submit">Включить</button>
+        {{end}}
+      </form>
+      <form method="post" action="/admin/backends/{{$b.ID}}/delete" onsubmit="return confirm('Удалить {{$b.Name}} из шлюза?')">
+        <button class="ghost danger-text" type="submit">Удалить</button>
+      </form>
+    </div>
 
-    {{if or $b.Running (and $b.Healthy $b.CanLoad)}}
+    {{if and $b.Enabled (or $b.Running (and $b.Healthy $b.CanLoad))}}
     <div class="host-ram">
       {{if $b.Running}}
       <div class="ram-k">{{if $b.CanLoad}}В RAM — нажмите, чтобы выгрузить{{else}}Сейчас отдаёт{{end}}</div>

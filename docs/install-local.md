@@ -1,9 +1,11 @@
-# Установка локально
+# Local install
 
-## Зависимости
+**English** · [Русский](ru/install-local.md)
 
-- Go 1.23 или новее
-- (по желанию) Ollama, vLLM или LM Studio на этой же машине или в LAN
+## Dependencies
+
+- Go 1.23 or newer
+- (optional) Ollama, vLLM, or LM Studio on this machine or on the LAN
 
 ```bash
 git clone https://github.com/javded-itres/mikrollm.git
@@ -11,55 +13,57 @@ cd mikrollm
 go test ./...
 ```
 
-## Запуск
+## Run
 
 ```bash
 go run ./cmd/mikrollm -listen :4000 -data ./data -admin-password admin
 ```
 
-или `make run` (то же самое).
+or `make run` (same thing).
 
-Админка: http://127.0.0.1:4000/admin  
-Пароль: то, что передали в `-admin-password`. Если флаг и `ADMIN_PASSWORD` пустые **и** база ещё не создана, пароль генерируется и печатается в stdout:
+Admin: http://127.0.0.1:4000/admin  
+Password: whatever you passed to `-admin-password`. If the flag and `ADMIN_PASSWORD` are empty **and** the database does not exist yet, a password is generated and printed:
 
 ```
 generated admin password: …………
 ```
 
-Каталог `-data` (по умолчанию `./data`) содержит `mikrollm.db` (SQLite, WAL). Его нельзя отдавать в git — см. `.gitignore`.
+The `-data` directory (default `./data`) holds `mikrollm.db` (SQLite, WAL). Do not commit it — see `.gitignore`.
 
-## Пустая база
+## Empty database
 
-При первом старте, если таблица `backends` пустая, добавляются:
+On first start, if the `backends` table is empty, these are added:
 
-| Имя | URL |
+| Name | URL |
 |---|---|
 | mac-82 | `http://192.168.88.82:11434` |
 | mac-80 | `http://192.168.88.80:11434` |
 
-Это удобно для типовой LAN MikroTik. Иначе зайдите в **Статус**, удалите лишнее и добавьте свой бэкенд (`http://127.0.0.1:11434` Ollama, `:8000` vLLM, `:1234` LM Studio). Как загрузить модель на GPU-сервер — [providers.md](providers.md).
+Handy for a typical MikroTik LAN. Otherwise open **Status**, delete extras, and add your backend (`http://127.0.0.1:11434` Ollama, `:8000` vLLM, `:1234` LM Studio). Loading a model on a GPU host: [providers.md](providers.md).
 
-## Сброс пароля
+## Reset the password
 
 ```bash
-ADMIN_PASSWORD=новыйсекрет ADMIN_PASSWORD_RESET=1 \
+ADMIN_PASSWORD=newsecret ADMIN_PASSWORD_RESET=1 \
   go run ./cmd/mikrollm -data ./data
 ```
 
-После успешного входа уберите `ADMIN_PASSWORD_RESET`, иначе пароль будет перезаписываться на каждом старте.
+After a successful login, drop `ADMIN_PASSWORD_RESET`, or the password will be rewritten on every start.
 
-MCP-токен при первом старте генерируется в лог (`generated MCP token:`). Задать свой: `-mcp-token` / `MIKROLLM_MCP_TOKEN`. Сброс: `-mcp-token-reset` / `MIKROLLM_MCP_TOKEN_RESET=1`. Как подключить агента — [mcp.md](mcp.md).
+The MCP token is generated into the log on first start (`generated MCP token:`). Set your own with `-mcp-token` / `MIKROLLM_MCP_TOKEN`. Reset: `-mcp-token-reset` / `MIKROLLM_MCP_TOKEN_RESET=1`. Connecting an agent: [mcp.md](mcp.md).
 
-Очереди (необязательно): `MIKROLLM_QUEUE_MAX_BYTES` (по умолчанию 16 МиБ тела на диске), `MIKROLLM_QUEUE_MAX_JOBS` (200), `MIKROLLM_QUEUE_MAX_WAIT` (`3m`).
+Queues (optional): `MIKROLLM_QUEUE_MAX_BYTES` (default 16 MiB body on disk), `MIKROLLM_QUEUE_MAX_JOBS` (200), `MIKROLLM_QUEUE_MAX_WAIT` (`3m`).
 
-## Сборка бинаря
+HTTPS: `MIKROLLM_TLS_AUTO=1`, a `-tls-cert` / `-tls-key` pair, or Let's Encrypt `-acme-hosts llm.example.com` (the machine needs port 80 from the internet). Details: [tls.md](tls.md).
+
+## Build a binary
 
 ```bash
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o mikrollm ./cmd/mikrollm
 ./mikrollm -listen :4000 -data ./data -admin-password admin
 ```
 
-Кросс-сборка:
+Cross-compile:
 
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/mikrollm-linux-amd64 ./cmd/mikrollm

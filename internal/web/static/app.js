@@ -17,6 +17,21 @@
     f.appendChild(i);
   });
 
+  document.querySelectorAll("[data-kind-form]").forEach(function (root) {
+    var form = root.querySelector("form") || root;
+    var sel = form.querySelector("select[name=kind]");
+    if (!sel) return;
+    function sync() {
+      var k = sel.value;
+      form.querySelectorAll("[data-for-kind]").forEach(function (el) {
+        var kinds = (el.getAttribute("data-for-kind") || "").split(/\s+/);
+        el.hidden = kinds.indexOf(k) === -1;
+      });
+    }
+    sel.addEventListener("change", sync);
+    sync();
+  });
+
   document.querySelectorAll("[data-toggle]").forEach(function (el) {
     el.addEventListener("change", function () {
       var root = document.querySelector(el.getAttribute("data-toggle"));
@@ -96,16 +111,64 @@
     return true;
   }
 
+  var catalogPage = 1;
+  function paginateCatalog(reset) {
+    var sizeEl = document.getElementById("catalog-page-size");
+    var pager = document.getElementById("catalog-pager");
+    if (!sizeEl) return;
+    if (reset) catalogPage = 1;
+    var rows = Array.prototype.filter.call(document.querySelectorAll(".model-tr"), function (el) {
+      return !el.classList.contains("is-hidden");
+    });
+    var n = rows.length;
+    var sz = parseInt(sizeEl.value, 10);
+    if (isNaN(sz)) sz = 10;
+    rows.forEach(function (el) { el.classList.remove("is-paged-out"); });
+    if (!pager) return;
+    pager.innerHTML = "";
+    if (!sz || sz <= 0) {
+      return;
+    }
+    var pages = Math.max(1, Math.ceil(n / sz) || 1);
+    if (catalogPage > pages) catalogPage = pages;
+    if (catalogPage < 1) catalogPage = 1;
+    var from = (catalogPage - 1) * sz;
+    var to = Math.min(n, from + sz);
+    rows.forEach(function (el, i) {
+      el.classList.toggle("is-paged-out", i < from || i >= to);
+    });
+    function btn(label, toPage, disabled) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "ghost btn-sm";
+      b.textContent = label;
+      b.disabled = !!disabled;
+      b.addEventListener("click", function () {
+        catalogPage = toPage;
+        paginateCatalog(false);
+      });
+      pager.appendChild(b);
+    }
+    btn("←", catalogPage - 1, catalogPage <= 1);
+    var info = document.createElement("span");
+    info.className = "muted";
+    info.textContent = (n ? (from + 1) : 0) + "–" + to + " из " + n;
+    pager.appendChild(info);
+    btn("→", catalogPage + 1, catalogPage >= pages);
+  }
+
   function bindModelFilters(nameId, provId, priceId, rowSel, countId) {
     var nameEl = document.getElementById(nameId);
     var provEl = document.getElementById(provId);
     var priceEl = document.getElementById(priceId);
+    var mediaEl = document.getElementById("model-media");
     if (!nameEl && !provEl && !priceEl) return;
     var onlyEl = document.getElementById(rowSel.indexOf("#key-models") >= 0 ? "key-only-picked" : "");
     function apply() {
       var q = (nameEl && nameEl.value ? nameEl.value : "").trim().toLowerCase();
       var prov = provEl ? provEl.value : "";
       var price = priceEl ? priceEl.value : "";
+      var media = mediaEl ? mediaEl.value : "";
       var only = onlyEl && onlyEl.checked;
       var vis = 0, total = 0;
       document.querySelectorAll(rowSel).forEach(function (el) {
@@ -113,15 +176,20 @@
         var name = (el.getAttribute("data-name") || "").toLowerCase();
         var title = (el.getAttribute("data-title") || "").toLowerCase();
         var provider = el.getAttribute("data-provider") || "";
+        var rowMedia = (el.getAttribute("data-media") || "").toLowerCase();
         var cb = el.querySelector("input[name=model]");
         var ok = true;
         if (q && name.indexOf(q) < 0 && title.indexOf(q) < 0 && provider.toLowerCase().indexOf(q) < 0) ok = false;
         if (prov && provider !== prov) ok = false;
         if (!matchBand(el.getAttribute("data-band") || "none", el.getAttribute("data-prompt"), price)) ok = false;
+        if (media === "image" && rowMedia.indexOf("image") < 0) ok = false;
+        if (media === "video" && rowMedia.indexOf("video") < 0) ok = false;
+        if (media === "chat" && rowMedia) ok = false;
         if (only && (!cb || !cb.checked)) ok = false;
         el.classList.toggle("is-hidden", !ok);
         if (ok) vis++;
       });
+      if (rowSel === ".model-tr") paginateCatalog(true);
       document.querySelectorAll("#key-models .pick-group").forEach(function (g) {
         var n = g.nextElementSibling, any = false;
         while (n && !n.classList.contains("pick-group")) {
@@ -133,7 +201,7 @@
       var cnt = document.getElementById(countId);
       if (cnt && total) cnt.textContent = vis + " из " + total;
     }
-    [nameEl, provEl, priceEl, onlyEl].forEach(function (el) {
+    [nameEl, provEl, priceEl, mediaEl, onlyEl].forEach(function (el) {
       if (!el) return;
       el.addEventListener("input", apply);
       el.addEventListener("change", apply);
@@ -142,6 +210,19 @@
     return apply;
   }
   bindModelFilters("model-filter", "model-provider", "model-price", ".model-tr", "catalog-count");
+  (function () {
+    var sizeEl = document.getElementById("catalog-page-size");
+    if (!sizeEl) return;
+    try {
+      var s = localStorage.getItem("ml-catalog-page-size");
+      if (s != null && s !== "") sizeEl.value = s;
+    } catch (e) {}
+    sizeEl.addEventListener("change", function () {
+      try { localStorage.setItem("ml-catalog-page-size", sizeEl.value); } catch (e) {}
+      paginateCatalog(true);
+    });
+    paginateCatalog(false);
+  })();
   var applyKeyFilters = bindModelFilters("key-model-filter", "key-provider", "key-price", "#key-models .pick", "key-count");
 
   (function keyPicker() {
@@ -610,6 +691,8 @@
     var stop = document.getElementById("chat-stop");
     var status = document.getElementById("chat-status");
     var modelEl = document.getElementById("chat-model");
+    var modeEl = document.getElementById("gen-mode");
+    var pathEl = document.getElementById("gen-path");
     var messages = [];
     var ac = null;
     var pinBottom = true;
@@ -618,6 +701,40 @@
       for (var i = 0; i < modelEl.options.length; i++) {
         if (modelEl.options[i].value === saved) { modelEl.selectedIndex = i; break; }
       }
+    }
+    function genMode() {
+      return (modeEl && modeEl.value) || "chat";
+    }
+    function filterModels() {
+      if (!modelEl) return;
+      var mode = genMode();
+      var opts = modelEl.querySelectorAll("option");
+      var first = null;
+      opts.forEach(function (o) {
+        if (!o.value) return;
+        var media = o.getAttribute("data-media") || "";
+        var ok = true;
+        if (mode === "image") ok = media.indexOf("image") >= 0;
+        if (mode === "video") ok = media.indexOf("video") >= 0;
+        o.hidden = !ok;
+        o.disabled = !ok;
+        if (ok && !first) first = o;
+      });
+      if (modelEl.selectedOptions[0] && modelEl.selectedOptions[0].hidden && first) {
+        first.selected = true;
+      }
+      if (pathEl && modeEl) {
+        var p = modeEl.options[modeEl.selectedIndex];
+        pathEl.textContent = "без ключа · " + ((p && p.getAttribute("data-path")) || "");
+      }
+      var temp = document.getElementById("chat-temp");
+      var max = document.getElementById("chat-max");
+      if (temp) temp.hidden = mode !== "chat";
+      if (max) max.hidden = mode !== "chat";
+    }
+    if (modeEl) {
+      modeEl.addEventListener("change", filterModels);
+      filterModels();
     }
     if (modelEl) {
       modelEl.addEventListener("change", function () {
@@ -637,11 +754,59 @@
 
     function persist() {
       try {
+        var slim = messages.map(function (m) {
+          return { role: m.role, content: typeof m.content === "string" ? m.content : "", think: m.think || "", hadImage: !!m.image };
+        });
         sessionStorage.setItem("ml-chat-thread", JSON.stringify({
           model: modelEl && modelEl.value,
-          messages: messages
+          mode: genMode(),
+          messages: slim
         }));
       } catch (e) {}
+      renderHist();
+    }
+    function renderHist() {
+      var task = document.getElementById("chat-task");
+      var list = document.getElementById("chat-hist-list");
+      var emptyH = document.getElementById("chat-hist-empty");
+      if (!list) return;
+      list.innerHTML = "";
+      var first = "";
+      messages.forEach(function (m) {
+        if (m.role === "user" && !first) first = String(m.content || "");
+      });
+      if (task) {
+        task.hidden = !first;
+        task.textContent = first ? ("Задача: " + first) : "";
+      }
+      if (emptyH) emptyH.hidden = messages.length > 0;
+      messages.forEach(function (m, i) {
+        var li = document.createElement("li");
+        var t = typeof m.content === "string" ? m.content : "(медиа)";
+        if (m.hadImage || m.image) t = "изображение";
+        li.textContent = (m.role === "user" ? "Вы: " : "Модель: ") + t.slice(0, 80);
+        if (i === 0 && m.role === "user") li.className = "is-task";
+        list.appendChild(li);
+      });
+      if (input) {
+        input.placeholder = messages.length
+          ? "Правка к этой генерации…"
+          : "Напишите сообщение… Enter — отправить";
+      }
+    }
+    function historyForAPI() {
+      return messages.map(function (m) {
+        if (m.role === "assistant" && m.image) {
+          return {
+            role: "assistant",
+            content: [
+              { type: "text", text: m.content || "Generated image." },
+              { type: "image_url", image_url: { url: m.image } }
+            ]
+          };
+        }
+        return { role: m.role, content: m.content };
+      });
     }
     function restore() {
       try {
@@ -650,14 +815,18 @@
         var data = JSON.parse(raw);
         if (!data || !data.messages || !data.messages.length) return;
         messages = data.messages;
+        if (modeEl && data.mode) modeEl.value = data.mode;
+        filterModels();
         messages.forEach(function (m) {
-          var b = bubble(m.role === "user" ? "user" : "assistant", m.content || "", true);
+          var text = m.content || (m.hadImage ? "изображение" : "");
+          var b = bubble(m.role === "user" ? "user" : "assistant", text, true);
           if (m.think && b.think) {
             b.think.hidden = false;
             b.think.textContent = m.think;
           }
         });
         stickBottom(true);
+        renderHist();
       } catch (e) {}
     }
 
@@ -700,6 +869,7 @@
       status.textContent = "";
       setBusy(false);
       try { sessionStorage.removeItem("ml-chat-thread"); } catch (e) {}
+      renderHist();
     });
 
     stop.addEventListener("click", function () {
@@ -713,16 +883,200 @@
       }
     });
 
+    function downloadURL(url, name) {
+      function clickBlob(href) {
+        var a = document.createElement("a");
+        a.href = href;
+        a.download = name;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      if ((url || "").indexOf("data:") === 0) {
+        clickBlob(url);
+        return;
+      }
+      fetch(url, { credentials: "same-origin" }).then(function (r) {
+        if (!r.ok) throw new Error("download " + r.status);
+        return r.blob();
+      }).then(function (b) {
+        var href = URL.createObjectURL(b);
+        clickBlob(href);
+        setTimeout(function () { URL.revokeObjectURL(href); }, 4000);
+      }).catch(function (e) {
+        if (status) status.textContent = e.message || "не удалось скачать";
+      });
+    }
+    function mediaActions(asst, kind, src, prompt) {
+      asst.div.classList.add("has-media");
+      var old = asst.div.querySelector(".chat-actions");
+      if (old) old.remove();
+      var row = document.createElement("div");
+      row.className = "chat-actions";
+      var dl = document.createElement("button");
+      dl.type = "button";
+      dl.className = "ghost";
+      dl.textContent = "Скачать";
+      dl.addEventListener("click", function () {
+        downloadURL(src, "mikrollm-" + kind + "-" + Date.now() + (kind === "video" ? ".mp4" : ".png"));
+      });
+      var rg = document.createElement("button");
+      rg.type = "button";
+      rg.className = "ghost";
+      rg.textContent = "Ещё раз";
+      rg.addEventListener("click", function () {
+        if (send.disabled) return;
+        if (messages.length && messages[messages.length - 1].role === "assistant") messages.pop();
+        asst.body.textContent = "";
+        asst.body.querySelectorAll("img,video").forEach(function (n) { n.remove(); });
+        row.remove();
+        runMedia(kind, prompt, asst);
+      });
+      row.appendChild(dl);
+      row.appendChild(rg);
+      asst.div.appendChild(row);
+    }
+    function videoJobStatus(j) {
+      if (!j || typeof j !== "object") return "";
+      var s = j.status || j.state;
+      if (!s && j.data && typeof j.data === "object") s = j.data.status || j.data.state;
+      return String(s || "").toLowerCase();
+    }
+    function pollVideo(id, model, asst, prompt) {
+      var delay = 2500;
+      var t0 = Date.now();
+      var maxWait = 45 * 60 * 1000;
+      function tick() {
+        if (ac && ac.signal.aborted) {
+          var e = new Error("остановлено");
+          e.name = "AbortError";
+          return Promise.reject(e);
+        }
+        if (Date.now() - t0 > maxWait) {
+          return Promise.reject(new Error("видео всё ещё не готово (ждали 45 мин)"));
+        }
+        return fetch("/admin/videos/" + encodeURIComponent(id) + "?model=" + encodeURIComponent(model), {
+          credentials: "same-origin",
+          signal: ac ? ac.signal : undefined,
+          headers: { "X-CSRF-Token": csrfToken() }
+        }).then(function (r) {
+          return r.json().then(function (j) { return { ok: r.ok, j: j }; }).catch(function () {
+            return { ok: false, j: {} };
+          });
+        }).then(function (x) {
+          var j = x.j || {};
+          var st = videoJobStatus(j);
+          var sec = Math.round((Date.now() - t0) / 1000);
+          asst.body.textContent = "видео " + id + " · " + (st || "ожидание") + " · " + sec + " с";
+          if (status) status.textContent = "ожидание генерации… " + sec + " с · Стоп отменяет опрос";
+          stickBottom();
+          if (st === "completed" || st === "complete" || st === "succeeded" || st === "success") {
+            asst.body.textContent = "";
+            var src = "/admin/videos/" + encodeURIComponent(id) + "/content?model=" + encodeURIComponent(model);
+            var v = document.createElement("video");
+            v.controls = true;
+            v.src = src;
+            asst.body.appendChild(v);
+            mediaActions(asst, "video", src, prompt);
+            return;
+          }
+          if (st === "failed" || st === "error" || st === "cancelled" || st === "canceled" || j.error) {
+            var em = (j.error && (j.error.message || j.error)) || j.message || "генерация не удалась";
+            var fe = new Error(typeof em === "string" ? em : JSON.stringify(em));
+            fe.fatal = true;
+            throw fe;
+          }
+          delay = Math.min(10000, delay + 400);
+          return new Promise(function (res) { setTimeout(res, delay); }).then(tick);
+        }).catch(function (e) {
+          if (e && e.name === "AbortError") throw e;
+          if (e && e.fatal) throw e;
+          delay = Math.min(10000, delay + 400);
+          asst.body.textContent = "видео " + id + " · повтор запроса статуса…";
+          return new Promise(function (res) { setTimeout(res, delay); }).then(tick);
+        });
+      }
+      return tick();
+    }
+    function runMedia(mode, text, asst) {
+      setBusy(true);
+      status.textContent = "генерация…";
+      ac = new AbortController();
+      var model = modelEl && modelEl.value;
+      var url = mode === "image" ? "/admin/images" : "/admin/videos";
+      var payload = { model: model, prompt: text, n: 1, size: "1024x1024", messages: historyForAPI() };
+      if (mode === "video") payload = { model: model, prompt: text, seconds: "4", size: "720x1280", messages: historyForAPI() };
+      fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        signal: ac.signal,
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+        body: JSON.stringify(payload)
+      }).then(function (r) {
+        return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+      }).then(function (x) {
+        if (!x.ok) throw new Error((x.j && x.j.error && x.j.error.message) || JSON.stringify(x.j) || "error");
+        if (mode === "image") {
+          var d = (x.j.data && x.j.data[0]) || {};
+          var src = d.url || (d.b64_json ? ("data:image/png;base64," + d.b64_json) : "");
+          if (src) {
+            asst.body.textContent = "";
+            var img = document.createElement("img");
+            img.src = src;
+            img.alt = text;
+            asst.body.appendChild(img);
+            messages.push({ role: "assistant", content: "Изображение сгенерировано.", image: src });
+            mediaActions(asst, "image", src, text);
+          } else {
+            asst.body.textContent = JSON.stringify(x.j);
+            messages.push({ role: "assistant", content: asst.body.textContent });
+          }
+        } else {
+          if (!x.j.id) throw new Error("провайдер не вернул id задачи");
+          asst.body.textContent = "видео " + x.j.id + " · " + (x.j.status || "ожидание");
+          status.textContent = "ожидание генерации…";
+          return pollVideo(x.j.id, model, asst, text).then(function () {
+            messages.push({ role: "assistant", content: "Видео сгенерировано." });
+            persist();
+            setBusy(false);
+            status.textContent = "";
+          });
+        }
+        persist();
+        setBusy(false);
+        status.textContent = "";
+      }).catch(function (e) {
+        if (e && e.name === "AbortError") {
+          asst.body.textContent = asst.body.textContent || "остановлено";
+          status.textContent = "остановлено";
+          persist();
+          setBusy(false);
+          return;
+        }
+        asst.body.textContent = String(e.message || e);
+        messages.push({ role: "assistant", content: asst.body.textContent });
+        persist();
+        setBusy(false);
+        status.textContent = "";
+      });
+    }
+
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
       var model = modelEl && modelEl.value;
       var text = (input.value || "").trim();
       if (!model || !text) return;
+      var mode = genMode();
       input.value = "";
       messages.push({ role: "user", content: text });
       persist();
       bubble("user", text);
       var asst = bubble("assistant", "");
+      if (mode === "image" || mode === "video") {
+        runMedia(mode, text, asst);
+        return;
+      }
       var acc = "";
       var think = "";
       setBusy(true);

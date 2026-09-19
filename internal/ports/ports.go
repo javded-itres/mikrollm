@@ -27,6 +27,7 @@ type BackendQuery interface {
 
 type BackendCommand interface {
 	UpsertBackend(name, baseURL string, enabled bool, weight int, kind, token string) (int64, error)
+	SetBackendEnabled(id int64, enabled bool) error
 	DeleteBackend(id int64) error
 }
 
@@ -80,8 +81,17 @@ type SecretRepo interface {
 }
 
 type LogRepo interface {
-	Log(prefix, model, backend string, status int, latency time.Duration, bytesOut int64)
+	Log(prefix, model, backend string, status int, latency time.Duration, bytesOut int64, u domain.TokenUsage)
 	ListLogs(limit int) ([]domain.RequestLog, error)
+}
+
+type SecurityRepo interface {
+	ListPolicies() ([]domain.Policy, error)
+	GetPolicy(id int64) (domain.Policy, error)
+	SavePolicy(p domain.Policy) (int64, error)
+	DeletePolicy(id int64) error
+	SetPolicyTargets(id int64, targets []domain.PolicyTarget) error
+	PoliciesFor(alias, queueAlias, upstream string) ([]domain.Policy, error)
 }
 
 type JobRepo interface {
@@ -104,12 +114,18 @@ type Store interface {
 	KeyRepo
 	SecretRepo
 	LogRepo
+	SecurityRepo
+	PromptCacheMode() string
+	SetPromptCacheMode(string) error
+	Billing(period string, now time.Time) (domain.BillingView, error)
 	SeedIfEmpty(backends []domain.Backend) error
 	Close() error
 }
 
 type Health interface {
 	CheckOnce()
+	RefreshAll()
+	RefreshBackend(id int64)
 	Get(id int64) domain.HostStatus
 	Catalog(backends []domain.Backend) []domain.CatalogEntry
 	HealthyCount() int
@@ -144,6 +160,10 @@ type Host interface {
 
 type ChatGateway interface {
 	ServeChat(w http.ResponseWriter, r *http.Request)
+	ServeImages(w http.ResponseWriter, r *http.Request)
+	ServeVideos(w http.ResponseWriter, r *http.Request)
+	ServeVideoStatus(w http.ResponseWriter, r *http.Request)
+	ServeVideoContent(w http.ResponseWriter, r *http.Request)
 }
 
 type Jobs interface {

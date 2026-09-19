@@ -318,4 +318,4 @@ func newSessionID() string {
 	return hex.EncodeToString(b)
 }
 
-const mcpInstructions = `MikroLLM — шлюз к Ollama / vLLM / LM Studio / OpenRouter / Ollama Cloud. Сначала get_status. Провайдеры = бэкенды (upsert_provider). Модели = alias шлюза (save_model / connect_model). Очереди маршрутизируют клиентский alias по шагам (save_queue со steps). Ключи sk- ограничивают модели и RPM (create_key). Логи — list_logs и log_stats. pull/load асинхронны: смотрите list_jobs. Токены бэкендов и секреты ключей в ответах не повторяйте.`
+const mcpInstructions = `MikroLLM — шлюз к Ollama / vLLM / LM Studio / OpenRouter / Ollama Cloud. Сначала get_status. Провайдеры = бэкенды (upsert_provider). Модели = alias шлюза (save_model / connect_model). prompt_cache на alias: inherit|off|auto|on (auto = Claude top-level cache_control). Очереди маршрутизируют клиентский alias по шагам (save_queue со steps). Ключи sk- ограничивают модели и RPM (create_key). Логи — list_logs и log_stats (cached_tokens / saved_usd). pull/load асинхронны: смотрите list_jobs. Токены бэкендов и секреты ключей в ответах не повторяйте.`

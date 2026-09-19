@@ -10,6 +10,7 @@ import (
 
 	"github.com/javded-itres/mikrollm/internal/auth"
 	"github.com/javded-itres/mikrollm/internal/domain"
+	"github.com/javded-itres/mikrollm/internal/guard"
 	"github.com/javded-itres/mikrollm/internal/ports"
 )
 
@@ -27,14 +28,15 @@ func (s *Server) buildTools() []toolDef {
 	bol := map[string]any{"type": "boolean"}
 	return []toolDef{
 		{Name: "get_status", Description: "Сводка шлюза: версия, RAM, бэкенды (health/latency/модели в RAM), alias, живые очереди, фоновые jobs.", Schema: objSchema(nil), Fn: s.toolStatus},
-		{Name: "refresh_health", Description: "Внеочередной опрос всех бэкендов, затем та же сводка, что get_status.", Schema: objSchema(nil), Fn: s.toolRefresh},
+		{Name: "refresh_health", Description: "Принудительно скачать каталоги со всех бэкендов (без кэша; OpenRouter — chat+image+video), затем сводка как get_status.", Schema: objSchema(nil), Fn: s.toolRefresh},
+		{Name: "refresh_provider", Description: "Принудительно обновить каталог одного провайдера по id (Ollama tags, OpenRouter /models + /videos/models и т.д.).", Schema: objSchema(map[string]any{"id": num}, "id"), Fn: s.toolRefreshProvider},
 		{Name: "list_providers", Description: "Список провайдеров/бэкендов (Ollama, vLLM, LM Studio, OpenRouter, Ollama Cloud). Токен маскируется.", Schema: objSchema(nil), Fn: s.toolListProviders},
-		{Name: "upsert_provider", Description: "Добавить или обновить бэкенд. Идентичность — base_url. Пустой token не затирает уже сохранённый ключ. Для правки передайте id или url.", Schema: objSchema(map[string]any{
+		{Name: "upsert_provider", Description: "Добавить или обновить бэкенд. Идентичность — base_url. Пустой token не затирает ключ. enabled и weight без поля не меняются. Выключить: id + enabled=false.", Schema: objSchema(map[string]any{
 			"name": str, "base_url": str, "kind": map[string]any{"type": "string", "description": "ollama | ollama-cloud | openrouter | vllm | lmstudio"},
 			"token": str, "enabled": bol, "weight": num, "id": num,
 		}), Fn: s.toolUpsertProvider},
 		{Name: "delete_provider", Description: "Удалить бэкенд по id.", Schema: objSchema(map[string]any{"id": num}, "id"), Fn: s.toolDeleteProvider},
-		{Name: "list_models", Description: "Alias шлюза: upstream, бэкенды, LB, контекст, fallback.", Schema: objSchema(nil), Fn: s.toolListModels},
+		{Name: "list_models", Description: "Alias шлюза: upstream, бэкенды, LB, контекст, fallback, prompt_cache.", Schema: objSchema(nil), Fn: s.toolListModels},
 		{Name: "list_catalog", Description: "Модели, которые health видит на бэкендах. Фильтры q/provider, лимит.", Schema: objSchema(map[string]any{
 			"q": str, "provider": str, "limit": num, "unconnected_only": bol,
 		}), Fn: s.toolCatalog},
@@ -45,7 +47,7 @@ func (s *Server) buildTools() []toolDef {
 		{Name: "save_model", Description: "Создать или обновить alias. Если backend_ids пусты — берёт их из каталога.", Schema: objSchema(map[string]any{
 			"id": num, "alias": str, "upstream_name": str,
 			"backend_ids": map[string]any{"type": "array", "items": num},
-			"lb_policy":   str, "max_context": num, "fallback": str, "enabled": bol,
+			"lb_policy":   str, "max_context": num, "fallback": str, "prompt_cache": str, "enabled": bol,
 		}, "alias"), Fn: s.toolSaveModel},
 		{Name: "delete_model", Description: "Удалить alias по id или имени.", Schema: objSchema(map[string]any{"id": num, "alias": str}), Fn: s.toolDeleteModel},
 		{Name: "host_action", Description: "Операция на хосте: pull/load (фон) или unload/delete. vLLM/облако часть действий не умеют.", Schema: objSchema(map[string]any{
@@ -80,6 +82,20 @@ func (s *Server) buildTools() []toolDef {
 		}), Fn: s.toolListLogs},
 		{Name: "log_stats", Description: "Агрегаты по последним логам: счётчики по статусу/модели/бэкенду, p50/p95 latency, error rate.", Schema: objSchema(map[string]any{"limit": num}), Fn: s.toolLogStats},
 		{Name: "rotate_mcp_token", Description: "Выпустить новый MCP Bearer-токен. Старый сразу недействителен. Новый показывается один раз.", Schema: objSchema(nil), Fn: s.toolRotateMCP},
+		{Name: "list_policies", Description: "Фильтры безопасности: системный промпт, NSFW/18+, стоп-слова, PII, prompt injection, категории-плагины, regex.", Schema: objSchema(nil), Fn: s.toolListPolicies},
+		{Name: "list_plugins", Description: "Встроенные плагины категорий (LiteLLM content_filter): nsfw, adult, csam, violence. Включаются в save_policy через plugins[] или kind=nsfw.", Schema: objSchema(nil), Fn: s.toolListPlugins},
+		{Name: "save_policy", Description: "Создать/обновить фильтр. kind=nsfw включает nsfw+adult. plugins — id из list_plugins. Один id на alias+queue+model срабатывает один раз.", Schema: objSchema(map[string]any{
+			"id": num, "name": str, "kind": map[string]any{"type": "string", "description": "system_prompt | nsfw | block_words | regex | pii | prompt_injection | category"},
+			"action": str, "mode": str, "enabled": bol, "prompt": str, "pattern": str,
+			"words":      map[string]any{"type": "array", "items": str},
+			"pii":        map[string]any{"type": "array", "items": str},
+			"categories": map[string]any{"type": "array", "items": str},
+			"plugins":    map[string]any{"type": "array", "items": str},
+			"aliases":    map[string]any{"type": "array", "items": str},
+			"queues":     map[string]any{"type": "array", "items": str},
+			"models":     map[string]any{"type": "array", "items": str},
+		}, "name"), Fn: s.toolSavePolicy},
+		{Name: "delete_policy", Description: "Удалить фильтр по id.", Schema: objSchema(map[string]any{"id": num}, "id"), Fn: s.toolDeletePolicy},
 	}
 }
 
@@ -89,7 +105,18 @@ func (s *Server) toolStatus(map[string]any) (any, error) {
 
 func (s *Server) toolRefresh(map[string]any) (any, error) {
 	if s.health != nil {
-		s.health.CheckOnce()
+		s.health.RefreshAll()
+	}
+	return s.statusPayload(), nil
+}
+
+func (s *Server) toolRefreshProvider(args map[string]any) (any, error) {
+	id, ok := intArg(args, "id")
+	if !ok || id <= 0 {
+		return nil, fmt.Errorf("id required")
+	}
+	if s.health != nil {
+		s.health.RefreshBackend(id)
 	}
 	return s.statusPayload(), nil
 }
@@ -143,7 +170,8 @@ func (s *Server) statusPayload() map[string]any {
 		},
 		"backends_up": up, "backends_total": len(bs), "aliases": len(aliases),
 		"queue_live": waitN, "mcp_prefix": prefix,
-		"backends": backends, "queues": qv, "jobs": jobs, "jobs_running": running,
+		"prompt_cache": map[string]any{"global": s.st.PromptCacheMode()},
+		"backends":     backends, "queues": qv, "jobs": jobs, "jobs_running": running,
 	}
 }
 
@@ -179,32 +207,59 @@ func (s *Server) toolUpsertProvider(args map[string]any) (any, error) {
 	kind := strArg(args, "kind")
 	rawURL := strArg(args, "base_url", "url")
 	token := strArg(args, "token")
+	var old domain.Backend
+	haveOld := false
 	if id, ok := intArg(args, "id"); ok && id > 0 {
-		old, err := s.st.GetBackend(id)
-		if err == nil {
-			if name == "" {
-				name = old.Name
-			}
-			if kind == "" {
-				kind = old.Kind
-			}
-			if rawURL == "" {
-				rawURL = old.BaseURL
-			}
-			if token == "" {
-				token = old.Token
-			}
+		if b, err := s.st.GetBackend(id); err == nil {
+			old, haveOld = b, true
+		}
+	}
+	if haveOld {
+		if name == "" {
+			name = old.Name
+		}
+		if kind == "" {
+			kind = old.Kind
+		}
+		if rawURL == "" {
+			rawURL = old.BaseURL
+		}
+		if token == "" {
+			token = old.Token
 		}
 	}
 	url, err := domain.SanitizeBackendURL(kind, rawURL)
 	if name == "" || err != nil || url == "" {
 		return nil, fmt.Errorf("нужны name и корректный http(s) URL")
 	}
+	if !haveOld {
+		if bs, err := s.st.ListBackends(); err == nil {
+			want := strings.TrimRight(url, "/")
+			for _, b := range bs {
+				if strings.TrimRight(b.BaseURL, "/") == want {
+					old, haveOld = b, true
+					if token == "" {
+						token = old.Token
+					}
+					break
+				}
+			}
+		}
+	}
 	if domain.RequiresToken(kind) && token == "" {
 		return nil, fmt.Errorf("для OpenRouter и Ollama Cloud нужен API-ключ")
 	}
-	enabled := boolArg(args, "enabled", true)
+	enabled := true
 	weight := 1
+	if haveOld {
+		enabled = old.Enabled
+		if old.Weight > 0 {
+			weight = old.Weight
+		}
+	}
+	if hasArg(args, "enabled") {
+		enabled = boolArg(args, "enabled", true)
+	}
 	if n, ok := intArg(args, "weight"); ok && n > 0 {
 		weight = int(n)
 	}
@@ -215,7 +270,7 @@ func (s *Server) toolUpsertProvider(args map[string]any) (any, error) {
 	if s.health != nil {
 		go s.health.CheckOnce()
 	}
-	return map[string]any{"ok": true, "id": id, "name": name, "url": url, "kind": domain.NormalizeKind(kind)}, nil
+	return map[string]any{"ok": true, "id": id, "name": name, "url": url, "kind": domain.NormalizeKind(kind), "enabled": enabled}, nil
 }
 
 func (s *Server) toolDeleteProvider(args map[string]any) (any, error) {
@@ -260,9 +315,10 @@ func (s *Server) toolListModels(map[string]any) (any, error) {
 		out = append(out, map[string]any{
 			"id": m.ID, "alias": m.Alias, "upstream_name": m.UpstreamName,
 			"lb_policy": m.LBPolicy, "enabled": m.Enabled, "backend_ids": m.BackendIDs,
-			"backends": names, "max_context": m.MaxContext, "fallback": m.Fallback,
+			"backends": names, "max_context": m.MaxContext, "fallback": m.Fallback, "prompt_cache": m.PromptCache,
 			"context": m.ContextWindow(meta.Context), "provider": meta.Provider,
 			"priced": meta.Priced, "prompt_usd": meta.PromptUSD, "completion_usd": meta.CompletionUSD,
+			"media": domain.MergeMedia(m.Media, meta.Media),
 		})
 	}
 	return map[string]any{"models": out}, nil
@@ -313,7 +369,7 @@ func (s *Server) toolCatalog(args map[string]any) (any, error) {
 			"backend_ids": e.BackendIDs, "backends": e.BackendNames,
 			"size": e.Size, "loaded_on": e.LoadedOn, "context": e.Context,
 			"priced": e.Priced, "prompt_usd": e.PromptUSD, "completion_usd": e.CompletionUSD,
-			"connected": connected[e.Name],
+			"connected": connected[e.Name], "media": e.Media,
 		})
 		if len(out) >= limit {
 			break
@@ -378,6 +434,16 @@ func (s *Server) toolSaveModel(args map[string]any) (any, error) {
 	if hasArg(args, "enabled") {
 		m.Enabled = boolArg(args, "enabled", true)
 	}
+	if hasArg(args, "prompt_cache") {
+		m.PromptCache = strArg(args, "prompt_cache")
+	}
+	if hasArg(args, "media") {
+		if sl, ok := strSlice(args, "media"); ok {
+			m.Media = domain.ParseMedia(strings.Join(sl, ","))
+		} else {
+			m.Media = domain.ParseMedia(strArg(args, "media"))
+		}
+	}
 	if id, ok := intArg(args, "id"); ok && id > 0 {
 		if old, err := s.st.GetModel(id); err == nil {
 			m.ID = old.ID
@@ -396,6 +462,12 @@ func (s *Server) toolSaveModel(args map[string]any) (any, error) {
 			if !hasArg(args, "fallback") {
 				m.Fallback = old.Fallback
 			}
+			if !hasArg(args, "prompt_cache") {
+				m.PromptCache = old.PromptCache
+			}
+			if !hasArg(args, "media") {
+				m.Media = old.Media
+			}
 			if !hasArg(args, "backend_ids") {
 				m.BackendIDs = old.BackendIDs
 			}
@@ -413,6 +485,9 @@ func (s *Server) toolSaveModel(args map[string]any) (any, error) {
 		}
 		if !hasArg(args, "fallback") {
 			m.Fallback = old.Fallback
+		}
+		if !hasArg(args, "prompt_cache") {
+			m.PromptCache = old.PromptCache
 		}
 		if m.LBPolicy == "" {
 			m.LBPolicy = old.LBPolicy
@@ -894,6 +969,9 @@ func (s *Server) toolListLogs(args map[string]any) (any, error) {
 			"id": l.ID, "ts": l.TS.UTC().Format(time.RFC3339Nano),
 			"key": l.KeyPrefix, "model": l.Model, "backend": l.Backend,
 			"status": l.Status, "latency_ms": l.LatencyMS, "bytes_out": l.BytesOut,
+			"prompt_tokens": l.PromptTokens, "completion_tokens": l.CompletionTokens,
+			"cached_tokens": l.CachedTokens, "cache_write_tokens": l.CacheWriteTokens,
+			"upstream": l.Upstream, "saved_usd": l.SavedUSD, "usage_cost": l.UsageCost,
 		})
 		if len(out) >= limit {
 			break
@@ -929,6 +1007,8 @@ func (s *Server) toolLogStats(args map[string]any) (any, error) {
 	byBackend := map[string]int{}
 	var lats []int
 	errN := 0
+	cachedSum, promptSum := 0, 0
+	savedSum, costSum := 0.0, 0.0
 	for _, l := range ls {
 		byStatus[logClass(l.Status)]++
 		if l.Model != "" {
@@ -941,6 +1021,10 @@ func (s *Server) toolLogStats(args map[string]any) (any, error) {
 		if l.Status >= 400 {
 			errN++
 		}
+		cachedSum += l.CachedTokens
+		promptSum += l.PromptTokens
+		savedSum += l.SavedUSD
+		costSum += l.UsageCost
 	}
 	sort.Ints(lats)
 	p50, p95 := 0, 0
@@ -952,10 +1036,16 @@ func (s *Server) toolLogStats(args map[string]any) (any, error) {
 	if len(ls) > 0 {
 		rate = float64(errN) / float64(len(ls))
 	}
+	ratio := 0.0
+	if promptSum > 0 {
+		ratio = float64(cachedSum) / float64(promptSum)
+	}
 	return map[string]any{
 		"n": len(ls), "errors": errN, "error_rate": rate,
 		"p50_latency_ms": p50, "p95_latency_ms": p95,
 		"by_status": byStatus, "by_model": topN(byModel, 15), "by_backend": topN(byBackend, 15),
+		"cached_tokens": cachedSum, "prompt_tokens": promptSum, "cached_ratio": ratio,
+		"saved_usd": savedSum, "usage_cost": costSum,
 	}, nil
 }
 
@@ -996,6 +1086,119 @@ func (s *Server) toolRotateMCP(map[string]any) (any, error) {
 		"ok": true, "prefix": prefix, "token": plain,
 		"warning": "скопируйте token сейчас — старый больше не работает",
 	}, nil
+}
+
+func (s *Server) toolListPlugins(map[string]any) (any, error) {
+	var out []map[string]any
+	for _, p := range guard.ListPlugins() {
+		out = append(out, map[string]any{"id": p.ID, "label": p.Label, "group": p.Group, "words": len(p.Words)})
+	}
+	return map[string]any{"plugins": out}, nil
+}
+
+func (s *Server) toolListPolicies(map[string]any) (any, error) {
+	ps, err := s.st.ListPolicies()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, policyJSON(p))
+	}
+	return map[string]any{"policies": out}, nil
+}
+
+func (s *Server) toolSavePolicy(args map[string]any) (any, error) {
+	p := domain.Policy{Name: strArg(args, "name"), Kind: strArg(args, "kind"), Action: strArg(args, "action"), Mode: strArg(args, "mode"), Enabled: true}
+	if id, ok := intArg(args, "id"); ok && id > 0 {
+		old, err := s.st.GetPolicy(id)
+		if err == nil {
+			p = old
+			if name := strArg(args, "name"); name != "" {
+				p.Name = name
+			}
+			if k := strArg(args, "kind"); k != "" {
+				p.Kind = k
+			}
+			if a := strArg(args, "action"); a != "" {
+				p.Action = a
+			}
+			if m := strArg(args, "mode"); m != "" {
+				p.Mode = m
+			}
+		} else {
+			p.ID = id
+		}
+	}
+	if hasArg(args, "enabled") {
+		p.Enabled = boolArg(args, "enabled", true)
+	}
+	if hasArg(args, "prompt") {
+		p.Config.Prompt = strArg(args, "prompt")
+	}
+	if hasArg(args, "pattern") {
+		p.Config.Pattern = strArg(args, "pattern")
+	}
+	if w, ok := strSlice(args, "words"); ok {
+		p.Config.Words = w
+	}
+	if w, ok := strSlice(args, "pii"); ok {
+		p.Config.PII = w
+	}
+	if w, ok := strSlice(args, "categories"); ok {
+		p.Config.Categories = w
+	}
+	if w, ok := strSlice(args, "plugins"); ok {
+		p.Config.Plugins = w
+	}
+	if hasArg(args, "aliases") || hasArg(args, "queues") || hasArg(args, "models") {
+		var ts []domain.PolicyTarget
+		if a, ok := strSlice(args, "aliases"); ok {
+			for _, x := range a {
+				ts = append(ts, domain.PolicyTarget{Kind: domain.GuardTargetAlias, Key: x})
+			}
+		}
+		if a, ok := strSlice(args, "queues"); ok {
+			for _, x := range a {
+				ts = append(ts, domain.PolicyTarget{Kind: domain.GuardTargetQueue, Key: x})
+			}
+		}
+		if a, ok := strSlice(args, "models"); ok {
+			for _, x := range a {
+				ts = append(ts, domain.PolicyTarget{Kind: domain.GuardTargetModel, Key: x})
+			}
+		}
+		p.Targets = ts
+	} else {
+		p.Targets = nil
+	}
+	id, err := s.st.SavePolicy(p)
+	if err != nil {
+		return nil, err
+	}
+	saved, err := s.st.GetPolicy(id)
+	if err != nil {
+		return map[string]any{"ok": true, "id": id}, nil
+	}
+	return policyJSON(saved), nil
+}
+
+func (s *Server) toolDeletePolicy(args map[string]any) (any, error) {
+	id, ok := intArg(args, "id")
+	if !ok || id <= 0 {
+		return nil, fmt.Errorf("id required")
+	}
+	if err := s.st.DeletePolicy(id); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "id": id}, nil
+}
+
+func policyJSON(p domain.Policy) map[string]any {
+	return map[string]any{
+		"id": p.ID, "name": p.Name, "kind": p.Kind, "action": p.Action, "mode": p.Mode,
+		"enabled": p.Enabled, "config": p.Config, "targets": p.Targets,
+	}
 }
 
 func maskToken(t string) string {

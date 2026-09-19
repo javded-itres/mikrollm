@@ -1,33 +1,38 @@
-# Архитектура
+# Architecture
 
-Один процесс, один бинарь, SQLite. Корень композиции — `internal/app`: там создаются реализации и передаются в конструкторы.
+**English** · [Русский](ru/architecture.md)
+
+One process, one binary, SQLite. Composition root is `internal/app`: implementations are constructed and passed into constructors.
 
 ```
-cmd/mikrollm          флаги, http.Server
-internal/app          сборка графа зависимостей
-internal/domain       сущности (Backend, Model, APIKey, Job…)
-internal/ports        интерфейсы Store, Health, Auth, Host, Jobs, ChatGateway
-internal/store        SQLite (modernc.org/sqlite, без CGO)
-internal/health       опрос Ollama / Ollama Cloud / OpenRouter / vLLM / LM Studio
-internal/auth         bcrypt, cookie+CSRF, ключи SHA-256
-internal/host         pull / delete / load / unload по типу бэкенда
+cmd/mikrollm          flags, http.Server (optional TLS)
+internal/app          dependency graph
+internal/domain       entities (Backend, Model, APIKey, Job…)
+internal/ports        Store, Health, Auth, Host, Jobs, ChatGateway
+internal/store        SQLite (modernc.org/sqlite, no CGO)
+internal/health       poll Ollama / Ollama Cloud / OpenRouter / vLLM / LM Studio
+internal/auth         bcrypt, cookie+CSRF, SHA-256 keys
+internal/host         pull / delete / load / unload by backend kind
 internal/ollama       Ollama HTTP (pull NDJSON, generate keep_alive)
-internal/jobs         фон pull/load + прогресс
+internal/jobs         background pull/load + progress
 internal/proxy        OpenAI/Ollama API, LB
-internal/queue        дисковая очередь запросов (SQLite WAL), слоты шагов, sticky HTTP
-internal/admin        HTML-админка
-internal/mcp          MCP Streamable HTTP (`/mcp`), JSON-RPC, без SDK
-internal/web          шаблоны и static (embed)
+internal/queue        disk queue (SQLite WAL), step slots, sticky HTTP
+internal/admin        HTML admin
+internal/mcp          MCP Streamable HTTP (`/mcp`), JSON-RPC, no SDK
+internal/guard        request/response filters, system prompt, prompt injection
+internal/promptcache  OpenRouter prefix cache: cache_control, usage, SSE tail
+internal/tlsconf      PEM / self-signed / Let's Encrypt ACME (autocert)
+internal/web          templates and static (embed)
 ```
 
-## Принципы
+## Principles
 
-- **S** — прокси не знает HTML, host-адаптер не знает SQLite.
-- **O / L** — новый адаптер вешается на порт, не меняя `proxy`/`admin`.
-- **I** — health видит только `BackendQuery`, auth — `AuthStore`.
-- **D** — HTTP-слои зависят от `ports`, не от конкретных пакетов. `*http.Client` тоже внедряется.
+- **S** — proxy does not know HTML; host adapter does not know SQLite.
+- **O / L** — a new adapter hangs on a port without changing `proxy`/`admin`.
+- **I** — health sees only `BackendQuery`, auth only `AuthStore`.
+- **D** — HTTP layers depend on `ports`, not concrete packages. `*http.Client` is injected too.
 
-DI по-Go: конструкторы, без Wire/Fx.
+Go DI: constructors, no Wire/Fx.
 
 ```go
 ui := admin.New(admin.Deps{
@@ -36,20 +41,20 @@ ui := admin.New(admin.Deps{
 mcp.New(mcp.Deps{Store: st, Health: checker, Auth: keys, Host: host, Jobs: tracker, Queues: queues}).Mount(mux)
 ```
 
-MCP-токен — SHA-256 в `admin_meta` (`mcp_token_hash` / prefix). Сравнение constant-time; plaintext не хранится.
+MCP token — SHA-256 in `admin_meta` (`mcp_token_hash` / prefix). Constant-time compare; plaintext is not stored.
 
-## Данные
+## Data
 
-Файл `<data>/mikrollm.db`, WAL. `MaxOpenConns=1` (ограничение modernc/sqlite). Список моделей **не** держит курсор во время второго запроса — иначе логин и API клинят.
+File `<data>/mikrollm.db`, WAL. `MaxOpenConns=1` (modernc/sqlite limit). The model list **must not** hold a cursor during a second query — login and API deadlock otherwise.
 
-Том `/data` на RouterOS переживает `container remove`. Очереди — таблицы `queues` / `queue_steps` / `queue_aliases` / `queue_jobs`; тела ждущих запросов на диске, `ResponseWriter` живого HTTP — в памяти.
+The `/data` volume on RouterOS survives `container remove`. Queues are tables `queues` / `queue_steps` / `queue_aliases` / `queue_jobs`; waiting bodies on disk, live HTTP `ResponseWriter` in memory. Billing rollup: `billing_hour`.
 
-## Фоновые задачи
+## Background work
 
-`POST /admin/ollama/{id}/pull` сразу отвечает и качает в goroutine с `context.Background()`. Прогресс в памяти и в таблице `ollama_jobs`. UI опрашивает `GET /admin/ollama/jobs`. После рестарта процесса running-pull возобновляется.
+`POST /admin/ollama/{id}/pull` returns immediately and downloads in a goroutine with `context.Background()`. Progress in memory and in `ollama_jobs`. UI polls `GET /admin/ollama/jobs`. After process restart a running pull resumes.
 
-Load в RAM: Ollama — `POST /api/generate` с пустым prompt и `keep_alive: -1`; LM Studio — `POST /api/v1/models/load`. vLLM не грузит модель через API (см. [providers.md](providers.md)).
+Load into RAM: Ollama — `POST /api/generate` with empty prompt and `keep_alive: -1`; LM Studio — `POST /api/v1/models/load`. vLLM does not load via API (see [providers.md](providers.md)).
 
-## Сборка образа RouterOS
+## RouterOS image
 
-`docker buildx` → OCI tar → `scripts/oci_to_legacy_docker.py` → docker-save v1. Иначе RouterOS отвечает `no config found in manifest`.
+`docker buildx` → OCI tar → `scripts/oci_to_legacy_docker.py` → docker-save v1. Otherwise RouterOS answers `no config found in manifest`.

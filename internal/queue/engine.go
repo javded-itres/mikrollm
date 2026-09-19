@@ -120,6 +120,7 @@ func (e *Engine) handle(ctx context.Context, w http.ResponseWriter, k domain.API
 		writeJSON(w, 404, "queue not found")
 		return
 	}
+	ctx = domain.WithQueueAlias(ctx, q.Alias)
 	if depth > 2 {
 		writeJSON(w, http.StatusServiceUnavailable, "queue overflow loop")
 		return

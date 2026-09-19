@@ -154,6 +154,34 @@ func TestMCPProvidersModelsQueuesKeysLogs(t *testing.T) {
 		t.Fatalf("token leaked? %+v", provs[0])
 	}
 
+	sc = call(t, s, "upsert_provider", map[string]any{"id": id, "enabled": false})
+	if sc["enabled"] != false {
+		t.Fatalf("disable %+v", sc)
+	}
+	b, err := st.GetBackend(id)
+	if err != nil || b.Enabled {
+		t.Fatalf("store enabled %+v %v", b, err)
+	}
+	sc = call(t, s, "upsert_provider", map[string]any{"id": id, "name": "mac-82"})
+	if sc["enabled"] != false {
+		t.Fatalf("omit enabled must keep off %+v", sc)
+	}
+	sc = call(t, s, "upsert_provider", map[string]any{"id": id, "enabled": true})
+	if sc["enabled"] != true {
+		t.Fatalf("enable %+v", sc)
+	}
+
+	sc = call(t, s, "save_policy", map[string]any{
+		"name": "inj", "kind": "prompt_injection", "aliases": []any{"fast"},
+	})
+	if sc["kind"] != "prompt_injection" {
+		t.Fatalf("policy %+v", sc)
+	}
+	sc = call(t, s, "list_policies", nil)
+	if len(sc["policies"].([]any)) != 1 {
+		t.Fatalf("policies %+v", sc)
+	}
+
 	sc = call(t, s, "save_model", map[string]any{
 		"alias": "fast", "upstream_name": "qwen3", "backend_ids": []any{id}, "lb_policy": "least_conn",
 	})
@@ -202,8 +230,8 @@ func TestMCPProvidersModelsQueuesKeysLogs(t *testing.T) {
 		t.Fatal("list_keys must not return hash")
 	}
 
-	st.Log("sk-agentxx", "fast", "mac-82", 200, 12*1e6, 100)
-	st.Log("sk-agentxx", "fast", "mac-82", 502, 40*1e6, 20)
+	st.Log("sk-agentxx", "fast", "mac-82", 200, 12*1e6, 100, domain.TokenUsage{CachedTokens: 8, SavedUSD: 0.1, HasSaved: true})
+	st.Log("sk-agentxx", "fast", "mac-82", 502, 40*1e6, 20, domain.TokenUsage{})
 	sc = call(t, s, "list_logs", map[string]any{"status_class": "5xx"})
 	if sc["count"].(float64) != 1 {
 		t.Fatalf("logs %+v", sc)

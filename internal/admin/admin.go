@@ -44,6 +44,18 @@ func New(d Deps) *UI {
 		"hctx":  domain.FormatContext,
 		"join":  strings.Join,
 		"add":   func(a, b int) int { return a + b },
+		"hastarget": func(ts []domain.PolicyTarget, kind, key string) bool {
+			return hasTarget(ts, kind, key)
+		},
+		"usd": domain.FormatUSD,
+		"hasval": func(ss []string, v string) bool {
+			for _, s := range ss {
+				if s == v {
+					return true
+				}
+			}
+			return false
+		},
 	}
 	must := func(files ...string) *template.Template {
 		return template.Must(template.New("layout.html").Funcs(fm).ParseFS(web.FS, files...))
@@ -52,12 +64,14 @@ func New(d Deps) *UI {
 		st: d.Store, health: d.Health, keys: d.Auth, host: d.Host, jobs: d.Jobs, chat: d.Chat, queues: d.Queues,
 		login: template.Must(template.New("login.html").Funcs(fm).ParseFS(web.FS, "templates/login.html")),
 		pages: map[string]*template.Template{
-			"dash":   must("templates/layout.html", "templates/dash.html"),
-			"models": must("templates/layout.html", "templates/models.html"),
-			"keys":   must("templates/layout.html", "templates/keys.html"),
-			"chat":   must("templates/layout.html", "templates/chat.html"),
-			"logs":   must("templates/layout.html", "templates/logs.html"),
-			"queues": must("templates/layout.html", "templates/queues.html"),
+			"dash":     must("templates/layout.html", "templates/dash.html"),
+			"models":   must("templates/layout.html", "templates/models.html"),
+			"keys":     must("templates/layout.html", "templates/keys.html"),
+			"chat":     must("templates/layout.html", "templates/chat.html"),
+			"logs":     must("templates/layout.html", "templates/logs.html"),
+			"queues":   must("templates/layout.html", "templates/queues.html"),
+			"security": must("templates/layout.html", "templates/security.html"),
+			"billing":  must("templates/layout.html", "templates/billing.html"),
 		},
 	}
 }
@@ -69,7 +83,9 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/logout", u.protect(u.logout))
 	mux.HandleFunc("GET /admin", u.protect(u.dash))
 	mux.HandleFunc("POST /admin/refresh", u.protect(u.refresh))
+	mux.HandleFunc("POST /admin/backends/{id}/refresh-models", u.protect(u.refreshBackendModels))
 	mux.HandleFunc("POST /admin/backends", u.protect(u.addBackend))
+	mux.HandleFunc("POST /admin/backends/{id}/enabled", u.protect(u.setBackendEnabled))
 	mux.HandleFunc("POST /admin/backends/{id}/delete", u.protect(u.delBackend))
 	mux.HandleFunc("POST /admin/password", u.protect(u.password))
 	mux.HandleFunc("POST /admin/mcp/token", u.protect(u.rotateMCP))
@@ -79,6 +95,8 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/models/{id}/delete", u.protect(u.delModel))
 	mux.HandleFunc("POST /admin/models/{id}/context", u.protect(u.setModelContext))
 	mux.HandleFunc("POST /admin/models/{id}/fallback", u.protect(u.setModelFallback))
+	mux.HandleFunc("POST /admin/models/{id}/prompt-cache", u.protect(u.setModelPromptCache))
+	mux.HandleFunc("POST /admin/prompt-cache", u.protect(u.setPromptCache))
 	mux.HandleFunc("GET /admin/ollama/jobs", u.protect(u.ollamaJobs))
 	mux.HandleFunc("POST /admin/ollama/{id}/pull", u.protect(u.ollamaPull))
 	mux.HandleFunc("POST /admin/ollama/{id}/delete", u.protect(u.ollamaDelete))
@@ -90,7 +108,16 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/keys/{id}/delete", u.protect(u.delKey))
 	mux.HandleFunc("GET /admin/chat", u.protect(u.chatPage))
 	mux.HandleFunc("POST /admin/chat", u.protect(u.chatPost))
+	mux.HandleFunc("POST /admin/images", u.protect(u.imagesPost))
+	mux.HandleFunc("POST /admin/videos", u.protect(u.videosPost))
+	mux.HandleFunc("GET /admin/videos/{id}", u.protect(u.videoStatus))
+	mux.HandleFunc("GET /admin/videos/{id}/content", u.protect(u.videoContent))
 	mux.HandleFunc("GET /admin/logs", u.protect(u.logs))
+	mux.HandleFunc("GET /admin/billing", u.protect(u.billing))
+	mux.HandleFunc("GET /admin/security", u.protect(u.securityPage))
+	mux.HandleFunc("POST /admin/security", u.protect(u.savePolicy))
+	mux.HandleFunc("POST /admin/security/{id}/delete", u.protect(u.delPolicy))
+	mux.HandleFunc("POST /admin/security/{id}/enabled", u.protect(u.setPolicyEnabled))
 	mux.HandleFunc("GET /admin/queues", u.protect(u.queuesPage))
 	mux.HandleFunc("GET /admin/queues/live", u.protect(u.queuesLive))
 	mux.HandleFunc("POST /admin/queues", u.protect(u.saveQueue))
@@ -167,7 +194,9 @@ func (u *UI) dash(w http.ResponseWriter, r *http.Request) {
 			lat = st.Latency.Truncate(time.Millisecond).String()
 		}
 		status := "Нет связи"
-		if st.Healthy {
+		if !b.Enabled {
+			status = "Выкл"
+		} else if st.Healthy {
 			up++
 			status = "Онлайн"
 		}
@@ -200,18 +229,40 @@ func (u *UI) dash(w http.ResponseWriter, r *http.Request) {
 	if newMCP != "" {
 		flash = ""
 	}
+	var cacheTok int
+	var savedUSD, billedUSD float64
+	if ls, err := u.st.ListLogs(500); err == nil {
+		for _, l := range ls {
+			cacheTok += l.CachedTokens
+			savedUSD += l.SavedUSD
+			billedUSD += l.UsageCost
+		}
+	}
 	u.render(w, r, "dash", map[string]any{
 		"Title": "Статус", "Nav": "dash", "Backends": vms,
 		"Up": up, "Total": len(vms), "AliasCount": len(aliases),
 		"Queues": qviews, "QueueLive": waitN,
+		"CacheTokens": cacheTok, "SavedUSD": savedUSD, "UsageCost": billedUSD,
 		"MCPPrefix": prefix, "NewMCPToken": newMCP,
 		"Flash": flash, "Error": errMsg(r.URL.Query().Get("err")),
 	})
 }
 
 func (u *UI) refresh(w http.ResponseWriter, r *http.Request) {
-	u.health.CheckOnce()
+	if r.FormValue("full") == "1" {
+		u.health.RefreshAll()
+	} else {
+		u.health.CheckOnce()
+	}
 	http.Redirect(w, r, safeAdminPath(r.FormValue("next"), "/admin")+"?ok=refreshed", http.StatusFound)
+}
+
+func (u *UI) refreshBackendModels(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if id > 0 {
+		u.health.RefreshBackend(id)
+	}
+	http.Redirect(w, r, safeAdminPath(r.FormValue("next"), "/admin")+"?ok=catalog_refreshed", http.StatusFound)
 }
 
 func (u *UI) addBackend(w http.ResponseWriter, r *http.Request) {
@@ -234,6 +285,34 @@ func (u *UI) addBackend(w http.ResponseWriter, r *http.Request) {
 	}
 	go u.health.CheckOnce()
 	http.Redirect(w, r, "/admin?ok=backend_saved", http.StatusFound)
+}
+
+func parseEnabled(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+func (u *UI) setBackendEnabled(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if id <= 0 {
+		http.Redirect(w, r, "/admin?err=no_backend", http.StatusFound)
+		return
+	}
+	on := parseEnabled(r.FormValue("enabled"))
+	if err := u.st.SetBackendEnabled(id, on); err != nil {
+		http.Redirect(w, r, "/admin?err=no_backend", http.StatusFound)
+		return
+	}
+	go u.health.CheckOnce()
+	ok := "backend_disabled"
+	if on {
+		ok = "backend_enabled"
+	}
+	http.Redirect(w, r, "/admin?ok="+ok, http.StatusFound)
 }
 
 func (u *UI) delBackend(w http.ResponseWriter, r *http.Request) {
@@ -332,7 +411,12 @@ func (u *UI) models(w http.ResponseWriter, r *http.Request) {
 		for _, id := range m.BackendIDs {
 			names = append(names, bmap[id].Name)
 		}
-		vms = append(vms, modelVM{Model: m, BackendNames: strings.Join(names, ", ")})
+		vm := modelVM{Model: m, BackendNames: strings.Join(names, ", ")}
+		if len(vm.Media) == 0 {
+			vm.Media = domain.InferMedia(m.Alias, nil)
+			vm.Media = domain.MergeMedia(vm.Media, domain.InferMedia(m.UpstreamName, nil))
+		}
+		vms = append(vms, vm)
 		connected[m.Alias] = true
 		if m.UpstreamName != "" {
 			connected[m.UpstreamName] = true
@@ -352,8 +436,8 @@ func (u *UI) models(w http.ResponseWriter, r *http.Request) {
 			SizeLabel:    humanSize(e.Size),
 			LoadedLabel:  strings.Join(e.LoadedOn, ", "),
 			CtxLabel:     domain.FormatContext(e.Context),
-			PriceLabel:   domain.PriceLabel(e.Priced, e.PromptUSD, e.CompletionUSD),
-			PriceBand:    domain.PriceBand(e.Priced, e.PromptUSD),
+			PriceLabel:   domain.FormatCatalogPrice(e.Priced, e.PromptUSD, e.CompletionUSD, e.ImageUSD, e.ImageTokUSD, e.VideoSecUSD),
+			PriceBand:    domain.PriceBand(e.Priced, domain.PriceBandValue(e.PromptUSD, e.ImageUSD, e.ImageTokUSD, e.VideoSecUSD)),
 		}
 		for i, id := range e.BackendIDs {
 			name := e.BackendNames[i]
@@ -392,7 +476,7 @@ func (u *UI) models(w http.ResponseWriter, r *http.Request) {
 			meta = byName[vms[i].Alias]
 		}
 		vms[i].Provider = meta.Provider
-		vms[i].PriceLabel = domain.PriceLabel(meta.Priced, meta.PromptUSD, meta.CompletionUSD)
+		vms[i].PriceLabel = domain.FormatCatalogPrice(meta.Priced, meta.PromptUSD, meta.CompletionUSD, meta.ImageUSD, meta.ImageTokUSD, meta.VideoSecUSD)
 		if vms[i].Provider != "" {
 			provSet[vms[i].Provider] = true
 		}
@@ -415,7 +499,8 @@ func (u *UI) models(w http.ResponseWriter, r *http.Request) {
 		"Title": "Модели", "Nav": "models", "Models": vms, "Backends": bs,
 		"PullBackends": pullers, "HasVLLM": hasVLLM, "HasCloud": hasCloud,
 		"Catalog": cat, "Available": available, "Providers": providers,
-		"Flash": flashMsg(r.URL.Query().Get("ok")), "Error": errMsg(r.URL.Query().Get("err")),
+		"PromptCache": u.st.PromptCacheMode(),
+		"Flash":       flashMsg(r.URL.Query().Get("ok")), "Error": errMsg(r.URL.Query().Get("err")),
 	})
 }
 
@@ -540,6 +625,38 @@ func (u *UI) setModelFallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/models?ok=fallback_saved", http.StatusFound)
 }
 
+func (u *UI) setPromptCache(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	if err := u.st.SetPromptCacheMode(r.FormValue("prompt_cache")); err != nil {
+		http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, "/admin/models?ok=prompt_cache_saved", http.StatusFound)
+}
+
+func (u *UI) setModelPromptCache(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	_ = r.ParseForm()
+	m, err := u.st.GetModel(id)
+	if err != nil {
+		http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
+		return
+	}
+	v := strings.ToLower(strings.TrimSpace(r.FormValue("prompt_cache")))
+	switch v {
+	case "inherit", "off", "auto", "on":
+		m.PromptCache = v
+	default:
+		http.Redirect(w, r, "/admin/models?err=prompt_cache+must+be+inherit|off|auto|on", http.StatusFound)
+		return
+	}
+	if _, err := u.st.SaveModel(m); err != nil {
+		http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, "/admin/models?ok=prompt_cache_saved", http.StatusFound)
+}
+
 type keyVM struct {
 	domain.APIKey
 	Allowed   string
@@ -616,8 +733,8 @@ func (u *UI) keyModelOpts(selected map[string]bool) ([]keyModelOpt, []string) {
 		out = append(out, keyModelOpt{
 			Name: name, Group: group, GroupHead: head,
 			CtxLabel: domain.FormatContext(ctx), Provider: meta.Provider,
-			PriceLabel: domain.PriceLabel(meta.Priced, meta.PromptUSD, meta.CompletionUSD),
-			PriceBand:  domain.PriceBand(meta.Priced, meta.PromptUSD),
+			PriceLabel: domain.FormatCatalogPrice(meta.Priced, meta.PromptUSD, meta.CompletionUSD, meta.ImageUSD, meta.ImageTokUSD, meta.VideoSecUSD),
+			PriceBand:  domain.PriceBand(meta.Priced, domain.PriceBandValue(meta.PromptUSD, meta.ImageUSD, meta.ImageTokUSD, meta.VideoSecUSD)),
 			Title:      meta.Title, Prompt: meta.PromptUSD, Checked: selected[name],
 		})
 		return true
@@ -800,6 +917,49 @@ func (u *UI) logs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (u *UI) billing(w http.ResponseWriter, r *http.Request) {
+	view, err := u.st.Billing(r.URL.Query().Get("p"), time.Now())
+	if err != nil {
+		u.render(w, r, "billing", map[string]any{
+			"Title": "Биллинг", "Nav": "billing", "Error": err.Error(),
+			"View": domain.BillingView{Period: "day"}, "Caption": "последние 30 дней",
+			"Periods": []struct {
+				ID, Label string
+				Active    bool
+			}{{ID: "day", Label: "День", Active: true}},
+		})
+		return
+	}
+	type pill struct {
+		ID, Label string
+		Active    bool
+	}
+	periods := []pill{
+		{ID: "hour", Label: "Час"},
+		{ID: "day", Label: "День"},
+		{ID: "week", Label: "Неделя"},
+		{ID: "month", Label: "Месяц"},
+		{ID: "year", Label: "Год"},
+	}
+	for i := range periods {
+		periods[i].Active = periods[i].ID == view.Period
+	}
+	caption := "последние 30 дней"
+	switch view.Period {
+	case "hour":
+		caption = "последние 24 часа"
+	case "week":
+		caption = "последние 12 недель"
+	case "month":
+		caption = "последние 12 месяцев"
+	case "year":
+		caption = "последние 5 лет"
+	}
+	u.render(w, r, "billing", map[string]any{
+		"Title": "Биллинг", "Nav": "billing", "View": view, "Periods": periods, "Caption": caption,
+	})
+}
+
 func logStatusKind(status int) string {
 	switch {
 	case status >= 200 && status < 300:
@@ -840,8 +1000,14 @@ func flashMsg(code string) string {
 		return "Ключ отозван."
 	case "refreshed":
 		return "Список моделей обновлён."
+	case "catalog_refreshed":
+		return "Каталог провайдера обновлён с сервера (включая video, если API отдаёт)."
 	case "backend_saved":
 		return "Сервер добавлен. Обновите модели, если список пустой."
+	case "backend_enabled":
+		return "Провайдер включён. Шлюз снова будет на него ходить."
+	case "backend_disabled":
+		return "Провайдер выключен. Health и маршруты его пропускают."
 	case "backend_deleted":
 		return "Бэкенд удалён."
 	case "password_updated":
@@ -864,6 +1030,8 @@ func flashMsg(code string) string {
 		return "Контекст модели сохранён."
 	case "fallback_saved":
 		return "Запасная модель сохранена."
+	case "prompt_cache_saved":
+		return "Настройка prompt cache сохранена."
 	case "queue_saved":
 		return "Очередь сохранена."
 	case "queue_deleted":

@@ -6,7 +6,8 @@
   </div>
   <form method="post" action="/admin/refresh">
     <input type="hidden" name="next" value="/admin/models">
-    <button class="ghost" type="submit">Обновить</button>
+    <input type="hidden" name="full" value="1">
+    <button class="ghost" type="submit" title="Заново скачать списки со всех бэкендов, без кэша. OpenRouter — chat + image + video.">Обновить каталоги</button>
   </form>
 </div>
 
@@ -36,6 +37,19 @@
   {{end}}
 </details>
 
+<div class="card">
+  <h2>Prompt cache (OpenRouter)</h2>
+  <p class="muted small">Default <code>auto</code> ставит top-level <code>cache_control</code> только на Claude. Первый ход Claude — запись 1.25×. Ollama / vLLM / Ollama Cloud не трогаем. <a href="https://github.com/javded-itres/mikrollm/blob/main/docs/providers.md#prompt-cache">Справка</a></p>
+  <form method="post" action="/admin/prompt-cache" class="ctx-form" style="margin-top:.6rem">
+    <select name="prompt_cache">
+      <option value="auto" {{if eq .PromptCache "auto"}}selected{{end}}>auto — Claude</option>
+      <option value="off" {{if eq .PromptCache "off"}}selected{{end}}>off — не инжектить</option>
+      <option value="on" {{if eq .PromptCache "on"}}selected{{end}}>on — любой OpenRouter</option>
+    </select>
+    <button class="btn-sm" type="submit">OK</button>
+  </form>
+</div>
+
 {{if .Catalog}}
 <form method="post" action="/admin/models/connect" id="catalog-form"></form>
   <div class="toolbar" id="catalog-filters">
@@ -43,6 +57,12 @@
     <select id="model-provider" class="sel-sm" title="Провайдер">
       <option value="">Все провайдеры</option>
       {{range .Providers}}<option value="{{.}}">{{.}}</option>{{end}}
+    </select>
+    <select id="model-media" class="sel-sm" title="Тип контента">
+      <option value="">Все типы</option>
+      <option value="image">Изображение</option>
+      <option value="video">Видео</option>
+      <option value="chat">Только текст</option>
     </select>
     <select id="model-price" class="sel-sm" title="Цена входа за 1M токенов">
       <option value="">Все цены</option>
@@ -62,6 +82,18 @@
     </select>
     <button type="submit" form="catalog-form">В шлюз</button>
   </div>
+  <div class="toolbar catalog-pager-bar">
+    <label class="inline">На странице
+      <select id="catalog-page-size" class="sel-sm" title="Строк на странице">
+        <option value="10" selected>10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="0">все</option>
+      </select>
+    </label>
+    <div class="row" id="catalog-pager"></div>
+  </div>
 
   <div class="table-wrap card flush" id="catalog-table">
     <table class="tbl">
@@ -72,7 +104,7 @@
           <th>Провайдер</th>
           <th class="col-num">Размер</th>
           <th class="col-num">Контекст</th>
-          <th class="col-num">Цена 1M</th>
+          <th class="col-num">Цена</th>
           <th>RAM</th>
           <th>Шлюз</th>
           <th class="col-act">Диск</th>
@@ -80,18 +112,19 @@
       </thead>
       <tbody>
         {{range $m := .Catalog}}
-        <tr class="model-tr {{if $m.Connected}}is-on{{end}}" data-name="{{$m.Name}}" data-provider="{{$m.Provider}}" data-band="{{$m.PriceBand}}" data-prompt="{{$m.PromptUSD}}" data-title="{{$m.Title}}">
+        <tr class="model-tr {{if $m.Connected}}is-on{{end}}" data-name="{{$m.Name}}" data-provider="{{$m.Provider}}" data-band="{{$m.PriceBand}}" data-prompt="{{$m.PromptUSD}}" data-title="{{$m.Title}}" data-media="{{join $m.Media ","}}">
           <td class="col-check">
             <input type="checkbox" form="catalog-form" name="model" value="{{$m.Name}}" {{if $m.Connected}}disabled{{end}} title="Подключить к шлюзу">
           </td>
           <td>
             <div class="name" title="{{if $m.Title}}{{$m.Title}} · {{end}}{{$m.Name}}">{{$m.Name}}</div>
             {{if $m.Title}}<div class="muted small">{{$m.Title}}</div>{{end}}
+            {{range $m.Media}}<span class="pill media-{{.}}">{{.}}</span>{{end}}
           </td>
           <td>{{if $m.Provider}}<span class="pill">{{$m.Provider}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
           <td class="col-num muted">{{if $m.SizeLabel}}{{$m.SizeLabel}}{{else}}—{{end}}</td>
           <td class="col-num muted" title="Контекст с сервера">{{if $m.CtxLabel}}{{$m.CtxLabel}}{{else}}—{{end}}</td>
-          <td class="col-num muted" title="вход / выход за 1M токенов">{{if $m.PriceLabel}}{{$m.PriceLabel}}{{else}}—{{end}}</td>
+          <td class="col-num muted" title="чат: вход/выход за 1M ток.; картинка: кадр или 1M img; видео: секунда">{{if $m.PriceLabel}}{{$m.PriceLabel}}{{else}}—{{end}}</td>
           <td>
             <div class="host-pills">
               {{range $m.Hosts}}
@@ -147,12 +180,12 @@
   <div class="table-wrap">
     <table class="tbl">
       <thead>
-        <tr><th>Клиентам</th><th>На сервере</th><th>Провайдер</th><th>Цена 1M</th><th>Серверы</th><th>Контекст</th><th>Запасная</th><th>LB</th><th class="col-act"></th></tr>
+        <tr><th>Клиентам</th><th>На сервере</th><th>Провайдер</th><th>Цена 1M</th><th>Серверы</th><th>Контекст</th><th>Запасная</th><th>Кэш</th><th>LB</th><th class="col-act"></th></tr>
       </thead>
       <tbody>
         {{range $m := .Models}}
         <tr>
-          <td><code>{{$m.Alias}}</code></td>
+          <td><code>{{$m.Alias}}</code>{{range $m.Media}} <span class="pill media-{{.}}">{{.}}</span>{{end}}</td>
           <td class="muted">{{$m.UpstreamName}}</td>
           <td>{{if $m.Provider}}<span class="pill">{{$m.Provider}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
           <td class="muted" title="вход / выход за 1M токенов">{{if $m.PriceLabel}}{{$m.PriceLabel}}{{else}}—{{end}}</td>
@@ -171,6 +204,17 @@
                 {{range $o := $.Models}}
                 {{if ne $o.Alias $m.Alias}}<option value="{{$o.Alias}}" {{if eq $o.Alias $m.Fallback}}selected{{end}}>{{$o.Alias}}</option>{{end}}
                 {{end}}
+              </select>
+              <button class="btn-sm" type="submit">OK</button>
+            </form>
+          </td>
+          <td>
+            <form method="post" action="/admin/models/{{$m.ID}}/prompt-cache" class="ctx-form" title="inherit — глобальная настройка выше">
+              <select name="prompt_cache">
+                <option value="inherit" {{if or (eq $m.PromptCache "inherit") (eq $m.PromptCache "")}}selected{{end}}>inherit</option>
+                <option value="off" {{if eq $m.PromptCache "off"}}selected{{end}}>off</option>
+                <option value="auto" {{if eq $m.PromptCache "auto"}}selected{{end}}>auto</option>
+                <option value="on" {{if eq $m.PromptCache "on"}}selected{{end}}>on</option>
               </select>
               <button class="btn-sm" type="submit">OK</button>
             </form>

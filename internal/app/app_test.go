@@ -107,6 +107,81 @@ func TestRefreshOpenRedirect(t *testing.T) {
 	}
 }
 
+func TestAdminToggleBackend(t *testing.T) {
+	a := testApp(t)
+	cookies := login(t, a)
+	page := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	withCookies(page, cookies)
+	prec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(prec, page)
+	body := prec.Body.String()
+	if !strings.Contains(body, "Выключить") {
+		t.Fatal("missing disable button")
+	}
+	m := regexp.MustCompile(`name="csrf-token" content="([^"]+)"`).FindStringSubmatch(body)
+	if len(m) != 2 {
+		t.Fatal("csrf")
+	}
+	bs, err := a.Store.ListBackends()
+	if err != nil || len(bs) == 0 {
+		t.Fatalf("backends %v %+v", err, bs)
+	}
+	id := bs[0].ID
+	form := url.Values{"csrf": {m[1]}, "enabled": {"0"}}.Encode()
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/admin/backends/%d/enabled", id), strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	withCookies(req, cookies)
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 302 {
+		t.Fatalf("toggle %d %s", rec.Code, rec.Body.String())
+	}
+	b, err := a.Store.GetBackend(id)
+	if err != nil || b.Enabled {
+		t.Fatalf("want disabled %+v %v", b, err)
+	}
+	page = httptest.NewRequest(http.MethodGet, "/admin", nil)
+	withCookies(page, cookies)
+	prec = httptest.NewRecorder()
+	a.Handler.ServeHTTP(prec, page)
+	out := prec.Body.String()
+	if !strings.Contains(out, "Выкл") || !strings.Contains(out, "Включить") {
+		t.Fatalf("disabled card missing toggle: %s", out)
+	}
+}
+
+func TestAdminChatHasMediaMode(t *testing.T) {
+	a := testApp(t)
+	cookies := login(t, a)
+	req := httptest.NewRequest(http.MethodGet, "/admin/chat", nil)
+	withCookies(req, cookies)
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("chat %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "gen-mode") || !strings.Contains(body, "/v1/images/generations") {
+		t.Fatal("missing image playground")
+	}
+}
+
+func TestAdminSecurityPage(t *testing.T) {
+	a := testApp(t)
+	cookies := login(t, a)
+	req := httptest.NewRequest(http.MethodGet, "/admin/security", nil)
+	withCookies(req, cookies)
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("security %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Безопасность") || !strings.Contains(body, "prompt_injection") {
+		t.Fatal("missing security form")
+	}
+}
+
 func TestStaticNoTemplates(t *testing.T) {
 	a := testApp(t)
 	req := httptest.NewRequest(http.MethodGet, "/admin/static/../templates/login.html", nil)

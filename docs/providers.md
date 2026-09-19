@@ -1,38 +1,40 @@
-# Бэкенды: локальные и облачные
+# Backends: local and cloud
 
-MikroLLM — шлюз. Бэкенд может быть **локальным процессом** в LAN или **облачным API** (OpenRouter, Ollama Cloud) — без своего GPU-сервера. В админке **Статус → Добавить сервер** укажите тип, URL и при необходимости API-ключ.
+**English** · [Русский](ru/providers.md)
 
-| Тип | Куда ходить | Чат | Список моделей | Скачать / RAM |
+MikroLLM is a gateway. A backend can be a **local process** on the LAN or a **cloud API** (OpenRouter, Ollama Cloud) — no GPU server of your own. In admin **Status → Add server** set kind, URL, and an API key if needed.
+
+| Kind | Talks to | Chat | Model list | Download / RAM |
 |---|---|---|---|---|
-| **Ollama** (локальный) | `http://<хост>:11434` | `/api/chat`, `/v1/chat/completions` | `/api/tags`, `/api/ps` | да, из админки |
-| **Ollama Cloud** | `https://ollama.com` | `/api/chat`, `/v1/chat/completions` | `/api/tags` | нет: модели уже в облаке |
-| **OpenRouter** | `https://openrouter.ai/api/v1` | `/chat/completions` | `/models` | нет: модели уже в облаке |
-| **vLLM** | `http://<хост>:8000` | `/v1/chat/completions` | `/health`, `/v1/models` | нет API: модель = процесс |
-| **LM Studio** | `http://<хост>:1234` | `/v1/chat/completions` | `/api/v1/models` | да, из админки |
+| **Ollama** (local) | `http://<host>:11434` | `/api/chat`, `/v1/chat/completions` | `/api/tags`, `/api/ps` | yes, from admin |
+| **Ollama Cloud** | `https://ollama.com` | `/api/chat`, `/v1/chat/completions` | `/api/tags` | no: models already in the cloud |
+| **OpenRouter** | `https://openrouter.ai/api/v1` | `/chat/completions` | `/models` | no: models already in the cloud |
+| **vLLM** | `http://<host>:8000` | `/v1/chat/completions` | `/health`, `/v1/models` | no API: the model is the process |
+| **LM Studio** | `http://<host>:1234` | `/v1/chat/completions` | `/api/v1/models` | yes, from admin |
 
-Клиенты всегда ходят в MikroLLM (`/v1/chat/completions`). Если клиент шлёт `/api/chat`, а бэкенд не Ollama / Ollama Cloud, шлюз переписывает путь на OpenAI-совместимый чат провайдера.
+Clients always talk to MikroLLM (`/v1/chat/completions`). If the client sends `/api/chat` and the backend is not Ollama / Ollama Cloud, the gateway rewrites the path to the provider’s OpenAI-compatible chat.
 
-Облачные бэкенды требуют **HTTPS**. Образ RouterOS кладёт корневые CA в контейнер (`ca-certificates`). На обычном Linux/macOS используются системные сертификаты.
+Cloud backends need **HTTPS**. The RouterOS image puts root CAs in the container (`ca-certificates`). On normal Linux/macOS, system certs are used.
 
 ## Ollama
 
-1. Поставьте [Ollama](https://ollama.com) на машину с моделью.
-2. В админке: тип **Ollama**, URL `http://<хост>:11434`.
-3. На странице **Модели** скачайте (`llama3.2`, `qwen2.5:32b`, …), загрузите в RAM, подключите к шлюзу.
+1. Install [Ollama](https://ollama.com) on the machine that holds the model.
+2. In admin: kind **Ollama**, URL `http://<host>:11434`.
+3. On **Models** download (`llama3.2`, `qwen2.5:32b`, …), load into RAM, connect to the gateway.
 
-Подробнее: [admin.md](admin.md).
+More: [admin.md](admin.md).
 
 ## vLLM
 
-vLLM поднимает **одну** модель на время жизни процесса. Сменить веса = остановить сервер и запустить с другим id. Через HTTP это сделать нельзя — поэтому в админке нет кнопок «скачать» / «в RAM».
+vLLM holds **one** model for the life of the process. Changing weights = stop the server and start with another id. That cannot be done over HTTP — so admin has no “download” / “into RAM” buttons.
 
-### Установка
+### Install
 
-Нужны Python 3.9+, GPU NVIDIA (CUDA) или поддерживаемый бэкенд. Документация: [docs.vllm.ai](https://docs.vllm.ai/en/latest/getting_started/installation.html).
+Need Python 3.9+, NVIDIA GPU (CUDA) or a supported backend. Docs: [docs.vllm.ai](https://docs.vllm.ai/en/latest/getting_started/installation.html).
 
 ```bash
 pip install vllm
-# или
+# or
 uv pip install vllm
 ```
 
@@ -45,9 +47,9 @@ docker run --gpus all --ipc=host -p 8000:8000 \
   --host 0.0.0.0 --port 8000
 ```
 
-### Загрузить модель на сервер
+### Load a model on the server
 
-Имя модели — id с Hugging Face (`org/name`).
+The model name is a Hugging Face id (`org/name`).
 
 ```bash
 vllm serve Qwen/Qwen2.5-7B-Instruct \
@@ -55,7 +57,7 @@ vllm serve Qwen/Qwen2.5-7B-Instruct \
   --port 8000
 ```
 
-С ключом (тогда тот же токен впишите в MikroLLM):
+With a key (put the same token in MikroLLM):
 
 ```bash
 vllm serve Qwen/Qwen2.5-7B-Instruct \
@@ -63,7 +65,7 @@ vllm serve Qwen/Qwen2.5-7B-Instruct \
   --api-key supersecret
 ```
 
-Закрытая модель на Hugging Face:
+Private Hugging Face model:
 
 ```bash
 export HF_TOKEN=hf_...
@@ -71,29 +73,29 @@ vllm serve meta-llama/Meta-Llama-3.1-8B-Instruct \
   --host 0.0.0.0 --port 8000
 ```
 
-Первый запуск качает веса в кэш Hugging Face (`~/.cache/huggingface`). Это и есть «загрузка модели на сервер».
+The first start downloads weights into the Hugging Face cache (`~/.cache/huggingface`). That is “loading the model on the server”.
 
-Проверка:
+Check:
 
 ```bash
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/v1/models
 ```
 
-### Сменить модель
+### Change model
 
 ```bash
-# остановить процесс vllm / контейнер
+# stop the vllm process / container
 vllm serve mistralai/Mistral-7B-Instruct-v0.3 --host 0.0.0.0 --port 8000
 ```
 
-В MikroLLM после смены нажмите **Обновить статусы** — в каталоге появится новое имя.
+In MikroLLM click **Refresh status** — the new name appears in the catalog.
 
-### Подключить к шлюзу
+### Connect to the gateway
 
-Админка → **Статус** → тип **vLLM**, URL `http://<хост>:8000`, токен если задавали `--api-key`. Дальше **Модели → В шлюз**.
+Admin → **Status** → kind **vLLM**, URL `http://<host>:8000`, token if you set `--api-key`. Then **Models → To gateway**.
 
-systemd-пример:
+systemd example:
 
 ```ini
 [Service]
@@ -103,17 +105,17 @@ Restart=on-failure
 
 ## LM Studio
 
-[LM Studio](https://lmstudio.ai) — десктоп (macOS / Windows / Linux) с локальным HTTP-сервером. С версии 0.4 есть REST `/api/v1/*`: список, download, load, unload.
+[LM Studio](https://lmstudio.ai) is a desktop app (macOS / Windows / Linux) with a local HTTP server. From 0.4 there is REST `/api/v1/*`: list, download, load, unload.
 
-### Включить сервер
+### Enable the server
 
-1. Откройте LM Studio → **Developer**.
-2. Start server, bind `0.0.0.0`, порт `1234` (чтобы шлюз в LAN видел хост).
-3. Если включили API token — скопируйте его в поле «Токен» MikroLLM.
+1. Open LM Studio → **Developer**.
+2. Start server, bind `0.0.0.0`, port `1234` (so the gateway on the LAN can see the host).
+3. If you enabled an API token — paste it into MikroLLM’s Token field.
 
-Headless (без окна): см. [Run as a service](https://lmstudio.ai/docs/developer/core/headless).
+Headless (no window): see [Run as a service](https://lmstudio.ai/docs/developer/core/headless).
 
-Проверка:
+Check:
 
 ```bash
 curl http://127.0.0.1:1234/v1/models
@@ -121,38 +123,68 @@ curl http://127.0.0.1:1234/api/v1/models \
   -H "Authorization: Bearer $LM_API_TOKEN"
 ```
 
-### Скачать и загрузить из MikroLLM
+### Download and load from MikroLLM
 
-В админке тип **LM Studio**, URL `http://<хост>:1234`.
+In admin kind **LM Studio**, URL `http://<host>:1234`.
 
-- **Скачать**: id из каталога LM Studio (`ibm/granite-4-micro`) или ссылка Hugging Face. Прогресс как у Ollama pull.
-- **В RAM / выгрузить**: кнопки на **Моделях** и карточке сервера. API: `POST /api/v1/models/load` и `/unload`.
-- Файл с диска админка не удаляет — уберите модель в UI LM Studio.
+- **Download**: id from the LM Studio catalog (`ibm/granite-4-micro`) or a Hugging Face URL. Progress like Ollama pull.
+- **Into RAM / unload**: buttons on **Models** and the server card. API: `POST /api/v1/models/load` and `/unload`.
+- Admin does not delete the file from disk — remove the model in the LM Studio UI.
 
-Можно по-прежнему грузить модель руками в LM Studio (Chat / Developer → load). Шлюз увидит её после **Обновить**.
+You can still load a model by hand in LM Studio (Chat / Developer → load). The gateway sees it after **Refresh**.
 
-### Если сервер старый
+### Old server
 
-До v1 REST LM Studio отдаёт только `/v1/models` (уже загруженные). Тогда MikroLLM покажет их как «в RAM», а кнопок download/load может не быть — обновите LM Studio.
+Before v1 REST, LM Studio only serves `/v1/models` (already loaded). MikroLLM then shows them as “in RAM” and may hide download/load — upgrade LM Studio.
 
 ## OpenRouter
 
-Прямое облако: MikroLLM ходит на `https://openrouter.ai/api/v1`, локальный LLM-сервер не нужен.
+Direct cloud: MikroLLM talks to `https://openrouter.ai/api/v1`, no local LLM server.
 
-1. Ключ: [openrouter.ai/keys](https://openrouter.ai/settings/keys) (`sk-or-v1-…`).
-2. Админка → **Статус** → тип **OpenRouter**. URL подставится сам (`https://openrouter.ai/api/v1`). Вставьте ключ.
-3. **Обновить статусы** — каталог с OpenRouter (`GET /models`).
-4. **Модели → В шлюз** для нужных id (`openai/gpt-4o-mini`, `anthropic/claude-sonnet-4`, …).
+1. Key: [openrouter.ai/keys](https://openrouter.ai/settings/keys) (`sk-or-v1-…`).
+2. Admin → **Status** → kind **OpenRouter**. URL is filled (`https://openrouter.ai/api/v1`). Paste the key.
+3. **Refresh status** — catalog from OpenRouter (`GET /models`).
+4. **Models → To gateway** for the ids you need (`openai/gpt-4o-mini`, `anthropic/claude-sonnet-4`, …).
 
-Чат: `POST https://openrouter.ai/api/v1/chat/completions`, `Authorization: Bearer <ключ>`.
+Chat: `POST https://openrouter.ai/api/v1/chat/completions`, `Authorization: Bearer <key>`.
 
-Скачивать и грузить в RAM нечего — веса у провайдера. На RouterOS нужен образ с CA-сертификатами (текущий Dockerfile их копирует).
+Nothing to download or load into RAM — weights live at the provider. RouterOS needs an image with CA certs (the current Dockerfile copies them).
 
-**403 Forbidden.** OpenRouter (Cloudflare) часто отвечает 403 на API с IP РФ. Ключ при этом может быть верным: `GET /api/v1/key` с VPN даёт 200, с ISP — 403. Контейнер MikroLLM живёт в `192.168.254.0/24` и **не** попадает под правило «LAN 88 → AMS WG». Нужно отдельное mark-routing на `192.168.254.5` в таблицу `vpn` и src-nat на свободный адрес LAN (не `.1` роутера), иначе ответ VPN приходит на INPUT и сессия висит. `ru-domains` / `novpn` оставьте на ISP. Подробнее: [install-mikrotik.md](install-mikrotik.md#openrouter-403).
+**403 Forbidden.** OpenRouter (Cloudflare) often 403s API from a Russian IP. The key can still be valid: `GET /api/v1/key` via VPN is 200, via ISP is 403. The MikroLLM container lives in `192.168.254.0/24` and **does not** match the “LAN 88 → AMS WG” rule. You need a separate mark-routing on `192.168.254.5` into table `vpn` and src-nat to a free LAN address (not the router `.1`), or the VPN reply hits INPUT and the session hangs. Leave `ru-domains` / `novpn` on the ISP. Details: [install-mikrotik.md](install-mikrotik.md#openrouter-403).
 
-В поле токена вставляйте сам ключ `sk-or-v1-…`, без префикса `Bearer`.
+In the token field paste the raw key `sk-or-v1-…`, without a `Bearer` prefix.
 
-Проверка:
+## Prompt cache
+
+Clouds (via OpenRouter) discount a **repeated prompt prefix**: same system + long context, new question at the tail. This is not a full-response cache. Ollama / vLLM / LM Studio / **Ollama Cloud** are a no-op.
+
+On **Models**: global `auto` | `off` | `on`, plus `inherit` per alias. Default **`auto`**: the gateway sets top-level `"cache_control":{"type":"ephemeral"}` **only** if the hop is Anthropic (id `anthropic/…` or catalog provider `Anthropic`) and the client did not send `cache_control` / a breakpoint. Claude first turn is a **1.25×** input write, later reads ~0.10×. The gateway does not set `"ttl":"1h"`.
+
+`on` — the same field on any OpenRouter request without hints. `off` — inject nothing.
+
+Client `cache_control`, `session_id`, `prompt_cache_key`, `X-Session-Id` are passed through. Agents should send a stable `X-Session-Id` / `session_id` (≤256) so OpenRouter keeps a sticky route.
+
+**Qwen / `deepseek/deepseek-v3.2` / Gemini-explicit** do not turn on from Claude’s top-level field. You need a per-block breakpoint:
+
+```json
+{
+  "model": "qwen/qwen3-max",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "Reference:" },
+        { "type": "text", "text": "HUGE TEXT BODY", "cache_control": { "type": "ephemeral" } },
+        { "type": "text", "text": "New question" }
+      ]
+    }
+  ]
+}
+```
+
+In logs: `cached_tokens`, `$` estimate (`cache_discount` or a multiplier). `usage.cost` is billed amount, not savings. Non-stream headers: `X-MikroLLM-Cache-Tokens`, and `X-MikroLLM-Cache-Write-Tokens` on a write.
+
+Check:
 
 ```bash
 curl https://openrouter.ai/api/v1/key \
@@ -161,20 +193,20 @@ curl https://openrouter.ai/api/v1/key \
 
 ## Ollama Cloud
 
-Только **облачные** модели на [ollama.com](https://ollama.com) — не локальный демон `:11434` и не `:cloud` через ваш GPU.
+**Cloud** models on [ollama.com](https://ollama.com) only — not the local daemon `:11434` and not `:cloud` through your GPU.
 
-1. Ключ: [ollama.com/settings/keys](https://ollama.com/settings/keys).
-2. Админка → тип **Ollama Cloud**. URL `https://ollama.com`. Вставьте ключ.
-3. Список: `GET https://ollama.com/api/tags` (имена **без** суффикса `-cloud`, например `gpt-oss:120b`).
-4. Цены $/1M (вход / выход) — с [ollama.com/pricing](https://ollama.com/pricing); если модели нет в таблице — со страницы `/library/<модель>` (как у [glm-5.3](https://ollama.com/library/glm-5.3)). Имена в tags могут быть с тегом (`gemma4:31b`), в таблице — семейство (`gemma4`).
-5. Подключите нужные в шлюз. Pull/load/delete в админке скрыты: качать некуда.
+1. Key: [ollama.com/settings/keys](https://ollama.com/settings/keys).
+2. Admin → kind **Ollama Cloud**. URL `https://ollama.com`. Paste the key.
+3. List: `GET https://ollama.com/api/tags` (names **without** a `-cloud` suffix, e.g. `gpt-oss:120b`).
+4. $/1M (in / out) from [ollama.com/pricing](https://ollama.com/pricing); if the model is missing, from `/library/<model>` (e.g. [glm-5.3](https://ollama.com/library/glm-5.3)). Tags may include a tag (`gemma4:31b`); the table is the family (`gemma4`).
+5. Connect what you need to the gateway. Pull/load/delete are hidden in admin: there is nowhere to download.
 
-Чат с MikroLLM:
+Chat via MikroLLM:
 
-- клиент OpenAI → шлюз шлёт `POST https://ollama.com/v1/chat/completions`;
-- клиент Ollama → `POST https://ollama.com/api/chat`.
+- OpenAI client → gateway sends `POST https://ollama.com/v1/chat/completions`;
+- Ollama client → `POST https://ollama.com/api/chat`.
 
-Не путайте с локальным типом **Ollama**: тот ходит на ваш хост в LAN и умеет pull/RAM. Cloud — отдельная карточка.
+Do not confuse with local **Ollama**: that talks to your LAN host and can pull/RAM. Cloud is a separate card.
 
 ```bash
 curl https://ollama.com/api/tags \
@@ -185,8 +217,8 @@ curl https://ollama.com/api/chat \
   -d '{"model":"gpt-oss:120b","messages":[{"role":"user","content":"hi"}],"stream":false}'
 ```
 
-## Смешанный пул
+## Mixed pool
 
-Один alias может указывать на несколько серверов разного типа. Балансировка та же (`least_conn` / `round_robin` / `failover`). Имя модели для клиента — alias; на апстрим уходит `upstream_name`.
+One alias can point at several servers of different kinds. LB is the same (`least_conn` / `round_robin` / `failover`). The client name is the alias; upstream gets `upstream_name`.
 
-Убедитесь, что **одно и то же имя** есть на всех хостах пула, либо заведите отдельные alias (`qwen-ollama`, `qwen-vllm`).
+Make sure **the same name** exists on every host in the pool, or use separate aliases (`qwen-ollama`, `qwen-vllm`).

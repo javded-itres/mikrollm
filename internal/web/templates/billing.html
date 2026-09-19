@@ -1,0 +1,54 @@
+{{define "content"}}
+<div class="pagehead tight bill-head">
+  <div>
+    <h1>Биллинг</h1>
+    <p class="muted">Сколько списало облако. Локальные модели — ноль долларов.</p>
+  </div>
+  <nav class="bill-periods" aria-label="Период">
+    {{range .Periods}}
+    <a href="/admin/billing?p={{.ID}}"{{if .Active}} class="active" aria-current="page"{{end}}>{{.Label}}</a>
+    {{end}}
+  </nav>
+</div>
+
+<div class="bill-hero">
+  <div class="bill-sum">{{usd .View.UsageCost}}</div>
+  <div class="muted">{{.Caption}}</div>
+</div>
+
+<div class="stat-row bill-stats">
+  <div class="stat">
+    <div class="stat-val">{{.View.N}}</div>
+    <div class="stat-k">запросов</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val">{{.View.PromptTokens}}</div>
+    <div class="stat-k">токенов входа</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val">{{.View.CompletionTokens}}</div>
+    <div class="stat-k">токенов выхода</div>
+  </div>
+  <div class="stat" title="оценка экономии prompt cache, не инвойс">
+    <div class="stat-val">{{usd .View.SavedUSD}}</div>
+    <div class="stat-k">кэш сэкономил</div>
+  </div>
+</div>
+
+{{if .View.N}}
+<div class="card bill-card">
+  <div class="bill-chart" role="img" aria-label="Затраты по {{.Caption}}">
+    {{range .View.Buckets}}
+    <div class="bill-col" tabindex="0" title="{{.Label}}: {{usd .UsageCost}}, {{.N}} запр.">
+      <div class="bill-track"><i{{if .Pct}} style="height:{{.Pct}}%"{{end}}></i></div>
+      <span>{{.Label}}</span>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{else}}
+<div class="card empty">
+  <p>Пока пусто. Когда облако вернёт <code>usage.cost</code>, сумма появится здесь. История не обрезается вместе с логом — считаем по часам.</p>
+</div>
+{{end}}
+{{end}}

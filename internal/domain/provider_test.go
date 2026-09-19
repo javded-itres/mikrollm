@@ -45,4 +45,10 @@ func TestPerMillionAndPriceLabel(t *testing.T) {
 	if PriceBand(true, 0) != "free" || PriceBand(false, 0) != "none" || PriceBand(true, 3) != "lt10" {
 		t.Fatal("band")
 	}
+	if g := FormatCatalogPrice(true, 0, 0, 0.04, 0, 0); g != "$0.04 / кадр" {
+		t.Fatalf("image %q", g)
+	}
+	if g := FormatCatalogPrice(true, 0, 0, 0, 0, 0.08); g != "$0.08 / сек" {
+		t.Fatalf("video %q", g)
+	}
 }

@@ -21,6 +21,8 @@ type Model struct {
 	BackendIDs   []int64
 	MaxContext   int
 	Fallback     string
+	PromptCache  string
+	Media        []string
 }
 
 type APIKey struct {
@@ -48,15 +50,75 @@ func (k APIKey) Allows(model string) bool {
 	return false
 }
 
+type TokenUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+	CachedTokens     int
+	CacheWriteTokens int
+	Upstream         string
+	PromptUSD        float64
+	CacheDiscount    float64
+	HasDiscount      bool
+	Cost             float64
+	HasCost          bool
+	SavedUSD         float64
+	HasSaved         bool
+}
+
 type RequestLog struct {
-	ID        int64
-	TS        time.Time
-	KeyPrefix string
-	Model     string
-	Backend   string
-	Status    int
-	LatencyMS int64
-	BytesOut  int64
+	ID               int64
+	TS               time.Time
+	KeyPrefix        string
+	Model            string
+	Backend          string
+	Status           int
+	LatencyMS        int64
+	BytesOut         int64
+	PromptTokens     int
+	CompletionTokens int
+	CachedTokens     int
+	CacheWriteTokens int
+	Upstream         string
+	PromptUSD        float64
+	CacheDiscount    float64
+	UsageCost        float64
+	SavedUSD         float64
+}
+
+type BillingHour struct {
+	Hour             time.Time
+	N                int
+	PromptTokens     int
+	CompletionTokens int
+	CachedTokens     int
+	UsageCost        float64
+	SavedUSD         float64
+}
+
+type BillingBucket struct {
+	Key              string
+	Label            string
+	Start            time.Time
+	N                int
+	PromptTokens     int
+	CompletionTokens int
+	CachedTokens     int
+	UsageCost        float64
+	SavedUSD         float64
+	Pct              int
+}
+
+type BillingView struct {
+	Period           string
+	From             time.Time
+	To               time.Time
+	N                int
+	PromptTokens     int
+	CompletionTokens int
+	CachedTokens     int
+	UsageCost        float64
+	SavedUSD         float64
+	Buckets          []BillingBucket
 }
 
 type HostStatus struct {
@@ -73,6 +135,10 @@ type HostStatus struct {
 	Prompt     map[string]float64
 	Completion map[string]float64
 	Priced     map[string]bool
+	Media      map[string][]string
+	ImageUSD   map[string]float64
+	ImageTok   map[string]float64
+	VideoSec   map[string]float64
 }
 
 type CatalogEntry struct {
@@ -88,6 +154,10 @@ type CatalogEntry struct {
 	Priced        bool
 	PromptUSD     float64
 	CompletionUSD float64
+	ImageUSD      float64
+	ImageTokUSD   float64
+	VideoSecUSD   float64
+	Media         []string
 }
 
 type Job struct {

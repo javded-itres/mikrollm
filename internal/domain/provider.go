@@ -101,13 +101,46 @@ func FormatUSD(n float64) string {
 }
 
 func PriceLabel(priced bool, promptPerM, completionPerM float64) string {
-	if !priced {
-		return ""
+	return FormatCatalogPrice(priced, promptPerM, completionPerM, 0, 0, 0)
+}
+
+// FormatCatalogPrice: chat $/1M in/out, image per кадр or /1M img-токен, video /сек.
+func FormatCatalogPrice(priced bool, promptPerM, completionPerM, imagePerImg, imagePerM, videoPerSec float64) string {
+	var parts []string
+	if promptPerM > 0 || completionPerM > 0 {
+		parts = append(parts, FormatUSD(promptPerM)+" / "+FormatUSD(completionPerM))
 	}
-	if promptPerM <= 0 && completionPerM <= 0 {
+	if imagePerImg > 0 {
+		parts = append(parts, FormatUSD(imagePerImg)+" / кадр")
+	} else if imagePerM > 0 {
+		parts = append(parts, FormatUSD(imagePerM)+" / 1M img")
+	}
+	if videoPerSec > 0 {
+		parts = append(parts, FormatUSD(videoPerSec)+" / сек")
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, " · ")
+	}
+	if priced {
 		return "бесплатно"
 	}
-	return FormatUSD(promptPerM) + " / " + FormatUSD(completionPerM)
+	return ""
+}
+
+func PriceBandValue(promptPerM, imagePerImg, imagePerM, videoPerSec float64) float64 {
+	if promptPerM > 0 {
+		return promptPerM
+	}
+	if imagePerM > 0 {
+		return imagePerM
+	}
+	if imagePerImg > 0 {
+		return imagePerImg * 1000
+	}
+	if videoPerSec > 0 {
+		return videoPerSec * 100
+	}
+	return 0
 }
 
 func PriceBand(priced bool, promptPerM float64) string {
