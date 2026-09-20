@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"github.com/javded-itres/mikrollm/internal/domain"
 	"github.com/javded-itres/mikrollm/internal/health"
 	"github.com/javded-itres/mikrollm/internal/host"
+	"github.com/javded-itres/mikrollm/internal/hubclient"
 	"github.com/javded-itres/mikrollm/internal/jobs"
 	"github.com/javded-itres/mikrollm/internal/mcp"
 	"github.com/javded-itres/mikrollm/internal/ports"
@@ -42,11 +45,14 @@ type Config struct {
 	MCPToken      string
 	ResetMCPToken bool
 	Version       string
+	Seed          string
+	SeedOllamaURL string
 }
 
 type App struct {
 	Handler http.Handler
 	Store   *store.Store
+	stop    context.CancelFunc
 }
 
 func New(cfg Config) (*App, error) {
@@ -65,12 +71,12 @@ func New(cfg Config) (*App, error) {
 		st.Close()
 		return nil, err
 	}
-	_ = st.SeedIfEmpty([]domain.Backend{
-		{Name: "mac-82", BaseURL: "http://192.168.88.82:11434", Weight: 1},
-		{Name: "mac-80", BaseURL: "http://192.168.88.80:11434", Weight: 1},
-	})
+	_ = st.SeedIfEmpty(seedBackends(cfg))
 
 	checker := health.New(st, nil)
+	if isLocalSeed(cfg.Seed) {
+		bootstrapLocalOllama(st, checker)
+	}
 	go checker.Loop(10 * time.Second)
 	keys := auth.New(st)
 	hosts := host.New(nil)
@@ -80,8 +86,14 @@ func New(cfg Config) (*App, error) {
 	queues := queue.New(st, px, queue.LimitsFromEnv())
 	px.SetQueue(queues)
 	go queues.Loop(context.Background())
+	hubc := hubclient.New(st, keys, cfg.Listen)
+	secret := newRelaySecret()
+	px.SetHubRelay(secret)
+	px.SetHubDial(hubc)
+	checker.SetHub(hubc)
+	hubc.RelaySecret = secret
 	ui := admin.New(admin.Deps{
-		Store: st, Health: checker, Auth: keys, Host: hosts, Jobs: tracker, Chat: px, Queues: queues,
+		Store: st, Health: checker, Auth: keys, Host: hosts, Jobs: tracker, Chat: px, Queues: queues, Hub: hubc,
 	})
 
 	mux := http.NewServeMux()
@@ -103,7 +115,62 @@ func New(cfg Config) (*App, error) {
 		Version: cfg.Version,
 	}).Mount(mux)
 
-	return &App{Handler: logRequests(secureHeaders(limitBody(mux))), Store: st}, nil
+	hubc.Handler = mux
+	ctx, stop := context.WithCancel(context.Background())
+	go hubc.Loop(ctx)
+
+	return &App{Handler: logRequests(secureHeaders(limitBody(mux))), Store: st, stop: stop}, nil
+}
+
+func isLocalSeed(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	return s == "local" || s == "desktop"
+}
+
+func seedBackends(cfg Config) []domain.Backend {
+	if isLocalSeed(cfg.Seed) {
+		u := strings.TrimSpace(cfg.SeedOllamaURL)
+		if u == "" {
+			u = "http://127.0.0.1:11434"
+		}
+		return []domain.Backend{{Name: "ollama", BaseURL: u, Weight: 1, Kind: domain.KindOllama, Enabled: true}}
+	}
+	return []domain.Backend{
+		{Name: "mac-82", BaseURL: "http://192.168.88.82:11434", Weight: 1},
+		{Name: "mac-80", BaseURL: "http://192.168.88.80:11434", Weight: 1},
+	}
+}
+
+func bootstrapLocalOllama(st *store.Store, h *health.Checker) {
+	ms, err := st.ListModels()
+	if err != nil || len(ms) > 0 {
+		return
+	}
+	h.CheckOnce()
+	bs, err := st.ListBackends()
+	if err != nil {
+		return
+	}
+	n := 0
+	for _, e := range h.Catalog(bs) {
+		if e.Name == "" || len(e.BackendIDs) == 0 {
+			continue
+		}
+		if err := st.ConnectOllamaModel(e.Name, e.BackendIDs, "least_conn", e.Context); err != nil {
+			log.Printf("seed connect %s: %v", e.Name, err)
+			continue
+		}
+		n++
+	}
+	if n > 0 {
+		log.Printf("connected %d local Ollama model(s)", n)
+	}
+}
+
+func newRelaySecret() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
 }
 
 func limitBody(next http.Handler) http.Handler {
@@ -137,6 +204,9 @@ func secureHeaders(next http.Handler) http.Handler {
 }
 
 func (a *App) Close() error {
+	if a.stop != nil {
+		a.stop()
+	}
 	if a.Store == nil {
 		return nil
 	}

@@ -30,10 +30,19 @@ Docs: [docs/](docs/README.md) (English default). Russian: [docs/ru/](docs/ru/REA
 - OpenRouter and Ollama Cloud over HTTPS, no extra GPU server; API key required. $/1M prices in the catalog: OpenRouter from `/models`, Ollama Cloud from [ollama.com/pricing](https://ollama.com/pricing).
 - OpenRouter prompt cache: `auto` injects Claude `cache_control`; logs show `cached_tokens` and a $ estimate. [docs/providers.md](docs/providers.md#prompt-cache).
 - Playground: pick an alias or upstream name and chat without an API key (admin session required).
+- **Hub network**: toggle **Hub network member** on Status; the gateway registers itself at the compiled hub URL (`https://hub.mikrollm.ru`, override `MIKROLLM_HUB_URL`) and shares marked aliases through an outbound long-poll. Not P2P. The hub **service** is a separate repo. [docs/hub.md](docs/hub.md)
 
 ## Quick start (local)
 
-Need Go 1.23+ and at least one Ollama on `localhost:11434` or on the LAN.
+**One line** (Linux or macOS): installs Ollama if needed, MikroLLM, a user service, and connects local Ollama models. [docs/install-desktop.md](docs/install-desktop.md)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/javded-itres/mikrollm/main/scripts/install.sh | sh
+```
+
+Admin: http://127.0.0.1:4000/admin — password is printed by the script (`~/.mikrollm/admin.pass`).
+
+From source you need Go 1.23+ and at least one Ollama on `localhost:11434` or on the LAN:
 
 ```bash
 git clone https://github.com/javded-itres/mikrollm.git
@@ -59,6 +68,7 @@ An empty data dir **seeds** two backends `mac-82` / `mac-80` at `192.168.88.80/8
 
 | Scenario | Doc |
 |---|---|
+| Laptop / desktop, one command | [docs/install-desktop.md](docs/install-desktop.md) |
 | Dev machine with Go | [docs/install-local.md](docs/install-local.md) |
 | Linux server, Docker or systemd | [docs/install-docker.md](docs/install-docker.md) |
 | MikroTik RouterOS 7 container | [docs/install-mikrotik.md](docs/install-mikrotik.md) |
@@ -68,6 +78,7 @@ An empty data dir **seeds** two backends `mac-82` / `mac-80` at `192.168.88.80/8
 | HTTP API | [docs/api.md](docs/api.md) |
 | MCP for an agent | [docs/mcp.md](docs/mcp.md) |
 | Code layout | [docs/architecture.md](docs/architecture.md) |
+| Hub network (outbound client) | [docs/hub.md](docs/hub.md) |
 
 ## Requirements
 
@@ -79,6 +90,7 @@ An empty data dir **seeds** two backends `mac-82` / `mac-80` at `192.168.88.80/8
 
 | Flag | Env | Default |
 |---|---|---|
+| `-seed` | `MIKROLLM_SEED` | empty = LAN demo `mac-80`/`mac-82`; `local` = `http://127.0.0.1:11434` and connect Ollama models |
 | `-listen` | `MIKROLLM_LISTEN` | `:4000` |
 | `-data` | `MIKROLLM_DATA` | `./data` |
 | `-admin-password` | `ADMIN_PASSWORD` | empty: generated and printed on **first** start |
@@ -96,6 +108,7 @@ An empty data dir **seeds** two backends `mac-82` / `mac-80` at `192.168.88.80/8
 |  | `MIKROLLM_QUEUE_MAX_BYTES` | `16777216` — max queued body on disk; older waiters dropped |
 |  | `MIKROLLM_QUEUE_MAX_JOBS` | `200` — max waiting+running |
 |  | `MIKROLLM_QUEUE_MAX_WAIT` | `3m` — how long an HTTP connection may wait for a slot |
+|  | `MIKROLLM_HUB_URL` | compiled `https://hub.mikrollm.ru` — outbound hub for **Hub network member** |
 
 The password is bcrypt in SQLite (`data/mikrollm.db`). Reset only with `ADMIN_PASSWORD_RESET=1`.
 

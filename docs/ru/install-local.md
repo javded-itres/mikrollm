@@ -56,6 +56,8 @@ MCP-токен при первом старте генерируется в ло
 
 HTTPS: `MIKROLLM_TLS_AUTO=1`, пара `-tls-cert` / `-tls-key`, или Let's Encrypt `-acme-hosts llm.example.com` (машине нужен порт 80 с интернета). Подробности — [tls.md](tls.md).
 
+Hub (необязательно): `MIKROLLM_HUB_URL` (по умолчанию `https://hub.mikrollm.ru`). На Статусе включить **Участник hub сети**. **Сервис** хаба — отдельный репозиторий (`mikrollm_hub`). Клиент: [hub.md](hub.md).
+
 ## Сборка бинаря
 
 ```bash

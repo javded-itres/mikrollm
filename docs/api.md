@@ -18,7 +18,7 @@ Without a key (except health/ready and admin) — `401`. Model not on the key al
 | GET | `/v1/model/info` | key | LiteLLM-style `model_info.max_input_tokens` |
 | GET | `/model/info` | key | same, without `/v1` |
 | POST | `/v1/chat/completions` | key | OpenAI Chat Completions, including `stream: true`. Optional `X-Session-Id` (OpenRouter). Non-stream: `X-MikroLLM-Cache-Tokens` |
-| POST | `/v1/images/generations` | key | OpenAI Images API. OpenRouter: chat + `modalities: ["image","text"]`, response `{data:[{url\|b64_json}]}` |
+| POST | `/v1/images/generations` | key | OpenAI Images API. OpenRouter: native `POST /images`. OpenComfy / OpenAI-style backends: native `/v1/images/generations`; same-host `data[].url` is inlined as `b64_json` |
 | POST | `/v1/videos` | key | OpenAI Videos API (Sora-style). `GET /v1/videos/{id}` and `/content` — status and file (`?model=` if the id is unknown to the gateway) |
 | POST | `/api/chat` | key | Ollama `/api/chat` |
 | GET | `/api/tags` | key | model names |

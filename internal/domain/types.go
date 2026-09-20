@@ -23,6 +23,30 @@ type Model struct {
 	Fallback     string
 	PromptCache  string
 	Media        []string
+	HubShare     bool
+	HubNodeID    string
+	HubNodeName  string
+}
+
+type HubPeerAlias struct {
+	Alias   string
+	Media   []string
+	Context int
+}
+
+type HubPeer struct {
+	ID      string
+	Name    string
+	Online  bool
+	Aliases []HubPeerAlias
+}
+
+// HubSettings is the outbound hub-client config (MikroLLM → cloud hub).
+type HubSettings struct {
+	Enabled bool
+	NodeID  string
+	Token   string
+	Name    string
 }
 
 type APIKey struct {
@@ -158,6 +182,9 @@ type CatalogEntry struct {
 	ImageTokUSD   float64
 	VideoSecUSD   float64
 	Media         []string
+	HubNodeID     string
+	HubNodeName   string
+	HubOnline     bool
 }
 
 type Job struct {

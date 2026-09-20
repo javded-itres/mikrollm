@@ -39,7 +39,7 @@ On first start, if the `backends` table is empty, these are added:
 | mac-82 | `http://192.168.88.82:11434` |
 | mac-80 | `http://192.168.88.80:11434` |
 
-Handy for a typical MikroTik LAN. Otherwise open **Status**, delete extras, and add your backend (`http://127.0.0.1:11434` Ollama, `:8000` vLLM, `:1234` LM Studio). Loading a model on a GPU host: [providers.md](providers.md).
+Handy for a typical MikroTik LAN. Desktop one-liner (`-seed local`) seeds `ollama` at `http://127.0.0.1:11434` instead and connects local models: [install-desktop.md](install-desktop.md). Otherwise open **Status**, delete extras, and add your backend (`http://127.0.0.1:11434` Ollama, `:8000` vLLM, `:1234` LM Studio). Loading a model on a GPU host: [providers.md](providers.md).
 
 ## Reset the password
 
@@ -55,6 +55,8 @@ The MCP token is generated into the log on first start (`generated MCP token:`).
 Queues (optional): `MIKROLLM_QUEUE_MAX_BYTES` (default 16 MiB body on disk), `MIKROLLM_QUEUE_MAX_JOBS` (200), `MIKROLLM_QUEUE_MAX_WAIT` (`3m`).
 
 HTTPS: `MIKROLLM_TLS_AUTO=1`, a `-tls-cert` / `-tls-key` pair, or Let's Encrypt `-acme-hosts llm.example.com` (the machine needs port 80 from the internet). Details: [tls.md](tls.md).
+
+Hub (optional): `MIKROLLM_HUB_URL` (default `https://hub.mikrollm.ru`). Enable **Hub network member** on Status. The hub **service** is a separate repo (`mikrollm_hub`). Client notes: [hub.md](hub.md).
 
 ## Build a binary
 

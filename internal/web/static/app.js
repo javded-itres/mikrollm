@@ -162,13 +162,15 @@
     var provEl = document.getElementById(provId);
     var priceEl = document.getElementById(priceId);
     var mediaEl = document.getElementById("model-media");
-    if (!nameEl && !provEl && !priceEl) return;
+    var serverEl = document.getElementById("model-server");
+    if (!nameEl && !provEl && !priceEl && !serverEl) return;
     var onlyEl = document.getElementById(rowSel.indexOf("#key-models") >= 0 ? "key-only-picked" : "");
     function apply() {
       var q = (nameEl && nameEl.value ? nameEl.value : "").trim().toLowerCase();
       var prov = provEl ? provEl.value : "";
       var price = priceEl ? priceEl.value : "";
       var media = mediaEl ? mediaEl.value : "";
+      var server = serverEl ? serverEl.value : "";
       var only = onlyEl && onlyEl.checked;
       var vis = 0, total = 0;
       document.querySelectorAll(rowSel).forEach(function (el) {
@@ -177,10 +179,20 @@
         var title = (el.getAttribute("data-title") || "").toLowerCase();
         var provider = el.getAttribute("data-provider") || "";
         var rowMedia = (el.getAttribute("data-media") || "").toLowerCase();
+        var servers = (el.getAttribute("data-servers") || "").split(",");
+        var isHub = el.getAttribute("data-hub") === "1";
         var cb = el.querySelector("input[name=model]");
         var ok = true;
         if (q && name.indexOf(q) < 0 && title.indexOf(q) < 0 && provider.toLowerCase().indexOf(q) < 0) ok = false;
         if (prov && provider !== prov) ok = false;
+        if (server === "__hub__" && !isHub) ok = false;
+        if (server && server !== "__hub__") {
+          var hit = false;
+          for (var i = 0; i < servers.length; i++) {
+            if (servers[i] === server) { hit = true; break; }
+          }
+          if (!hit) ok = false;
+        }
         if (!matchBand(el.getAttribute("data-band") || "none", el.getAttribute("data-prompt"), price)) ok = false;
         if (media === "image" && rowMedia.indexOf("image") < 0) ok = false;
         if (media === "video" && rowMedia.indexOf("video") < 0) ok = false;
@@ -201,7 +213,7 @@
       var cnt = document.getElementById(countId);
       if (cnt && total) cnt.textContent = vis + " из " + total;
     }
-    [nameEl, provEl, priceEl, mediaEl, onlyEl].forEach(function (el) {
+    [nameEl, provEl, priceEl, mediaEl, serverEl, onlyEl].forEach(function (el) {
       if (!el) return;
       el.addEventListener("input", apply);
       el.addEventListener("change", apply);
@@ -210,6 +222,25 @@
     return apply;
   }
   bindModelFilters("model-filter", "model-provider", "model-price", ".model-tr", "catalog-count");
+  (function aliasHubFilter() {
+    var sel = document.getElementById("alias-hub-filter");
+    if (!sel) return;
+    function apply() {
+      var v = sel.value;
+      var vis = 0, total = 0;
+      document.querySelectorAll(".alias-tr").forEach(function (el) {
+        total++;
+        var h = el.getAttribute("data-hub") || "";
+        var ok = !v || h === v;
+        el.classList.toggle("is-hidden", !ok);
+        if (ok) vis++;
+      });
+      var cnt = document.getElementById("alias-hub-count");
+      if (cnt) cnt.textContent = vis + " из " + total;
+    }
+    sel.addEventListener("change", apply);
+    apply();
+  })();
   (function () {
     var sizeEl = document.getElementById("catalog-page-size");
     if (!sizeEl) return;
@@ -402,6 +433,12 @@
       hint: "Только облачные модели ollama.com, без локального Ollama. Ключ: ollama.com/settings/keys.",
       token: true,
       fill: true
+    },
+    opencomfy: {
+      url: "http://192.168.88.252:8788",
+      hint: "ComfyUI через OpenComfy (картинки и видео). URL без /v1. Ключ sk- из keys.yaml OpenComfy.",
+      token: true,
+      fill: false
     }
   };
   var knownURLs = {
@@ -409,7 +446,8 @@
     "http://192.168.88.82:8000": 1,
     "http://192.168.88.82:1234": 1,
     "https://openrouter.ai/api/v1": 1,
-    "https://ollama.com": 1
+    "https://ollama.com": 1,
+    "http://192.168.88.252:8788": 1
   };
   function syncKind() {
     if (!kindSel) return;
@@ -696,6 +734,14 @@
     var messages = [];
     var ac = null;
     var pinBottom = true;
+    var refs = [];
+    var MAX_REFS = 6;
+    var refInput = document.getElementById("chat-ref-input");
+    var refBtn = document.getElementById("chat-ref-btn");
+    var refStrip = document.getElementById("chat-refs");
+    var paramsCache = {};
+    var paramsSchema = null;
+    var paramsReq = 0;
     var saved = localStorage.getItem("ml-chat-model");
     if (saved && modelEl) {
       for (var i = 0; i < modelEl.options.length; i++) {
@@ -704,6 +750,24 @@
     }
     function genMode() {
       return (modeEl && modeEl.value) || "chat";
+    }
+    function optionMedia() {
+      var o = modelEl && modelEl.selectedOptions && modelEl.selectedOptions[0];
+      return o ? (o.getAttribute("data-media") || "") : "";
+    }
+    function mediaKind(media) {
+      var v = media.indexOf("video") >= 0;
+      var im = media.indexOf("image") >= 0;
+      if (v && !im) return "video";
+      if (im && !v) return "image";
+      return "chat";
+    }
+    function syncModeToModel() {
+      var want = mediaKind(optionMedia());
+      if (modeEl && want !== "chat" && modeEl.value !== want) {
+        modeEl.value = want;
+      }
+      filterModels();
     }
     function filterModels() {
       if (!modelEl) return;
@@ -729,19 +793,285 @@
       }
       var temp = document.getElementById("chat-temp");
       var max = document.getElementById("chat-max");
-      if (temp) temp.hidden = mode !== "chat";
-      if (max) max.hidden = mode !== "chat";
+      if (temp) temp.hidden = true;
+      if (max) max.hidden = true;
+      if (refBtn) refBtn.hidden = mode === "chat";
+      if (mode === "chat") clearRefs();
+      else renderRefs();
+      loadModelParams();
     }
     if (modeEl) {
       modeEl.addEventListener("change", filterModels);
-      filterModels();
     }
     if (modelEl) {
       modelEl.addEventListener("change", function () {
         localStorage.setItem("ml-chat-model", modelEl.value);
+        syncModeToModel();
       });
     }
 
+    function clearRefs() {
+      refs = [];
+      renderRefs();
+      if (refInput) refInput.value = "";
+    }
+    function renderRefs() {
+      if (!refStrip) return;
+      refStrip.innerHTML = "";
+      if (!refs.length || genMode() === "chat") {
+        refStrip.hidden = true;
+        return;
+      }
+      refStrip.hidden = false;
+      refs.forEach(function (src, i) {
+        var wrap = document.createElement("div");
+        wrap.className = "ref-thumb";
+        var im = document.createElement("img");
+        im.src = src;
+        im.alt = "референс " + (i + 1);
+        var rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "ghost";
+        rm.textContent = "×";
+        rm.title = "Убрать";
+        rm.addEventListener("click", function () {
+          refs.splice(i, 1);
+          renderRefs();
+        });
+        wrap.appendChild(im);
+        wrap.appendChild(rm);
+        refStrip.appendChild(wrap);
+      });
+      markParamDrop();
+    }
+    var PARAM_LABELS = {
+      input_image: "Референс", input_images: "Референсы", input_video: "Видео-референс",
+      seconds: "Секунды", size: "Размер", seed: "Seed", width: "Ширина", height: "Высота",
+      fps: "FPS", temperature: "temperature", max_tokens: "max_tokens",
+      negative_prompt: "Негатив", n: "Количество"
+    };
+    function paramLabel(name) { return PARAM_LABELS[name] || name; }
+    function skipParam(name) {
+      return name === "prompt" || name === "model" || name === "input_images" ||
+        name === "input_reference" || name === "input_references" || name === "n";
+    }
+    function isImageParam(p) {
+      return p && (p.type === "image" || p.name === "input_image" || p.name === "input_video");
+    }
+    function requiredList(schema) {
+      return ((schema && schema.required_parameters) || []).map(String);
+    }
+    function needsInputImage(schema) {
+      var r = requiredList(schema);
+      return r.indexOf("input_image") >= 0 || r.indexOf("input_images") >= 0 || r.indexOf("input_video") >= 0;
+    }
+    function loadModelParams() {
+      var fields = document.getElementById("chat-params-fields");
+      var emptyP = document.getElementById("chat-params-empty");
+      var model = modelEl && modelEl.value;
+      if (!model) {
+        paramsSchema = null;
+        if (fields) { fields.hidden = true; fields.innerHTML = ""; }
+        if (emptyP) { emptyP.hidden = false; emptyP.textContent = "Выберите модель."; }
+        return;
+      }
+      var key = genMode() + "|" + model;
+      if (paramsCache[key]) {
+        renderParams(paramsCache[key]);
+        return;
+      }
+      var req = ++paramsReq;
+      if (emptyP) { emptyP.hidden = false; emptyP.textContent = "загрузка схемы…"; }
+      fetch("/admin/model-params?model=" + encodeURIComponent(model), {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" }
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        if (req !== paramsReq) return;
+        paramsCache[key] = j || {};
+        renderParams(paramsCache[key]);
+      }).catch(function () {
+        if (req !== paramsReq) return;
+        renderParams({ modality: genMode() === "chat" ? "chat" : genMode(), parameters: [], required_parameters: [] });
+      });
+    }
+    function renderParams(schema) {
+      paramsSchema = schema || {};
+      var fields = document.getElementById("chat-params-fields");
+      var emptyP = document.getElementById("chat-params-empty");
+      if (!fields) return;
+      var params = paramsSchema.parameters || [];
+      var required = requiredList(paramsSchema);
+      fields.innerHTML = "";
+      var shown = 0;
+      var sawImage = false;
+      params.forEach(function (p) {
+        if (!p || !p.name || skipParam(p.name)) return;
+        if (isImageParam(p) && sawImage) return;
+        if (isImageParam(p)) sawImage = true;
+        shown++;
+        var wrap = document.createElement("div");
+        wrap.className = "chat-param";
+        var lab = document.createElement("label");
+        lab.textContent = paramLabel(p.name);
+        if (p.required || required.indexOf(p.name) >= 0) {
+          var star = document.createElement("span");
+          star.className = "req";
+          star.textContent = "обязательно";
+          lab.appendChild(star);
+        }
+        wrap.appendChild(lab);
+        if (isImageParam(p)) {
+          var drop = document.createElement("div");
+          drop.className = "chat-param-drop";
+          drop.id = "chat-param-drop";
+          drop.textContent = "Нажмите или перетащите фото";
+          if (p.required || required.indexOf(p.name) >= 0) drop.classList.add("is-required");
+          drop.addEventListener("click", function () { if (refInput) refInput.click(); });
+          drop.addEventListener("dragover", function (ev) { ev.preventDefault(); });
+          drop.addEventListener("drop", function (ev) {
+            ev.preventDefault();
+            if (ev.dataTransfer && ev.dataTransfer.files) addRefFiles(ev.dataTransfer.files);
+          });
+          wrap.appendChild(drop);
+        } else {
+          wrap.appendChild(paramInput(p));
+        }
+        fields.appendChild(wrap);
+      });
+      fields.hidden = shown === 0;
+      if (emptyP) {
+        emptyP.hidden = shown > 0;
+        if (shown === 0) emptyP.textContent = "У этой модели нет дополнительных полей.";
+      }
+      markParamDrop();
+    }
+    function paramInput(p) {
+      var def = p.default;
+      var tempEl = document.getElementById("chat-temp");
+      var maxEl = document.getElementById("chat-max");
+      if (p.name === "temperature" && tempEl && tempEl.value) def = tempEl.value;
+      if (p.name === "max_tokens" && maxEl && maxEl.value) def = maxEl.value;
+      if (p.enum && p.enum.length) {
+        var sel = document.createElement("select");
+        sel.setAttribute("data-param", p.name);
+        sel.setAttribute("data-type", p.type || "string");
+        p.enum.forEach(function (ev) {
+          var o = document.createElement("option");
+          o.value = String(ev);
+          o.textContent = String(ev);
+          if (def != null && String(ev) === String(def)) o.selected = true;
+          sel.appendChild(o);
+        });
+        return sel;
+      }
+      var inp = document.createElement("input");
+      inp.setAttribute("data-param", p.name);
+      inp.setAttribute("data-type", p.type || "string");
+      var t = p.type || "string";
+      if (t === "integer" || t === "int" || t === "number" || t === "float") {
+        inp.type = "number";
+        inp.step = (t === "number" || t === "float") ? "any" : "1";
+        if (p.min != null) inp.min = p.min;
+        if (p.max != null) inp.max = p.max;
+      } else if (t === "boolean" || t === "bool") {
+        inp.type = "checkbox";
+        inp.checked = def === true || def === "true";
+        return inp;
+      } else {
+        inp.type = "text";
+      }
+      if (def != null && inp.type !== "checkbox") inp.value = String(def);
+      return inp;
+    }
+    function markParamDrop() {
+      var drop = document.getElementById("chat-param-drop");
+      if (!drop) return;
+      drop.classList.toggle("has-file", refs.length > 0);
+      drop.textContent = refs.length
+        ? ("фото: " + refs.length)
+        : (drop.classList.contains("is-required") ? "Нужен референс — нажмите или перетащите" : "Нажмите или перетащите фото");
+    }
+    function collectExtraParams() {
+      var out = {};
+      var root = document.getElementById("chat-params-fields");
+      if (!root) return out;
+      root.querySelectorAll("[data-param]").forEach(function (el) {
+        var name = el.getAttribute("data-param");
+        var typ = el.getAttribute("data-type") || "";
+        if (!name) return;
+        if (el.type === "checkbox") {
+          out[name] = el.checked;
+          return;
+        }
+        var v = (el.value || "").trim();
+        if (v === "") return;
+        if (typ === "integer" || typ === "int") {
+          var n = parseInt(v, 10);
+          if (!isNaN(n)) out[name] = n;
+          return;
+        }
+        if (typ === "number" || typ === "float") {
+          var f = parseFloat(v);
+          if (!isNaN(f)) out[name] = f;
+          return;
+        }
+        out[name] = v;
+      });
+      return out;
+    }
+    function fileToDataURL(file) {
+      return new Promise(function (resolve, reject) {
+        if (!file || !(file.type || "").match(/^image\//)) {
+          reject(new Error("нужен файл изображения"));
+          return;
+        }
+        var url = URL.createObjectURL(file);
+        var img = new Image();
+        img.onload = function () {
+          var w = img.naturalWidth || 1, h = img.naturalHeight || 1;
+          var max = 1280;
+          var scale = Math.min(1, max / Math.max(w, h));
+          var c = document.createElement("canvas");
+          c.width = Math.max(1, Math.round(w * scale));
+          c.height = Math.max(1, Math.round(h * scale));
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          URL.revokeObjectURL(url);
+          resolve(c.toDataURL("image/jpeg", 0.84));
+        };
+        img.onerror = function () {
+          URL.revokeObjectURL(url);
+          reject(new Error("не удалось прочитать изображение"));
+        };
+        img.src = url;
+      });
+    }
+    function addRefFiles(fileList) {
+      var files = Array.prototype.slice.call(fileList || []);
+      var room = MAX_REFS - refs.length;
+      if (room <= 0) {
+        if (status) status.textContent = "не больше " + MAX_REFS + " референсов";
+        return Promise.resolve();
+      }
+      files = files.slice(0, room);
+      return Promise.all(files.map(function (f) { return fileToDataURL(f); })).then(function (urls) {
+        urls.forEach(function (u) { if (u) refs.push(u); });
+        renderRefs();
+      }).catch(function (e) {
+        if (status) status.textContent = e.message || "не удалось прикрепить";
+      });
+    }
+    function appendRefsToBubble(b, urls) {
+      if (!b || !b.body || !urls || !urls.length) return;
+      var row = document.createElement("div");
+      row.className = "ref-row";
+      urls.forEach(function (src) {
+        var im = document.createElement("img");
+        im.src = src;
+        im.alt = "референс";
+        row.appendChild(im);
+      });
+      b.body.appendChild(row);
+    }
     function nearBottom() {
       return log.scrollHeight - log.scrollTop - log.clientHeight < 96;
     }
@@ -753,16 +1083,22 @@
     });
 
     function persist() {
-      try {
-        var slim = messages.map(function (m) {
-          return { role: m.role, content: typeof m.content === "string" ? m.content : "", think: m.think || "", hadImage: !!m.image };
-        });
-        sessionStorage.setItem("ml-chat-thread", JSON.stringify({
+      function pack(withImage) {
+        return JSON.stringify({
           model: modelEl && modelEl.value,
           mode: genMode(),
-          messages: slim
-        }));
-      } catch (e) {}
+          messages: messages.map(function (m) {
+            var row = { role: m.role, content: typeof m.content === "string" ? m.content : "", think: m.think || "", hadImage: !!(m.image || m.hadImage) };
+            if (withImage && m.image) row.image = m.image;
+            return row;
+          })
+        });
+      }
+      try {
+        sessionStorage.setItem("ml-chat-thread", pack(true));
+      } catch (e) {
+        try { sessionStorage.setItem("ml-chat-thread", pack(false)); } catch (e2) {}
+      }
       renderHist();
     }
     function renderHist() {
@@ -824,9 +1160,17 @@
             b.think.hidden = false;
             b.think.textContent = m.think;
           }
+          if (m.image) {
+            b.body.textContent = "";
+            var img = document.createElement("img");
+            img.src = m.image;
+            img.alt = text;
+            b.body.appendChild(img);
+          }
         });
         stickBottom(true);
         renderHist();
+        syncModeToModel();
       } catch (e) {}
     }
 
@@ -868,9 +1212,45 @@
       if (empty) empty.hidden = false;
       status.textContent = "";
       setBusy(false);
+      clearRefs();
       try { sessionStorage.removeItem("ml-chat-thread"); } catch (e) {}
       renderHist();
     });
+    if (refBtn && refInput) {
+      refBtn.addEventListener("click", function () { refInput.click(); });
+      refInput.addEventListener("change", function () {
+        addRefFiles(refInput.files).then(function () { refInput.value = ""; });
+      });
+    }
+    if (form) {
+      form.addEventListener("dragover", function (ev) {
+        if (genMode() === "chat") return;
+        ev.preventDefault();
+      });
+      form.addEventListener("drop", function (ev) {
+        if (genMode() === "chat") return;
+        ev.preventDefault();
+        if (ev.dataTransfer && ev.dataTransfer.files) addRefFiles(ev.dataTransfer.files);
+      });
+    }
+    if (input) {
+      input.addEventListener("paste", function (ev) {
+        if (genMode() === "chat") return;
+        var items = ev.clipboardData && ev.clipboardData.items;
+        if (!items) return;
+        var files = [];
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].type && items[i].type.indexOf("image/") === 0) {
+            var f = items[i].getAsFile();
+            if (f) files.push(f);
+          }
+        }
+        if (files.length) {
+          ev.preventDefault();
+          addRefFiles(files);
+        }
+      });
+    }
 
     stop.addEventListener("click", function () {
       if (ac) ac.abort();
@@ -1005,8 +1385,19 @@
       ac = new AbortController();
       var model = modelEl && modelEl.value;
       var url = mode === "image" ? "/admin/images" : "/admin/videos";
-      var payload = { model: model, prompt: text, n: 1, size: "1024x1024", messages: historyForAPI() };
-      if (mode === "video") payload = { model: model, prompt: text, seconds: "4", size: "720x1280", messages: historyForAPI() };
+      var extra = collectExtraParams();
+      var payload = { model: model, prompt: text, messages: historyForAPI() };
+      Object.keys(extra).forEach(function (k) { payload[k] = extra[k]; });
+      if (payload.n == null) payload.n = 1;
+      if (!payload.size) payload.size = mode === "video" ? "720x1280" : "1024x1024";
+      if (mode === "video" && (payload.seconds == null || payload.seconds === "")) payload.seconds = "4";
+      if (refs.length) {
+        payload.input_image = refs[0];
+        payload.input_images = refs.slice();
+        payload.input_references = refs.map(function (u) {
+          return { type: "image_url", image_url: { url: u } };
+        });
+      }
       fetch(url, {
         method: "POST",
         credentials: "same-origin",
@@ -1019,7 +1410,7 @@
         if (!x.ok) throw new Error((x.j && x.j.error && x.j.error.message) || JSON.stringify(x.j) || "error");
         if (mode === "image") {
           var d = (x.j.data && x.j.data[0]) || {};
-          var src = d.url || (d.b64_json ? ("data:image/png;base64," + d.b64_json) : "");
+          var src = d.b64_json ? ("data:image/png;base64," + d.b64_json) : (d.url || "");
           if (src) {
             asst.body.textContent = "";
             var img = document.createElement("img");
@@ -1066,15 +1457,30 @@
       ev.preventDefault();
       var model = modelEl && modelEl.value;
       var text = (input.value || "").trim();
-      if (!model || !text) return;
+      if (!model) return;
       var mode = genMode();
+      var mk = mediaKind(optionMedia());
+      if (mk !== "chat" && mode === "chat") {
+        mode = mk;
+        if (modeEl) modeEl.value = mk;
+        filterModels();
+      }
+      var shot = refs.slice();
+      if (!text && !(shot.length && (mode === "image" || mode === "video"))) return;
+      if ((mode === "image" || mode === "video") && needsInputImage(paramsSchema) && !shot.length) {
+        if (status) status.textContent = "нужен референс (input_image)";
+        return;
+      }
+      if (!text) text = "по референсам";
       input.value = "";
       messages.push({ role: "user", content: text });
       persist();
-      bubble("user", text);
+      var userB = bubble("user", text);
+      if (mode === "image" || mode === "video") appendRefsToBubble(userB, shot);
       var asst = bubble("assistant", "");
       if (mode === "image" || mode === "video") {
         runMedia(mode, text, asst);
+        clearRefs();
         return;
       }
       var acc = "";
@@ -1091,8 +1497,16 @@
         body: JSON.stringify({
           model: model,
           stream: true,
-          temperature: parseFloat(document.getElementById("chat-temp").value) || 0.7,
-          max_tokens: parseInt(document.getElementById("chat-max").value, 10) || 1024,
+          temperature: (function () {
+            var extra = collectExtraParams();
+            if (extra.temperature != null) return extra.temperature;
+            return parseFloat(document.getElementById("chat-temp").value) || 0.7;
+          })(),
+          max_tokens: (function () {
+            var extra = collectExtraParams();
+            if (extra.max_tokens != null) return extra.max_tokens;
+            return parseInt(document.getElementById("chat-max").value, 10) || 1024;
+          })(),
           messages: messages
         })
       }).then(function (r) {
@@ -1159,5 +1573,6 @@
       });
     });
     restore();
+    syncModeToModel();
   })();
 })();

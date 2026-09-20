@@ -54,6 +54,14 @@ func (u *UI) videoContent(w http.ResponseWriter, r *http.Request) {
 	u.chat.ServeVideoContent(w, r)
 }
 
+func (u *UI) modelParams(w http.ResponseWriter, r *http.Request) {
+	if u.chat == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "chat gateway unavailable")
+		return
+	}
+	u.chat.ServeModelParams(w, r)
+}
+
 type chatOpt struct {
 	Value, Label, Media string
 }
@@ -106,6 +114,9 @@ func (u *UI) chatModelOpts() (aliases, catalog []chatOpt) {
 		}
 		ml := domain.MediaLabel(media)
 		lb := label(m.Alias, meta)
+		if m.HubNodeName != "" {
+			lb = m.HubNodeName + " · " + lb
+		}
 		if ml != "" {
 			lb += " · " + ml
 		}
@@ -113,15 +124,28 @@ func (u *UI) chatModelOpts() (aliases, catalog []chatOpt) {
 		seen[m.Alias] = true
 	}
 	for _, e := range u.health.Catalog(bs) {
-		if e.Name == "" || seen[e.Name] {
+		if e.Name == "" {
+			continue
+		}
+		val := e.Name
+		if e.HubNodeID != "" {
+			val = "hub|" + e.HubNodeID + "|" + e.Name
+			if seen[val] || seen[e.Name] {
+				continue
+			}
+		} else if seen[e.Name] {
 			continue
 		}
 		ml := domain.MediaLabel(e.Media)
 		lb := label(e.Name, e)
+		if e.HubNodeName != "" {
+			lb = e.HubNodeName + " · " + lb
+		}
 		if ml != "" {
 			lb += " · " + ml
 		}
-		catalog = append(catalog, chatOpt{Value: e.Name, Label: lb, Media: strings.Join(e.Media, ",")})
+		catalog = append(catalog, chatOpt{Value: val, Label: lb, Media: strings.Join(e.Media, ",")})
+		seen[val] = true
 		seen[e.Name] = true
 	}
 	return aliases, catalog

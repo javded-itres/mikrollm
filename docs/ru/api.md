@@ -18,7 +18,7 @@
 | GET | `/v1/model/info` | ключ | как LiteLLM: `model_info.max_input_tokens` |
 | GET | `/model/info` | ключ | то же, без префикса `/v1` |
 | POST | `/v1/chat/completions` | ключ | OpenAI Chat Completions, в т.ч. `stream: true`. Optional `X-Session-Id` (на OpenRouter). Non-stream: `X-MikroLLM-Cache-Tokens` |
-| POST | `/v1/images/generations` | ключ | OpenAI Images API. OpenRouter: chat + `modalities: ["image","text"]`, ответ как `{data:[{url\|b64_json}]}` |
+| POST | `/v1/images/generations` | ключ | OpenAI Images API. OpenRouter: нативный `POST /images`. OpenComfy / OpenAI-бэкенды: нативный `/v1/images/generations`; same-host `data[].url` встраивается как `b64_json` |
 | POST | `/v1/videos` | ключ | OpenAI Videos API (Sora-style). `GET /v1/videos/{id}` и `/content` — статус и файл (`?model=` если id неизвестен шлюзу) |
 | POST | `/api/chat` | ключ | Ollama `/api/chat` |
 | GET | `/api/tags` | ключ | имена моделей |

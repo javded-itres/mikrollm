@@ -37,10 +37,20 @@
     <div class="chat-log card flush" id="chat-log">
       <div class="chat-empty muted" id="chat-empty">Выберите модель и напишите сообщение — как в LiteLLM Playground.</div>
     </div>
+    <aside class="chat-params card" id="chat-params">
+      <div class="chat-params-h">Параметры модели</div>
+      <p class="muted small" id="chat-params-empty">Схема подтянется при выборе модели.</p>
+      <div id="chat-params-fields" hidden></div>
+    </aside>
   </div>
 
   <form class="chat-composer" id="chat-form">
-    <textarea id="chat-input" rows="2" placeholder="Напишите сообщение… Enter — отправить" required></textarea>
+    <div class="composer-main">
+      <div class="ref-strip" id="chat-refs" hidden></div>
+      <textarea id="chat-input" rows="2" placeholder="Напишите сообщение… Enter — отправить"></textarea>
+    </div>
+    <input type="file" id="chat-ref-input" accept="image/*" multiple hidden>
+    <button type="button" class="ghost" id="chat-ref-btn" hidden title="Референс для генерации">+ фото</button>
     <button type="submit" id="chat-send">Отправить</button>
     <button type="button" class="ghost" id="chat-stop" hidden>Стоп</button>
   </form>

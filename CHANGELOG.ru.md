@@ -4,6 +4,20 @@
 
 ## Unreleased
 
+## 0.0.5 — 2026-09-20
+
+- Зашитый адрес hub — `https://hub.mikrollm.ru` (`MIKROLLM_HUB_URL` по-прежнему переопределяет). Инструкция: [docs/ru/hub.md](docs/ru/hub.md).
+- Чат админки: справа панель **параметры модели** (`GET /admin/model-params`). У OpenComfy видны обязательные поля (например `input_image`); без референса запрос не отправляется. Фото уходят как `input_image` / `input_images` и `input_references`.
+- Playground: выбор video-only модели (Hailuo и т.п.) переключает тип на **Видео**, чтобы чат не ловил ответ OpenComfy `video models use POST /v1/videos`. Chat на video-only alias — 400 с этой подсказкой.
+- Playground: в режиме **изображение** / **видео** можно прикрепить несколько фото-референсов (`+ фото`, вставка, drag-and-drop). Уходят как `input_references` (JPEG, до 6, с уменьшением). Тело media-relay в hub — до 8 МиБ.
+- **Картинки OpenRouter:** `POST /v1/images/generations` идёт в OpenRouter `POST /images`, не в chat с `modalities: ["image","text"]`. Image-only модели (Flux, Seedream, …) больше не отвечают 404 «No endpoints found that support the requested output modalities». Правки кадра — `input_references`.
+- **Hub и медиа:** image/video alias анонсируются и релеятся (`POST /v1/relay/{node}/images` и `/videos`, плюс статус/файл). Бинарь клипа — `b64` (лимит 6 МиБ). Chat на video-only alias по-прежнему 400. [docs/ru/hub.md](docs/ru/hub.md)
+- **Картинки OpenComfy в чате админки:** `POST /v1/images/generations` скачивает same-host `data[].url` (файлы OpenComfy `/v1/files/…`) и отдаёт `b64_json`. CSP playground — `img-src 'self' data: blob:`, браузер не грузит `http://gpu:8788/…`. Чужие хосты не запрашиваются.
+- Одна команда на компьютер: `curl -fsSL https://raw.githubusercontent.com/javded-itres/mikrollm/main/scripts/install.sh | sh` ставит Ollama (если нужно) и MikroLLM на Linux/macOS, поднимает сервис и с `-seed local` подключает локальные модели Ollama. [docs/ru/install-desktop.md](docs/ru/install-desktop.md)
+
+- Бэкенд **OpenComfy**: локальный шлюз ComfyUI для картинок и видео (`:8788`). Статус → Добавить сервер → OpenComfy, URL без `/v1`, ключ `sk-…`. Каталог `/v1/models` + image/video models; `POST /v1/images/generations` и `POST /v1/videos` как у OpenAI (не chat+modalities OpenRouter). [docs/ru/providers.md](docs/ru/providers.md#opencomfy)
+- **Сеть hub** (не P2P): на Статусе **Участник hub сети** — шлюз сам регистрируется на зашитом `https://hub.mikrollm.ru` (или `MIKROLLM_HUB_URL`). Помеченные alias анонсируются; хаб ходит long-poll и релеить chat. В этом репозитории только клиент (`internal/hubclient`). **Сервис** хаба — [`mikrollm_hub`](https://github.com/javded-itres/mikrollm_hub). [docs/ru/hub.md](docs/ru/hub.md)
+
 ## 0.0.4 — 2026-09-19
 
 - Документация на двух языках; **по умолчанию английский** (`README.md`, `docs/`, GitHub Releases). Русский: `README.ru.md`, `docs/ru/`. [docs/ru/releasing.md](docs/ru/releasing.md)

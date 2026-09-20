@@ -89,6 +89,19 @@ func MediaLabel(ms []string) string {
 	return ""
 }
 
+// ExclusiveMedia is "video" or "image" when the model is only that kind; otherwise "".
+func ExclusiveMedia(ms []string) string {
+	v := HasMedia(ms, MediaVideo)
+	i := HasMedia(ms, MediaImage)
+	if v && !i {
+		return MediaVideo
+	}
+	if i && !v {
+		return MediaImage
+	}
+	return ""
+}
+
 var imageNameTokens = []string{
 	"dall-e", "dall_e", "dalle", "gpt-image", "flux", "imagen", "recraft", "ideogram",
 	"sdxl", "stable-diffusion", "stable_diffusion", "hidream", "grok-imagine",

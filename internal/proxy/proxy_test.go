@@ -44,6 +44,66 @@ func TestUnauthorized(t *testing.T) {
 	}
 }
 
+func TestChatRejectsVideoModel(t *testing.T) {
+	_, _, _, px, _ := setup(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"minimax-hailuo-02","messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	px.ServeChat(rec, req)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "Видео") || !strings.Contains(rec.Body.String(), "/v1/videos") {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+type fakeHubDial struct{ url string }
+
+func (f fakeHubDial) URL() string { return f.url }
+
+func TestForwardHubAlias(t *testing.T) {
+	st, _, _, px, _ := setup(t)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/relay/npeer/chat" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"from-hub"}}]}`))
+	}))
+	t.Cleanup(hub.Close)
+	px.SetHubDial(fakeHubDial{url: hub.URL})
+	if _, err := st.SaveModel(store.Model{
+		Alias: "remote-coder", UpstreamName: "coder", Enabled: true,
+		HubNodeID: "npeer", HubNodeName: "ams-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"remote-coder","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("X-MikroLLM-Hub-Relay", "unused")
+	px.SetHubRelay("unused")
+	rec := httptest.NewRecorder()
+	px.ChatCompletions(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "from-hub") {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHubRelaySkipsAPIKey(t *testing.T) {
+	_, _, _, px, _ := setup(t)
+	px.SetHubRelay("hub-secret")
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"x"}`))
+	rec := httptest.NewRecorder()
+	px.ChatCompletions(rec, req)
+	if rec.Code != 401 {
+		t.Fatalf("no header want 401 got %d", rec.Code)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"x"}`))
+	req.Header.Set("X-MikroLLM-Hub-Relay", "hub-secret")
+	rec = httptest.NewRecorder()
+	px.ChatCompletions(rec, req)
+	if rec.Code == 401 {
+		t.Fatalf("relay header still 401: %s", rec.Body.String())
+	}
+}
+
 func TestAllowlistAndProxy(t *testing.T) {
 	st, h, _, px, _ := setup(t)
 	var gotModel string

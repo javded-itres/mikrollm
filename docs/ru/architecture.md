@@ -23,6 +23,7 @@ internal/guard        фильтры запроса/ответа, системн
 internal/promptcache  prefix cache OpenRouter: cache_control, usage, SSE tail
 internal/tlsconf      PEM / self-signed / Let's Encrypt ACME (autocert)
 internal/web          шаблоны и static (embed)
+internal/hubclient    исходящий клиент hub (register / announce / long-poll)
 ```
 
 ## Принципы

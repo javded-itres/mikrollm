@@ -72,6 +72,31 @@
   </div>
 </section>
 
+<section class="card" id="hub-net">
+  <h2>Участник hub сети</h2>
+  <p class="muted small">Шлюз сам открывает исходящее соединение к <code>{{.HubURL}}</code> (адрес зашит в бинарь). Входящие порты и VPN не нужны: хаб — каталог и relay, не P2P. В каталог попадают только alias с пометкой «hub» на вкладке Модели.</p>
+  <form method="post" action="/admin/hub" class="grid2" style="margin-top:.8rem">
+    <div>
+      <label>Имя узла</label>
+      <input name="name" value="{{.HubName}}" placeholder="hap-ax3" maxlength="64">
+    </div>
+    <div>
+      <label>Статус</label>
+      <div class="row" style="min-height:2.4rem">
+        <span class="hub-led {{.HubState}}" title="{{.HubState}}"></span>
+        <strong>{{.HubLabel}}</strong>
+        {{if .HubError}}<span class="muted small">{{.HubError}}</span>{{end}}
+      </div>
+    </div>
+    <label class="inline span2">
+      <input type="checkbox" name="enabled" value="1" {{if .HubEnabled}}checked{{end}}>
+      Участник hub сети
+    </label>
+    {{if .HubNodeID}}<p class="muted small span2">id узла: <code>{{.HubNodeID}}</code></p>{{end}}
+    <div class="span2"><button type="submit">Сохранить</button></div>
+  </form>
+</section>
+
 {{if not .Backends}}
 <div class="card empty">
   <p>Пока нет бэкендов. Добавьте локальный сервер или облако — модели подтянутся сами.</p>
@@ -191,6 +216,7 @@
         <option value="openrouter">OpenRouter</option>
         <option value="vllm">vLLM (:8000)</option>
         <option value="lmstudio">LM Studio (:1234)</option>
+        <option value="opencomfy">OpenComfy (:8788)</option>
       </select>
     </div>
     <div>

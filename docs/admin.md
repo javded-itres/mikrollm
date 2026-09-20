@@ -12,13 +12,14 @@ Menu: **Status · Queues · Models · Security · Keys · Chat · Log · Billing
 Server cards: online/offline, kind (Ollama / vLLM / LM Studio), latency, on-disk models, what is in RAM now.
 
 - **Enable / Disable** — the card stays; health is not polled; requests and catalog skip this backend. No need to delete.
-- **Refresh models** on a card — force-download that provider’s catalog (no cache). OpenRouter: `/models` + video (`/models?output_modalities=video`, `/videos/models`).
+- **Refresh models** on a card — force-download that provider’s catalog (no cache). OpenRouter: `/models` + `/images/models` + video (`/models?output_modalities=video`, `/videos/models`). OpenComfy: `/v1/models` + `/v1/images/models` + `/v1/videos/models`.
 - On **Models**, **Refresh catalogs** does the same for every backend. Catalog list: 10 rows by default, options 20 / 50 / 100 / all.
   - Local Ollama: `http://192.168.88.82:11434`
   - Ollama Cloud: `https://ollama.com` + key from [ollama.com/settings/keys](https://ollama.com/settings/keys)
   - OpenRouter: `https://openrouter.ai/api/v1` + key from [openrouter.ai/keys](https://openrouter.ai/settings/keys)
   - vLLM: `http://192.168.88.82:8000`
   - LM Studio: `http://192.168.88.82:1234`
+  - OpenComfy: `http://192.168.88.252:8788` + key from OpenComfy `keys.yaml`
 - **Refresh status** — extra health poll for the chosen kind.
 - Change admin password at the bottom (min 8 characters). Old sessions die immediately.
 - **MCP for agents** — issue a Bearer token for `POST /mcp`. Secret shown once. Details: [mcp.md](mcp.md).
@@ -26,6 +27,8 @@ Server cards: online/offline, kind (Ollama / vLLM / LM Studio), latency, on-disk
 Health itself repeats every 10 seconds.
 
 Dashboard **Request queues**: steps (busy/cap), strip “waiting / running / done” with the provider the job went to. Updates once a second.
+
+**Hub network member** — the gateway registers itself at the compiled hub URL and long-polls for chat jobs. Mark aliases **in hub** on Models to publish them. Not P2P; no inbound port. [hub.md](hub.md).
 
 ## Queues
 
@@ -64,6 +67,7 @@ Catalog filters: name, **provider** (`openai/…` → OpenAI, local → Ollama /
 6. **Context** — catalog column (from the server: OpenRouter `context_length`, Ollama `/api/show`). An alias can override the token count; `0` = take from the server. Clients: `GET /v1/models` and `GET /v1/model/info` (`max_input_tokens`).
 7. **Fallback model** on an alias: if upstream returns 402 / “out of credits / subscription / quota”, the gateway retries the chosen alias (the key must allow it). Chain up to 4 hops, no cycles.
 8. **Prompt cache** (global above the alias table and the Cache column): `auto` injects Claude `cache_control` (first turn 1.25× write). `off` disables inject. Dashboard sums `cached_tokens` and a $ estimate. [providers.md](providers.md#prompt-cache).
+9. **Hub** on an alias: **in hub** publishes it to the cloud catalog when **Hub network member** is on (chat, image, and video). Connect remote rows with **To gateway**. [hub.md](hub.md).
 
 LB policies:
 
@@ -91,9 +95,10 @@ Empty allowlist and `*` mean all models. Otherwise the alias the client put in `
 Like LiteLLM Playground: pick a **type** (chat / image / video) or an endpoint, then a model.
 
 - Chat: `/v1/chat/completions`, stream, Stop, temperature, max_tokens.
-- Image: `/v1/images/generations` (OpenRouter via chat + `modalities`).
-- Video: `/v1/videos`, status is polled.
-- Image/video models are tagged in the catalog and selector. No API key — admin session only.
+- Image: `/v1/images/generations` (OpenRouter native `POST /images`; OpenComfy native, same-host file URLs inlined as `b64_json` for the chat `<img>`). Attach reference photos (`+ фото` or the right-hand panel) — they are sent as `input_image` / `input_images` / `input_references`.
+- Video: `/v1/videos`, status is polled. Same reference-photo attach as for images.
+- Right-hand **model parameters** panel: `GET /admin/model-params` (OpenComfy `GET /v1/models/{id}` schema). Required fields such as `input_image` show up before send; the playground blocks submit if a required reference is missing.
+- Image/video models are tagged in the catalog and selector. Picking a video-only (or image-only) model switches the type so chat is not sent to OpenComfy. No API key — admin session only.
 - Left **history**: first request is the task, later messages are edits. The model gets the whole thread (for OpenRouter, the previous frame too), not only the last line.
 - Enter sends, Shift+Enter is a new line.
 - Thinking models show the reasoning block separately.

@@ -29,6 +29,7 @@ func main() {
 	acmeHTTP := flag.String("acme-http", env("MIKROLLM_ACME_HTTP", ""), "HTTP-01 listen address (default :80, off to disable)")
 	acmeDir := flag.String("acme-dir", env("MIKROLLM_ACME_DIR", ""), "ACME cache directory (default <data>/acme)")
 	acmeStaging := flag.Bool("acme-staging", os.Getenv("MIKROLLM_ACME_STAGING") == "1", "use Let's Encrypt staging CA")
+	seed := flag.String("seed", env("MIKROLLM_SEED", ""), "empty=LAN demo hosts; local=http://127.0.0.1:11434 and connect Ollama models")
 	flag.Parse()
 
 	application, err := app.New(app.Config{
@@ -39,6 +40,7 @@ func main() {
 		MCPToken:      *mcpToken,
 		ResetMCPToken: *mcpReset,
 		Version:       version,
+		Seed:          *seed,
 	})
 	if err != nil {
 		log.Fatal(err)

@@ -280,3 +280,55 @@ func TestPromptCacheSettings(t *testing.T) {
 		t.Fatalf("%+v %v", ls, err)
 	}
 }
+
+func TestHubSettingsAndShare(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.EnsureAdmin("x", true); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.HubSettings()
+	if err != nil || got.Enabled || got.Token != "" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if err := st.SetHubSettings(domain.HubSettings{Enabled: true, NodeID: "n1", Token: "hk", Name: "hap"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.HubSettings()
+	if err != nil || !got.Enabled || got.NodeID != "n1" || got.Token != "hk" || got.Name != "hap" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	bid, err := st.UpsertBackend("mac", "http://127.0.0.1:11434", true, 1, "ollama", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.SaveModel(Model{Alias: "coder", UpstreamName: "qwen", Enabled: true, BackendIDs: []int64{bid}, HubShare: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := st.GetModel(id)
+	if !m.HubShare {
+		t.Fatal("hub_share not stored")
+	}
+	m.HubShare = false
+	if _, err := st.SaveModel(m); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = st.GetModel(id)
+	if m.HubShare {
+		t.Fatal("hub_share stuck")
+	}
+	if err := st.ConnectHubModel("coder", "n1", "ams-1", 8192, []string{"chat"}); err != nil {
+		t.Fatal(err)
+	}
+	hm, err := st.GetModelByAlias("coder@ams-1")
+	if err != nil {
+		hm, err = st.GetModelByAlias("coder")
+	}
+	if err != nil || hm.HubNodeID != "n1" {
+		t.Fatalf("hub model %+v %v", hm, err)
+	}
+}

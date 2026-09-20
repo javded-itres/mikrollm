@@ -11,6 +11,7 @@ import (
 	"github.com/javded-itres/mikrollm/internal/auth"
 	"github.com/javded-itres/mikrollm/internal/domain"
 	"github.com/javded-itres/mikrollm/internal/guard"
+	"github.com/javded-itres/mikrollm/internal/hubclient"
 	"github.com/javded-itres/mikrollm/internal/ports"
 )
 
@@ -29,10 +30,10 @@ func (s *Server) buildTools() []toolDef {
 	return []toolDef{
 		{Name: "get_status", Description: "Сводка шлюза: версия, RAM, бэкенды (health/latency/модели в RAM), alias, живые очереди, фоновые jobs.", Schema: objSchema(nil), Fn: s.toolStatus},
 		{Name: "refresh_health", Description: "Принудительно скачать каталоги со всех бэкендов (без кэша; OpenRouter — chat+image+video), затем сводка как get_status.", Schema: objSchema(nil), Fn: s.toolRefresh},
-		{Name: "refresh_provider", Description: "Принудительно обновить каталог одного провайдера по id (Ollama tags, OpenRouter /models + /videos/models и т.д.).", Schema: objSchema(map[string]any{"id": num}, "id"), Fn: s.toolRefreshProvider},
-		{Name: "list_providers", Description: "Список провайдеров/бэкендов (Ollama, vLLM, LM Studio, OpenRouter, Ollama Cloud). Токен маскируется.", Schema: objSchema(nil), Fn: s.toolListProviders},
+		{Name: "refresh_provider", Description: "Принудительно обновить каталог одного провайдера по id (Ollama tags, OpenRouter /models + /videos/models, OpenComfy /v1/models + image/video models).", Schema: objSchema(map[string]any{"id": num}, "id"), Fn: s.toolRefreshProvider},
+		{Name: "list_providers", Description: "Список провайдеров/бэкендов (Ollama, vLLM, LM Studio, OpenRouter, Ollama Cloud, OpenComfy). Токен маскируется.", Schema: objSchema(nil), Fn: s.toolListProviders},
 		{Name: "upsert_provider", Description: "Добавить или обновить бэкенд. Идентичность — base_url. Пустой token не затирает ключ. enabled и weight без поля не меняются. Выключить: id + enabled=false.", Schema: objSchema(map[string]any{
-			"name": str, "base_url": str, "kind": map[string]any{"type": "string", "description": "ollama | ollama-cloud | openrouter | vllm | lmstudio"},
+			"name": str, "base_url": str, "kind": map[string]any{"type": "string", "description": "ollama | ollama-cloud | openrouter | vllm | lmstudio | opencomfy"},
 			"token": str, "enabled": bol, "weight": num, "id": num,
 		}), Fn: s.toolUpsertProvider},
 		{Name: "delete_provider", Description: "Удалить бэкенд по id.", Schema: objSchema(map[string]any{"id": num}, "id"), Fn: s.toolDeleteProvider},
@@ -47,7 +48,7 @@ func (s *Server) buildTools() []toolDef {
 		{Name: "save_model", Description: "Создать или обновить alias. Если backend_ids пусты — берёт их из каталога.", Schema: objSchema(map[string]any{
 			"id": num, "alias": str, "upstream_name": str,
 			"backend_ids": map[string]any{"type": "array", "items": num},
-			"lb_policy":   str, "max_context": num, "fallback": str, "prompt_cache": str, "enabled": bol,
+			"lb_policy":   str, "max_context": num, "fallback": str, "prompt_cache": str, "enabled": bol, "hub_share": bol,
 		}, "alias"), Fn: s.toolSaveModel},
 		{Name: "delete_model", Description: "Удалить alias по id или имени.", Schema: objSchema(map[string]any{"id": num, "alias": str}), Fn: s.toolDeleteModel},
 		{Name: "host_action", Description: "Операция на хосте: pull/load (фон) или unload/delete. vLLM/облако часть действий не умеют.", Schema: objSchema(map[string]any{
@@ -172,6 +173,18 @@ func (s *Server) statusPayload() map[string]any {
 		"queue_live": waitN, "mcp_prefix": prefix,
 		"prompt_cache": map[string]any{"global": s.st.PromptCacheMode()},
 		"backends":     backends, "queues": qv, "jobs": jobs, "jobs_running": running,
+		"hub": s.hubStatus(),
+	}
+}
+
+func (s *Server) hubStatus() map[string]any {
+	cfg, err := s.st.HubSettings()
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	return map[string]any{
+		"enabled": cfg.Enabled, "node_id": cfg.NodeID, "name": cfg.Name,
+		"url": hubclient.HubURL(),
 	}
 }
 
@@ -318,7 +331,8 @@ func (s *Server) toolListModels(map[string]any) (any, error) {
 			"backends": names, "max_context": m.MaxContext, "fallback": m.Fallback, "prompt_cache": m.PromptCache,
 			"context": m.ContextWindow(meta.Context), "provider": meta.Provider,
 			"priced": meta.Priced, "prompt_usd": meta.PromptUSD, "completion_usd": meta.CompletionUSD,
-			"media": domain.MergeMedia(m.Media, meta.Media),
+			"media": domain.MergeMedia(m.Media, meta.Media), "hub_share": m.HubShare,
+			"hub_node_id": m.HubNodeID, "hub_node_name": m.HubNodeName,
 		})
 	}
 	return map[string]any{"models": out}, nil
@@ -370,6 +384,7 @@ func (s *Server) toolCatalog(args map[string]any) (any, error) {
 			"size": e.Size, "loaded_on": e.LoadedOn, "context": e.Context,
 			"priced": e.Priced, "prompt_usd": e.PromptUSD, "completion_usd": e.CompletionUSD,
 			"connected": connected[e.Name], "media": e.Media,
+			"hub_node_id": e.HubNodeID, "hub_node_name": e.HubNodeName, "hub_online": e.HubOnline,
 		})
 		if len(out) >= limit {
 			break
@@ -400,7 +415,26 @@ func (s *Server) toolConnectModel(args map[string]any) (any, error) {
 	var missing []string
 	for _, name := range names {
 		e, ok := byName[name]
-		if !ok || len(e.BackendIDs) == 0 {
+		if !ok {
+			for _, c := range cat {
+				if c.HubNodeID != "" && (c.Name == name || c.HubNodeName+"/"+c.Name == name || c.HubNodeID+"/"+c.Name == name) {
+					e, ok = c, true
+					break
+				}
+			}
+		}
+		if !ok {
+			missing = append(missing, name)
+			continue
+		}
+		if e.HubNodeID != "" {
+			if err := s.st.ConnectHubModel(e.Name, e.HubNodeID, e.HubNodeName, e.Context, e.Media); err != nil {
+				return nil, err
+			}
+			connected++
+			continue
+		}
+		if len(e.BackendIDs) == 0 {
 			missing = append(missing, name)
 			continue
 		}
@@ -437,6 +471,9 @@ func (s *Server) toolSaveModel(args map[string]any) (any, error) {
 	if hasArg(args, "prompt_cache") {
 		m.PromptCache = strArg(args, "prompt_cache")
 	}
+	if hasArg(args, "hub_share") {
+		m.HubShare = boolArg(args, "hub_share", false)
+	}
 	if hasArg(args, "media") {
 		if sl, ok := strSlice(args, "media"); ok {
 			m.Media = domain.ParseMedia(strings.Join(sl, ","))
@@ -465,6 +502,9 @@ func (s *Server) toolSaveModel(args map[string]any) (any, error) {
 			if !hasArg(args, "prompt_cache") {
 				m.PromptCache = old.PromptCache
 			}
+			if !hasArg(args, "hub_share") {
+				m.HubShare = old.HubShare
+			}
 			if !hasArg(args, "media") {
 				m.Media = old.Media
 			}
@@ -488,6 +528,9 @@ func (s *Server) toolSaveModel(args map[string]any) (any, error) {
 		}
 		if !hasArg(args, "prompt_cache") {
 			m.PromptCache = old.PromptCache
+		}
+		if !hasArg(args, "hub_share") {
+			m.HubShare = old.HubShare
 		}
 		if m.LBPolicy == "" {
 			m.LBPolicy = old.LBPolicy

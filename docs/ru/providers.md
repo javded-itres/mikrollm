@@ -11,6 +11,7 @@ MikroLLM — шлюз. Бэкенд может быть **локальным п�
 | **OpenRouter** | `https://openrouter.ai/api/v1` | `/chat/completions` | `/models` | нет: модели уже в облаке |
 | **vLLM** | `http://<хост>:8000` | `/v1/chat/completions` | `/health`, `/v1/models` | нет API: модель = процесс |
 | **LM Studio** | `http://<хост>:1234` | `/v1/chat/completions` | `/api/v1/models` | да, из админки |
+| **OpenComfy** | `http://<хост>:8788` | image chat shim | `/health`, `/v1/models` | нет: workflow на GPU-машине |
 
 Клиенты всегда ходят в MikroLLM (`/v1/chat/completions`). Если клиент шлёт `/api/chat`, а бэкенд не Ollama / Ollama Cloud, шлюз переписывает путь на OpenAI-совместимый чат провайдера.
 
@@ -216,6 +217,33 @@ curl https://ollama.com/api/chat \
   -H "Authorization: Bearer $OLLAMA_API_KEY" \
   -d '{"model":"gpt-oss:120b","messages":[{"role":"user","content":"hi"}],"stream":false}'
 ```
+
+## OpenComfy
+
+Локальный шлюз **картинок и видео** перед [ComfyUI](https://github.com/comfyanonymous/ComfyUI). Те же формы, что у LiteLLM/OpenAI: `POST /v1/images/generations`, `POST /v1/videos`, опрос `GET /v1/videos/{id}`. Это не чат-LLM.
+
+1. OpenComfy рядом с ComfyUI (`opencomfy -config …`, порт `:8788`).
+2. Админка → **Добавить сервер** → тип **OpenComfy**. URL `http://<gpu>:8788` (**без** `/v1`). Ключ из `keys.yaml` OpenComfy (`sk-…`).
+3. **Обновить каталоги**. Модели с тегами image/video из `/v1/models`, `/v1/images/models`, `/v1/videos/models`.
+4. **Модели** → подключить нужные имена (`flux-dev`, `minimax-hailuo-02`, …) как alias — как Flux/Sora с OpenRouter.
+
+Клиенты по-прежнему ходят в MikroLLM:
+
+```bash
+curl http://<mikrollm>:4000/v1/images/generations \
+  -H "Authorization: Bearer sk-…" \
+  -d '{"model":"toy-image","prompt":"красный куб"}'
+
+curl http://<mikrollm>:4000/v1/videos \
+  -H "Authorization: Bearer sk-…" \
+  -d '{"model":"minimax-hailuo-02","prompt":"волны","seconds":"6"}'
+```
+
+OpenComfy отдаёт URL файла на `:8788`. MikroLLM подтягивает same-host URL в `b64_json` (до 4 МиБ), иначе CSP админки (`img-src 'self' data: blob:`) прячет картинку в чате.
+
+В playground выберите модель и тип **image** / **video**, не chat. Справа панель параметров (схема OpenComfy). Агент может ходить в OpenComfy `POST /mcp` (tool `generate_<id>` на каждый workflow). Видео-модели не чат-бэкенды.
+
+Pull/load/delete скрыты: веса и workflow остаются на хосте ComfyUI.
 
 ## Смешанный пул
 

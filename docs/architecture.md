@@ -23,6 +23,7 @@ internal/guard        request/response filters, system prompt, prompt injection
 internal/promptcache  OpenRouter prefix cache: cache_control, usage, SSE tail
 internal/tlsconf      PEM / self-signed / Let's Encrypt ACME (autocert)
 internal/web          templates and static (embed)
+internal/hubclient    outbound hub client (register / announce / long-poll)
 ```
 
 ## Principles

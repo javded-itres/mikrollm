@@ -19,9 +19,15 @@ import (
 type Status = domain.HostStatus
 type CatalogEntry = domain.CatalogEntry
 
+type HubCatalog interface {
+	RefreshCatalog()
+	Peers() (selfID string, peers []domain.HubPeer)
+}
+
 type Checker struct {
 	backends ports.BackendQuery
 	doer     ports.HTTPDoer
+	hub      HubCatalog
 
 	mu       sync.RWMutex
 	stat     map[int64]Status
@@ -84,6 +90,8 @@ func New(backends ports.BackendQuery, doer ports.HTTPDoer) *Checker {
 	}
 }
 
+func (c *Checker) SetHub(h HubCatalog) { c.hub = h }
+
 func (c *Checker) Loop(every time.Duration) {
 	c.CheckOnce()
 	t := time.NewTicker(every)
@@ -110,6 +118,9 @@ func (c *Checker) RefreshAll() {
 	c.orMu.Lock()
 	c.orCache = map[int64]catalogSnap{}
 	c.orMu.Unlock()
+	if c.hub != nil {
+		c.hub.RefreshCatalog()
+	}
 	c.CheckOnce()
 }
 
@@ -146,6 +157,8 @@ func (c *Checker) probe(b domain.Backend) Status {
 		return c.probeOpenRouter(b, start)
 	case domain.KindOllamaCloud:
 		return c.probeOllamaCloud(b, start)
+	case domain.KindOpenComfy:
+		return c.probeOpenComfy(b, start)
 	default:
 		return c.probeOllama(b, start)
 	}
@@ -215,6 +228,100 @@ func (c *Checker) probeVLLM(b domain.Backend, start time.Time) Status {
 		st.Error = "vllm unreachable"
 	}
 	return st
+}
+
+func (c *Checker) probeOpenComfy(b domain.Backend, start time.Time) Status {
+	st := Status{Checked: start}
+	b.Token = domain.SanitizeToken(b.Token)
+	if b.Token == "" {
+		st.Error = "нужен API-ключ OpenComfy"
+		st.Latency = time.Since(start)
+		return st
+	}
+	resp, err := c.doGET(b, "/health")
+	st.Latency = time.Since(start)
+	healthOK := false
+	if err != nil {
+		st.Error = err.Error()
+	} else {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 400 {
+			healthOK = true
+		} else {
+			st.Error = resp.Status
+		}
+	}
+	d := c.fetchOpenComfyCatalog(b)
+	c.applyDecoded(&st, d)
+	if len(st.Models) > 0 {
+		st.Healthy = true
+		st.Error = ""
+		st.Running = append([]string{}, st.Models...)
+		return st
+	}
+	// /health is unauthenticated; an empty catalog usually means a bad key or /v1 in the base URL.
+	if healthOK {
+		st.Error = "нет моделей: проверьте ключ sk- и URL без /v1 (GET /v1/models)"
+	} else if st.Error == "" {
+		st.Error = "opencomfy unreachable"
+	}
+	st.Healthy = false
+	return st
+}
+
+func (c *Checker) fetchOpenComfyCatalog(b domain.Backend) decodedCatalog {
+	d, err := c.fetchOpenComfyPath(b, "/v1/models")
+	if err != nil {
+		d = emptyDecoded()
+	}
+	if img, e := c.fetchOpenComfyPath(b, "/v1/images/models"); e == nil {
+		for _, name := range img.Names {
+			img.Media[name] = domain.MergeMedia(img.Media[name], []string{domain.MediaImage})
+		}
+		d = mergeDecoded(d, img)
+	}
+	if vid, e := c.fetchOpenComfyPath(b, "/v1/videos/models"); e == nil {
+		for _, name := range vid.Names {
+			vid.Media[name] = domain.MergeMedia(vid.Media[name], []string{domain.MediaVideo})
+		}
+		d = mergeDecoded(d, vid)
+	}
+	if d.Providers == nil {
+		d.Providers = map[string]string{}
+	}
+	if d.Media == nil {
+		d.Media = map[string][]string{}
+	}
+	for _, name := range d.Names {
+		d.Providers[name] = domain.Backend{Kind: domain.KindOpenComfy}.Label()
+		if len(d.Media[name]) == 0 {
+			d.Media[name] = domain.InferMedia(name, nil)
+		}
+		videoOnly := domain.HasMedia(d.Media[name], domain.MediaVideo) && !domain.HasMedia(d.Media[name], domain.MediaImage)
+		if videoOnly {
+			if d.VideoSec[name] == 0 && d.ImageUSD[name] > 0 {
+				if d.VideoSec == nil {
+					d.VideoSec = map[string]float64{}
+				}
+				d.VideoSec[name] = d.ImageUSD[name]
+			}
+			delete(d.ImageUSD, name)
+		}
+	}
+	return d
+}
+
+func (c *Checker) fetchOpenComfyPath(b domain.Backend, path string) (decodedCatalog, error) {
+	resp, err := c.doGET(b, path)
+	if err != nil {
+		return decodedCatalog{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return decodedCatalog{}, fmt.Errorf("opencomfy %s: %s", path, resp.Status)
+	}
+	return decodeOpenAICatalog(io.LimitReader(resp.Body, openRouterCatalogMax)), nil
 }
 
 func (c *Checker) probeOpenRouter(b domain.Backend, start time.Time) Status {
@@ -310,6 +417,12 @@ func (c *Checker) fetchOpenRouterModels(b domain.Backend) (decodedCatalog, error
 		return decodedCatalog{}, err
 	}
 	if v, e := c.fetchOpenRouterPath(b, "/models?output_modalities=image"); e == nil {
+		d = mergeDecoded(d, v)
+	}
+	if v, e := c.fetchOpenRouterPath(b, "/images/models"); e == nil {
+		for _, name := range v.Names {
+			v.Media[name] = domain.MergeMedia(v.Media[name], []string{domain.MediaImage})
+		}
 		d = mergeDecoded(d, v)
 	}
 	if v, e := c.fetchOpenRouterPath(b, "/models?output_modalities=video"); e == nil {
@@ -1085,6 +1198,22 @@ func (c *Checker) Catalog(backends []domain.Backend) []CatalogEntry {
 			Priced: a.priced, PromptUSD: a.prompt, CompletionUSD: a.completion,
 			ImageUSD: a.imageUSD, ImageTokUSD: a.imageTok, VideoSecUSD: a.videoSec, Media: a.media,
 		})
+	}
+	if c.hub != nil {
+		_, peers := c.hub.Peers()
+		for _, p := range peers {
+			for _, a := range p.Aliases {
+				media := a.Media
+				if len(media) == 0 {
+					media = domain.InferMedia(a.Alias, nil)
+				}
+				out = append(out, CatalogEntry{
+					Name: a.Alias, Provider: p.Name, BackendNames: []string{p.Name},
+					Context: a.Context, Media: media,
+					HubNodeID: p.ID, HubNodeName: p.Name, HubOnline: p.Online,
+				})
+			}
+		}
 	}
 	return out
 }

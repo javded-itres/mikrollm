@@ -78,6 +78,13 @@ button, .btn {
 }
 button.ghost, .btn.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
 .danger-text { color: var(--bad) !important; }
+.hub-led {
+  width: .65rem; height: .65rem; border-radius: 50%;
+  background: var(--muted); flex: 0 0 auto;
+}
+.hub-led.online { background: var(--ok); }
+.hub-led.error { background: var(--bad); }
+.hub-led.off { background: var(--muted); }
 .flash { background: #1c2e22; border: 1px solid #3a5a28; padding: .65rem .85rem; border-radius: 8px; margin-bottom: 1rem; }
 .err { background: #3a1c22; border: 1px solid #6b2a32; padding: .65rem .85rem; border-radius: 8px; margin-bottom: 1rem; }
 .secret { display: block; background: #0b0f14; padding: .85rem; border-radius: 8px; word-break: break-all; }
@@ -210,7 +217,7 @@ progress { width: 100%; margin-top: .75rem; height: .55rem; }
 }
 .btn-sm:hover { border-color: var(--acc); }
 .tbl tr.is-on td { color: var(--muted); }
-.tbl tr.is-hidden { display: none; }
+.tbl tr.is-hidden, .alias-tr.is-hidden { display: none; }
 .job-banner {
   background: #152033; border: 1px solid var(--acc); border-radius: 12px;
   padding: .75rem 1rem; margin-bottom: 1rem;
@@ -333,12 +340,61 @@ a.btn, a.btn-sm {
   overflow: auto;
   padding: .7rem .75rem;
 }
+.chat-params {
+  flex: 0 0 240px;
+  max-width: 280px;
+  overflow: auto;
+  padding: .7rem .8rem;
+}
+.chat-params-h { font-size: 12px; font-weight: 650; margin-bottom: .45rem; }
+.chat-param { margin: 0 0 .7rem; }
+.chat-param label {
+  display: flex;
+  align-items: baseline;
+  gap: .35rem;
+  font-size: 12px;
+  font-weight: 650;
+  margin-bottom: .28rem;
+}
+.chat-param .req {
+  color: var(--bad);
+  font-weight: 700;
+  font-size: 11px;
+}
+.chat-param input,
+.chat-param select,
+.chat-param textarea {
+  width: 100%;
+  min-height: 2.1rem;
+}
+.chat-param-drop {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: .55rem .45rem;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  background: #10161f;
+}
+.chat-param-drop:hover { border-color: var(--acc); color: var(--text); }
+.chat-param-drop.is-required:not(.has-file) {
+  border-color: var(--bad);
+  color: #f0c0c4;
+}
+.chat-param-drop.has-file { border-style: solid; border-color: var(--ok); }
 .chat-hist-h { font-size: 12px; font-weight: 650; margin-bottom: .45rem; }
 .chat-task { font-size: 12px; margin-bottom: .6rem; padding-bottom: .55rem; border-bottom: 1px solid var(--line); }
 .chat-hist-list { margin: 0; padding-left: 1.1rem; font-size: 12px; line-height: 1.4; }
 .chat-hist-list li { margin: 0 0 .35rem; }
 @media (max-width: 860px) {
   .chat-hist { display: none; }
+  .chat-main { flex-wrap: wrap; }
+  .chat-params {
+    flex: 1 1 100%;
+    max-width: none;
+    max-height: 11rem;
+  }
 }
 .chat-toolbar { flex: 0 0 auto; margin-bottom: .5rem; }
 .chat-toolbar .chat-model { flex: 1; min-width: 160px; max-width: none; }
@@ -386,6 +442,13 @@ a.btn, a.btn-sm {
   border-radius: 12px;
   padding: .55rem .65rem;
 }
+.composer-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
 .chat-composer textarea {
   flex: 1 1 auto;
   min-width: 0;
@@ -394,6 +457,29 @@ a.btn, a.btn-sm {
   max-height: 12rem;
   resize: vertical;
 }
+.ref-strip { display: flex; flex-wrap: wrap; gap: .35rem; }
+.ref-thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #0d1218;
+}
+.ref-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ref-thumb button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-height: 1.25rem;
+  padding: 0 .35rem;
+  font-size: 12px;
+  line-height: 1.2;
+  border-radius: 6px;
+}
+.chat-msg .ref-row { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .4rem; }
+.chat-msg .ref-row img { max-height: 5.5rem; margin-top: 0; }
 .chat-hint { flex: 0 0 auto; margin: .35rem 0 0; min-height: 1.2em; }
 
 .wrap-dash { max-width: 1120px; }
@@ -483,6 +569,11 @@ a.btn, a.btn-sm {
 .pill.kind-or { border-color: #6a4a8a; color: #d0b4ff; }
 .pill.kind-vllm { border-color: #6a5420; color: #e6c07b; }
 .pill.kind-lms { border-color: #5a4a6a; color: #e0c0e8; }
+.pill.kind-comfy { border-color: #4a6a3a; color: #b8e090; }
+.pill.hub { border-color: #2a6a62; color: #8fd4c8; background: #152a28; }
+.pill.hub-peer { border-color: #4a5a8a; color: #b4c4ff; background: #1a2038; }
+.tbl tr.is-hub td { background: rgba(47, 120, 112, 0.12); }
+.tbl tr.is-hub-remote td { background: rgba(60, 80, 140, 0.10); }
 .ram-k { font-size: 12px; color: var(--muted); margin-bottom: .4rem; }
 .host-ram .chips { margin-top: 0; }
 .host-ram .chip {

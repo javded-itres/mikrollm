@@ -6,6 +6,20 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+## 0.0.5 — 2026-09-20
+
+- Compiled hub URL is `https://hub.mikrollm.ru` (`MIKROLLM_HUB_URL` still overrides). Hub guide: [docs/hub.md](docs/hub.md).
+- Admin chat: right-hand **model parameters** panel (`GET /admin/model-params`). OpenComfy workflows expose required fields (e.g. `input_image`); the playground blocks send until a reference is attached. Photos go as `input_image` / `input_images` as well as `input_references`.
+- Admin playground: picking a video-only model (e.g. Hailuo) switches the type to **Video** so chat does not hit OpenComfy’s `video models use POST /v1/videos`. Chat on a video-only alias returns 400 with that hint.
+- Admin playground: in **image** / **video** mode you can attach several reference photos (`+ фото`, paste, drop). They go as `input_references` (JPEG, max 6, downscaled). Hub media relay body cap is 8 MiB.
+- **OpenRouter images:** `POST /v1/images/generations` goes to OpenRouter `POST /images` (not chat + `modalities: ["image","text"]`). Image-only models (Flux, Seedream, …) no longer 404 with “No endpoints found that support the requested output modalities”. Previous-frame edits become `input_references`.
+- **Hub media:** shared image/video aliases are announced and relayed (`POST /v1/relay/{node}/images` and `/videos`, plus status/content). Binary clips come back as `b64` (cap 6 MiB). Chat on a video-only alias still 400. [docs/hub.md](docs/hub.md)
+- **OpenComfy pictures in admin chat:** `POST /v1/images/generations` fetches same-host `data[].url` files (OpenComfy `/v1/files/…`) and returns `b64_json`. The playground CSP is `img-src 'self' data: blob:` and cannot load `http://gpu:8788/…`. Foreign hosts are not fetched.
+- Desktop one-liner: `curl -fsSL https://raw.githubusercontent.com/javded-itres/mikrollm/main/scripts/install.sh | sh` installs Ollama (if needed) and MikroLLM on Linux/macOS, starts a user service, and with `-seed local` connects local Ollama models. [docs/install-desktop.md](docs/install-desktop.md)
+
+- **OpenComfy** backend kind: local ComfyUI image/video gateway (`:8788`). Admin **Add server** → OpenComfy, URL without `/v1`, API key `sk-…`. Catalog from `/v1/models` + `/v1/images/models` + `/v1/videos/models`; `POST /v1/images/generations` and `POST /v1/videos` proxy as with OpenAI (not OpenRouter chat+modalities). [docs/providers.md](docs/providers.md#opencomfy)
+- **Hub network** (not P2P): Status toggle **Hub network member** makes the gateway register at the compiled URL `https://hub.mikrollm.ru` (`MIKROLLM_HUB_URL` to override). Shared aliases are announced; the hub long-polls the node and relays chat, images, and videos. Client only in this repo (`internal/hubclient`). Hub **service** lives in [`mikrollm_hub`](https://github.com/javded-itres/mikrollm_hub). [docs/hub.md](docs/hub.md)
+
 ## 0.0.4 — 2026-09-19
 
 - Documentation is bilingual; **English is default** (`README.md`, `docs/`, GitHub Releases). Russian: `README.ru.md`, `docs/ru/`. [docs/releasing.md](docs/releasing.md)

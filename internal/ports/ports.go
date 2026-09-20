@@ -38,6 +38,7 @@ type ModelRepo interface {
 	SaveModel(m domain.Model) (int64, error)
 	DeleteModel(id int64) error
 	ConnectOllamaModel(name string, backendIDs []int64, policy string, maxContext int) error
+	ConnectHubModel(alias, nodeID, nodeName string, maxContext int, media []string) error
 }
 
 type QueueRepo interface {
@@ -117,6 +118,8 @@ type Store interface {
 	SecurityRepo
 	PromptCacheMode() string
 	SetPromptCacheMode(string) error
+	HubSettings() (domain.HubSettings, error)
+	SetHubSettings(domain.HubSettings) error
 	Billing(period string, now time.Time) (domain.BillingView, error)
 	SeedIfEmpty(backends []domain.Backend) error
 	Close() error
@@ -164,6 +167,7 @@ type ChatGateway interface {
 	ServeVideos(w http.ResponseWriter, r *http.Request)
 	ServeVideoStatus(w http.ResponseWriter, r *http.Request)
 	ServeVideoContent(w http.ResponseWriter, r *http.Request)
+	ServeModelParams(w http.ResponseWriter, r *http.Request)
 }
 
 type Jobs interface {

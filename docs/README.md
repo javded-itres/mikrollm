@@ -6,6 +6,7 @@ English is the default. Russian copies live in [ru/](ru/README.md). GitHub Relea
 
 | Doc | About |
 |---|---|
+| [install-desktop.md](install-desktop.md) | One-liner: Ollama + MikroLLM on Linux/macOS |
 | [install-local.md](install-local.md) | Run from source, flags, data dir |
 | [install-docker.md](install-docker.md) | Docker and systemd on a server |
 | [install-mikrotik.md](install-mikrotik.md) | RouterOS 7 container, veth, dst-nat, USB |
@@ -16,6 +17,7 @@ English is the default. Russian copies live in [ru/](ru/README.md). GitHub Relea
 | [api.md](api.md) | OpenAI / Ollama API, chat / images / videos, keys |
 | [mcp.md](mcp.md) | MCP: agent configures models, queues, keys, logs |
 | [architecture.md](architecture.md) | Packages, ports, dependency injection |
+| [hub.md](hub.md) | Hub client: join the cloud catalog (service is a separate repo) |
 | [load-test.md](load-test.md) | Field RPS: gateway overhead, local 35B, cloud 32k–128k, MikroTik RAM |
 | [releasing.md](releasing.md) | English GitHub Releases from this changelog |
 

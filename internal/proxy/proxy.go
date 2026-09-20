@@ -3,11 +3,13 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -16,18 +18,25 @@ import (
 	"github.com/javded-itres/mikrollm/internal/auth"
 	"github.com/javded-itres/mikrollm/internal/domain"
 	"github.com/javded-itres/mikrollm/internal/guard"
+	"github.com/javded-itres/mikrollm/internal/hubclient"
 	"github.com/javded-itres/mikrollm/internal/ports"
 	"github.com/javded-itres/mikrollm/internal/promptcache"
 	"github.com/javded-itres/mikrollm/internal/queue"
 )
 
+type HubDial interface {
+	URL() string
+}
+
 type Proxy struct {
-	st     ports.Store
-	health ports.Health
-	keys   ports.Auth
-	client ports.HTTPDoer
-	queues *queue.Engine
-	rr     atomic.Uint64
+	st       ports.Store
+	health   ports.Health
+	keys     ports.Auth
+	client   ports.HTTPDoer
+	queues   *queue.Engine
+	hubRelay string
+	hub      HubDial
+	rr       atomic.Uint64
 }
 
 func New(st ports.Store, h ports.Health, keys ports.Auth, client ports.HTTPDoer) *Proxy {
@@ -47,6 +56,10 @@ func New(st ports.Store, h ports.Health, keys ports.Auth, client ports.HTTPDoer)
 
 func (p *Proxy) SetQueue(e *queue.Engine) { p.queues = e }
 
+func (p *Proxy) SetHubRelay(secret string) { p.hubRelay = secret }
+
+func (p *Proxy) SetHubDial(h HubDial) { p.hub = h }
+
 func (p *Proxy) Health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -60,6 +73,12 @@ func (p *Proxy) Ready(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (p *Proxy) requireKey(w http.ResponseWriter, r *http.Request) (domain.APIKey, bool) {
+	if p.hubRelay != "" {
+		got := r.Header.Get(hubclient.RelayHeader)
+		if subtle.ConstantTimeCompare([]byte(got), []byte(p.hubRelay)) == 1 {
+			return domain.APIKey{Name: "hub", Prefix: "hub", AllowedModels: []string{"*"}, Enabled: true}, true
+		}
+	}
 	k, err := p.keys.Authenticate(auth.Bearer(r))
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]any{"message": "invalid api key", "type": "auth"}})
@@ -262,6 +281,27 @@ func (p *Proxy) catalog() []domain.CatalogEntry {
 	return p.health.Catalog(backends)
 }
 
+func isChatPath(path string) bool {
+	return path == "/v1/chat/completions" || path == "/api/chat"
+}
+
+func (p *Proxy) exclusiveMedia(alias string) string {
+	var media []string
+	upstream := alias
+	if m, err := p.st.GetModelByAlias(alias); err == nil {
+		media = domain.MergeMedia(media, m.Media)
+		if m.UpstreamName != "" {
+			upstream = m.UpstreamName
+		}
+	}
+	meta := p.catalogMeta(upstream, alias)
+	media = domain.MergeMedia(media, meta.Media)
+	if len(media) == 0 {
+		media = domain.MergeMedia(domain.InferMedia(alias, nil), domain.InferMedia(upstream, nil))
+	}
+	return domain.ExclusiveMedia(media)
+}
+
 func (p *Proxy) catalogMeta(names ...string) domain.CatalogEntry {
 	cat := p.catalog()
 	for _, name := range names {
@@ -358,6 +398,17 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, path string, nee
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"message": "model is required"}})
 		return
 	}
+	if isChatPath(path) {
+		if kind := p.exclusiveMedia(mb.Model); kind == domain.MediaVideo {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{
+				"message": "Это видео-модель. В админке выберите тип «Видео» — POST /v1/videos, не чат.",
+				"type":    "invalid_request_error",
+				"code":    "invalid_value",
+				"param":   "model",
+			}})
+			return
+		}
+	}
 	if k.ID != 0 {
 		p.st.TouchKey(k.ID)
 	}
@@ -445,6 +496,11 @@ func (p *Proxy) Forward(ctx context.Context, w http.ResponseWriter, k domain.API
 
 		start := time.Now()
 		p.health.Inc(b.ID)
+		if b.KindNorm() == domain.KindHub {
+			status, err := p.forwardHub(ctx, w, k, b, upstream, requested, filtered, start, path)
+			p.health.Dec(b.ID)
+			return b.Name, p.providerOf(b, model, upstream), status, err
+		}
 		upPath := rewriteUpstreamPath(b, path)
 		mode := promptcache.ModeOff
 		if b.KindNorm() == domain.KindOpenRouter {
@@ -601,7 +657,7 @@ func rewriteUpstreamPath(b domain.Backend, path string) string {
 		return b.OpenAIChatPath()
 	case "/v1/images/generations":
 		if b.KindNorm() == domain.KindOpenRouter {
-			return "/images/generations"
+			return "/images"
 		}
 		return "/v1/images/generations"
 	default:
@@ -646,7 +702,111 @@ func queueAllowed(k domain.APIKey, q domain.Queue, requested string) bool {
 	return false
 }
 
+func hubRelaySuffix(path string) string {
+	switch {
+	case path == "/v1/images/generations":
+		return "/images"
+	case path == "/v1/videos":
+		return "/videos"
+	case strings.HasPrefix(path, "/v1/videos/"):
+		rest := strings.TrimPrefix(path, "/v1/videos/")
+		parts := strings.Split(rest, "/")
+		for i, p := range parts {
+			parts[i] = neturl.PathEscape(p)
+		}
+		return "/videos/" + strings.Join(parts, "/")
+	default:
+		return "/chat"
+	}
+}
+
+func (p *Proxy) forwardHub(ctx context.Context, w http.ResponseWriter, k domain.APIKey, b domain.Backend, upstream, requested string, body []byte, start time.Time, path string) (int, error) {
+	if p.hub == nil || strings.TrimSpace(p.hub.URL()) == "" {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"message": "hub is not configured"}})
+		return http.StatusBadGateway, errors.New("hub is not configured")
+	}
+	var raw map[string]any
+	if json.Unmarshal(body, &raw) != nil {
+		raw = map[string]any{}
+	}
+	wantStream := false
+	if v, ok := raw["stream"].(bool); ok {
+		wantStream = v
+	}
+	raw["model"] = upstream
+	suffix := hubRelaySuffix(path)
+	if suffix == "/chat" {
+		raw["stream"] = false
+	}
+	payload, _ := json.Marshal(raw)
+	u := strings.TrimRight(p.hub.URL(), "/") + "/v1/relay/" + neturl.PathEscape(b.BaseURL) + suffix
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(payload))
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": map[string]any{"message": err.Error()}})
+		return 500, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		p.st.Log(k.Prefix, requested, b.Name, 502, time.Since(start), 0, domain.TokenUsage{})
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"message": err.Error()}})
+		return http.StatusBadGateway, err
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(io.LimitReader(resp.Body, 12<<20))
+	code := resp.StatusCode
+	if code == 0 {
+		code = 200
+	}
+	p.st.Log(k.Prefix, requested, b.Name, code, time.Since(start), int64(len(out)), domain.TokenUsage{})
+	if suffix == "/chat" && wantStream && code < 400 {
+		text, reasoning := hubclient.ChatText(out)
+		if text == "" {
+			text = reasoning
+			reasoning = ""
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		delta := map[string]any{"content": text}
+		if reasoning != "" {
+			delta["reasoning"] = reasoning
+		}
+		chunk, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": delta}},
+		})
+		_, _ = w.Write([]byte("data: " + string(chunk) + "\n\ndata: [DONE]\n\n"))
+		return 200, nil
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/json"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.WriteHeader(code)
+	_, _ = w.Write(out)
+	if code >= 400 {
+		return code, errors.New(strings.TrimSpace(string(out)))
+	}
+	return code, nil
+}
+
+func hubBackend(nodeID, nodeName, upstream string) (domain.Backend, string) {
+	name := nodeName
+	if name == "" {
+		name = nodeID
+	}
+	return domain.Backend{Name: name, Kind: domain.KindHub, BaseURL: nodeID}, upstream
+}
+
 func (p *Proxy) pick(alias string) (domain.Backend, string, error) {
+	if strings.HasPrefix(alias, "hub|") {
+		rest := strings.TrimPrefix(alias, "hub|")
+		i := strings.IndexByte(rest, '|')
+		if i > 0 {
+			b, up := hubBackend(rest[:i], "", rest[i+1:])
+			return b, up, nil
+		}
+	}
 	m, err := p.st.GetModelByAlias(alias)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return domain.Backend{}, "", err
@@ -656,6 +816,10 @@ func (p *Proxy) pick(alias string) (domain.Backend, string, error) {
 	policy := "least_conn"
 	if err == nil && m.Enabled {
 		upstream = m.UpstreamName
+		if m.HubNodeID != "" {
+			b, up := hubBackend(m.HubNodeID, m.HubNodeName, m.UpstreamName)
+			return b, up, nil
+		}
 		if m.LBPolicy != "" {
 			policy = m.LBPolicy
 		}
@@ -685,9 +849,28 @@ func (p *Proxy) pick(alias string) (domain.Backend, string, error) {
 		}
 	}
 	if len(candidates) == 0 {
+		if b, up, ok := p.pickHubCatalog(alias); ok {
+			return b, up, nil
+		}
 		return domain.Backend{}, "", errors.New("no healthy backend for model " + alias)
 	}
 	return p.choose(candidates, policy), upstream, nil
+}
+
+func (p *Proxy) pickHubCatalog(alias string) (domain.Backend, string, bool) {
+	bs, _ := p.st.ListBackends()
+	var hit []domain.CatalogEntry
+	for _, e := range p.health.Catalog(bs) {
+		if e.HubNodeID != "" && e.HubOnline && e.Name == alias {
+			hit = append(hit, e)
+		}
+	}
+	if len(hit) == 0 {
+		return domain.Backend{}, "", false
+	}
+	e := hit[0]
+	b, up := hubBackend(e.HubNodeID, e.HubNodeName, e.Name)
+	return b, up, true
 }
 
 func (p *Proxy) choose(list []domain.Backend, policy string) domain.Backend {

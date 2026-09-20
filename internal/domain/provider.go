@@ -39,6 +39,7 @@ var providerNames = map[string]string{
 	"inflection":   "Inflection",
 	"openrouter":   "OpenRouter",
 	"ollama":       "Ollama",
+	"opencomfy":    "OpenComfy",
 }
 
 func ProviderOf(model, kind string) string {

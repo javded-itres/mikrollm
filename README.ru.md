@@ -30,10 +30,19 @@
 - OpenRouter и Ollama Cloud — напрямую по HTTPS, без промежуточного GPU-сервера; нужен API-ключ. Цены $/1M в каталоге: OpenRouter из `/models`, Ollama Cloud с [ollama.com/pricing](https://ollama.com/pricing).
 - Prompt cache OpenRouter: `auto` ставит Claude `cache_control`; логи показывают `cached_tokens` и оценку $. [docs/providers.md](docs/ru/providers.md#prompt-cache).
 - Playground: выбрать alias или имя модели и писать в чат без ключа (нужна сессия админки).
+- **Сеть hub**: на Статусе включить **Участник hub сети** — шлюз сам регистрируется на зашитом адресе (`https://hub.mikrollm.ru`, иначе `MIKROLLM_HUB_URL`) и отдаёт помеченные alias через исходящий long-poll. Не P2P. **Сервис** хаба — отдельный репозиторий. [docs/ru/hub.md](docs/ru/hub.md)
 
 ## Быстрый старт (локально)
 
-Нужны Go 1.23+ и хотя бы один Ollama на `localhost:11434` или в LAN.
+**Одна строка** (Linux или macOS): ставит Ollama при необходимости, MikroLLM, пользовательский сервис и подключает локальные модели Ollama. [docs/ru/install-desktop.md](docs/ru/install-desktop.md)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/javded-itres/mikrollm/main/scripts/install.sh | sh
+```
+
+Админка: http://127.0.0.1:4000/admin — пароль печатает скрипт (`~/.mikrollm/admin.pass`).
+
+Из исходников нужны Go 1.23+ и хотя бы один Ollama на `localhost:11434` или в LAN:
 
 ```bash
 git clone https://github.com/javded-itres/mikrollm.git
@@ -59,6 +68,7 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 
 | Сценарий | Документ |
 |---|---|
+| Ноутбук / десктоп, одна команда | [docs/ru/install-desktop.md](docs/ru/install-desktop.md) |
 | Разработка на машине с Go | [docs/install-local.md](docs/ru/install-local.md) |
 | Linux-сервер, Docker или systemd | [docs/install-docker.md](docs/ru/install-docker.md) |
 | Контейнер MikroTik RouterOS 7 | [docs/install-mikrotik.md](docs/ru/install-mikrotik.md) |
@@ -68,6 +78,7 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 | HTTP API | [docs/api.md](docs/ru/api.md) |
 | MCP для агента | [docs/mcp.md](docs/ru/mcp.md) |
 | Устройство кода | [docs/architecture.md](docs/ru/architecture.md) |
+| Сеть hub (исходящий клиент) | [docs/ru/hub.md](docs/ru/hub.md) |
 
 ## Требования
 
@@ -79,6 +90,7 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 
 | Флаг | Переменная | По умолчанию |
 |---|---|---|
+| `-seed` | `MIKROLLM_SEED` | пусто = LAN `mac-80`/`mac-82`; `local` = `http://127.0.0.1:11434` и подключить модели Ollama |
 | `-listen` | `MIKROLLM_LISTEN` | `:4000` |
 | `-data` | `MIKROLLM_DATA` | `./data` |
 | `-admin-password` | `ADMIN_PASSWORD` | пусто: пароль генерируется и пишется в лог при **первом** старте |
@@ -96,6 +108,7 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 |  | `MIKROLLM_QUEUE_MAX_BYTES` | `16777216` — потолок тела очереди на диске, старше ждущие сбрасываются |
 |  | `MIKROLLM_QUEUE_MAX_JOBS` | `200` — максимум ждущих+идущих |
 |  | `MIKROLLM_QUEUE_MAX_WAIT` | `3m` — сколько HTTP-соединение может ждать слот |
+|  | `MIKROLLM_HUB_URL` | в коде `https://hub.mikrollm.ru` — исходящий hub для **Участник hub сети** |
 
 Пароль хранится в SQLite (`data/mikrollm.db`) как bcrypt. Сброс — только с `ADMIN_PASSWORD_RESET=1`.
 

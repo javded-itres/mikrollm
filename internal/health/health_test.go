@@ -141,6 +141,115 @@ func TestProbeOpenRouter(t *testing.T) {
 	}
 }
 
+func TestProbeOpenComfy(t *testing.T) {
+	var sawAuth string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		switch r.URL.Path {
+		case "/health":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+		case "/v1/models":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{
+					{"id": "toy-image", "name": "Toy Image",
+						"architecture": map[string]any{"output_modalities": []string{"image"}},
+						"pricing":      map[string]any{"image": "0.02"}},
+					{"id": "minimax-hailuo-02", "name": "Minimax H3",
+						"architecture": map[string]any{"output_modalities": []string{"video"}},
+						"pricing":      map[string]any{"image": "0.05"}},
+				},
+			})
+		case "/v1/images/models":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{{"id": "toy-image"}},
+			})
+		case "/v1/videos/models":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{{
+					"id": "minimax-hailuo-02",
+					"pricing_skus": map[string]any{"per-video-second": "0.05"},
+				}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(up.Close)
+	b := domain.Backend{ID: 11, Name: "comfy", BaseURL: up.URL, Kind: "opencomfy", Token: "sk-test", Enabled: true}
+	c := New(staticBackends{b}, up.Client())
+	c.CheckOnce()
+	st := c.Get(11)
+	if !st.Healthy {
+		t.Fatalf("unhealthy: %s", st.Error)
+	}
+	if sawAuth != "Bearer sk-test" {
+		t.Fatalf("auth %q", sawAuth)
+	}
+	if len(st.Models) != 2 {
+		t.Fatalf("models %+v", st.Models)
+	}
+	if !domain.HasMedia(st.Media["toy-image"], domain.MediaImage) {
+		t.Fatalf("toy media %+v", st.Media)
+	}
+	if !domain.HasMedia(st.Media["minimax-hailuo-02"], domain.MediaVideo) {
+		t.Fatalf("video media %+v", st.Media)
+	}
+	if st.Providers["toy-image"] != "OpenComfy" {
+		t.Fatalf("provider %+v", st.Providers)
+	}
+	if st.VideoSec["minimax-hailuo-02"] != 0.05 {
+		t.Fatalf("video sec %+v imageusd %+v", st.VideoSec, st.ImageUSD)
+	}
+	if st.ImageUSD["toy-image"] != 0.02 {
+		t.Fatalf("image usd %+v", st.ImageUSD)
+	}
+	cat := c.Catalog([]domain.Backend{b})
+	var video, image bool
+	for _, e := range cat {
+		if e.Name == "minimax-hailuo-02" && domain.HasMedia(e.Media, domain.MediaVideo) {
+			video = true
+		}
+		if e.Name == "toy-image" && domain.HasMedia(e.Media, domain.MediaImage) {
+			image = true
+		}
+	}
+	if !video || !image {
+		t.Fatalf("catalog media %+v", cat)
+	}
+}
+
+func TestProbeOpenComfyBadKey(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			w.WriteHeader(200)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"invalid api key"}}`))
+	}))
+	t.Cleanup(up.Close)
+	b := domain.Backend{ID: 13, Name: "comfy", BaseURL: up.URL, Kind: "opencomfy", Token: "sk-wrong", Enabled: true}
+	c := New(staticBackends{b}, up.Client())
+	c.CheckOnce()
+	st := c.Get(13)
+	if st.Healthy {
+		t.Fatal("health-only must not count as catalog")
+	}
+	if st.Error == "" || !strings.Contains(st.Error, "модел") {
+		t.Fatalf("err %q", st.Error)
+	}
+}
+
+func TestProbeOpenComfyNeedsKey(t *testing.T) {
+	b := domain.Backend{ID: 12, Name: "comfy", BaseURL: "http://127.0.0.1:9", Kind: "opencomfy", Enabled: true}
+	c := New(staticBackends{b}, http.DefaultClient)
+	c.CheckOnce()
+	st := c.Get(12)
+	if st.Healthy || !strings.Contains(st.Error, "ключ") {
+		t.Fatalf("expected key error, got healthy=%v err=%q", st.Healthy, st.Error)
+	}
+}
+
 func TestProbeOpenRouterForbidden(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
@@ -264,5 +373,24 @@ func TestProbeOllamaCloud(t *testing.T) {
 	}
 	if len(st.Running) != 0 {
 		t.Fatalf("cloud must not report local RAM %+v", st.Running)
+	}
+}
+
+type fakeHubCat struct{ peers []domain.HubPeer }
+
+func (f fakeHubCat) RefreshCatalog() {}
+func (f fakeHubCat) Peers() (string, []domain.HubPeer) {
+	return "self", f.peers
+}
+
+func TestCatalogIncludesHubPeers(t *testing.T) {
+	c := New(staticBackends{}, nil)
+	c.SetHub(fakeHubCat{peers: []domain.HubPeer{{
+		ID: "n1", Name: "ams-1", Online: true,
+		Aliases: []domain.HubPeerAlias{{Alias: "google/gemini", Context: 32_000}},
+	}}})
+	cat := c.Catalog(nil)
+	if len(cat) != 1 || cat[0].HubNodeID != "n1" || cat[0].Name != "google/gemini" || !cat[0].HubOnline {
+		t.Fatalf("%+v", cat)
 	}
 }

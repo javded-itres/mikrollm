@@ -54,6 +54,16 @@
 <form method="post" action="/admin/models/connect" id="catalog-form"></form>
   <div class="toolbar" id="catalog-filters">
     <input type="search" id="model-filter" placeholder="Имя или провайдер…" autocomplete="off">
+    <select id="model-server" class="sel-sm" title="Сервер">
+      <option value="">Все серверы</option>
+      <option value="__hub__">Все с hub</option>
+      {{range .Servers}}
+      {{if eq .Group "local"}}<option value="{{.Value}}">{{.Label}}</option>{{end}}
+      {{end}}
+      {{range .Servers}}
+      {{if eq .Group "hub"}}<option value="{{.Value}}">hub · {{.Label}}</option>{{end}}
+      {{end}}
+    </select>
     <select id="model-provider" class="sel-sm" title="Провайдер">
       <option value="">Все провайдеры</option>
       {{range .Providers}}<option value="{{.}}">{{.}}</option>{{end}}
@@ -112,9 +122,9 @@
       </thead>
       <tbody>
         {{range $m := .Catalog}}
-        <tr class="model-tr {{if $m.Connected}}is-on{{end}}" data-name="{{$m.Name}}" data-provider="{{$m.Provider}}" data-band="{{$m.PriceBand}}" data-prompt="{{$m.PromptUSD}}" data-title="{{$m.Title}}" data-media="{{join $m.Media ","}}">
+        <tr class="model-tr {{if $m.Connected}}is-on{{end}}" data-name="{{$m.Name}}" data-provider="{{$m.Provider}}" data-band="{{$m.PriceBand}}" data-prompt="{{$m.PromptUSD}}" data-title="{{$m.Title}}" data-media="{{join $m.Media ","}}" data-servers="{{$m.ServersCSV}}" data-hub="{{if $m.HubNodeID}}1{{else}}0{{end}}">
           <td class="col-check">
-            <input type="checkbox" form="catalog-form" name="model" value="{{$m.Name}}" {{if $m.Connected}}disabled{{end}} title="Подключить к шлюзу">
+            <input type="checkbox" form="catalog-form" name="model" value="{{$m.CheckValue}}" {{if or $m.Connected (and $m.HubNodeID (not $m.HubOnline))}}disabled{{end}} title="Подключить к шлюзу">
           </td>
           <td>
             <div class="name" title="{{if $m.Title}}{{$m.Title}} · {{end}}{{$m.Name}}">{{$m.Name}}</div>
@@ -138,6 +148,8 @@
                 <button type="submit" class="pill-btn" data-ollama="load" data-id="{{.ID}}" data-name="{{$m.Name}}" title="Загрузить в RAM на {{.Name}}">{{.Short}} · в RAM</button>
                 {{end}}
               </form>
+              {{else if .Hub}}
+              <span class="pill{{if .Online}} ok{{end}}" title="{{.Hint}}">{{.Short}} · {{if .Online}}онлайн{{else}}офлайн{{end}}</span>
               {{else}}
               <span class="pill{{if .Loaded}} ram{{end}}" title="{{.Hint}}">{{.Short}} · {{if .Cloud}}облако{{else}}{{.Label}}{{end}}{{if .Loaded}} · RAM{{end}}</span>
               {{end}}
@@ -175,17 +187,38 @@
 {{end}}
 
 {{if .Models}}
+<form id="hub-bulk-form" method="post" action="/admin/models/hub-bulk"></form>
 <div class="card">
   <h2>Alias в шлюзе</h2>
+  <p class="muted small">Отметьте локальные alias и нажмите «В hub», чтобы отдать их в каталог сети. Модели с другого узла сюда уже подключены и сами не шарятся.</p>
+  <div class="toolbar" id="alias-filters">
+    <select id="alias-hub-filter" class="sel-sm" title="Hub">
+      <option value="">Все alias</option>
+      <option value="hub">Шарятся в hub</option>
+      <option value="local">Только локально</option>
+      <option value="remote">С другого MikroLLM</option>
+    </select>
+    <span class="muted grow" id="alias-hub-count"></span>
+    <button type="submit" form="hub-bulk-form" name="hub_share" value="1">В hub</button>
+    <button class="ghost" type="submit" form="hub-bulk-form" name="hub_share" value="0">Убрать из hub</button>
+  </div>
   <div class="table-wrap">
     <table class="tbl">
       <thead>
-        <tr><th>Клиентам</th><th>На сервере</th><th>Провайдер</th><th>Цена 1M</th><th>Серверы</th><th>Контекст</th><th>Запасная</th><th>Кэш</th><th>LB</th><th class="col-act"></th></tr>
+        <tr><th class="col-check"></th><th>Клиентам</th><th>На сервере</th><th>Провайдер</th><th>Цена 1M</th><th>Серверы</th><th>Контекст</th><th>Запасная</th><th>Кэш</th><th>Hub</th><th>LB</th><th class="col-act"></th></tr>
       </thead>
       <tbody>
         {{range $m := .Models}}
-        <tr>
-          <td><code>{{$m.Alias}}</code>{{range $m.Media}} <span class="pill media-{{.}}">{{.}}</span>{{end}}</td>
+        <tr class="alias-tr{{if $m.HubShare}} is-hub{{end}}{{if $m.HubNodeID}} is-hub-remote{{end}}" data-hub="{{if $m.HubNodeID}}remote{{else if $m.HubShare}}hub{{else}}local{{end}}">
+          <td class="col-check">
+            {{if not $m.HubNodeID}}<input type="checkbox" form="hub-bulk-form" name="id" value="{{$m.ID}}" title="Выбрать для hub">{{end}}
+          </td>
+          <td>
+            <code>{{$m.Alias}}</code>
+            {{if $m.HubShare}}<span class="pill hub" title="Alias отдаётся в каталог hub сети">в hub</span>{{end}}
+            {{if $m.HubNodeID}}<span class="pill hub-peer" title="Модель с другого MikroLLM ({{$m.HubNodeID}})">с {{if $m.HubNodeName}}{{$m.HubNodeName}}{{else}}hub{{end}}</span>{{end}}
+            {{range $m.Media}} <span class="pill media-{{.}}">{{.}}</span>{{end}}
+          </td>
           <td class="muted">{{$m.UpstreamName}}</td>
           <td>{{if $m.Provider}}<span class="pill">{{$m.Provider}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
           <td class="muted" title="вход / выход за 1M токенов">{{if $m.PriceLabel}}{{$m.PriceLabel}}{{else}}—{{end}}</td>
@@ -218,6 +251,24 @@
               </select>
               <button class="btn-sm" type="submit">OK</button>
             </form>
+          </td>
+          <td>
+            {{if $m.HubNodeID}}
+            <span class="pill hub-peer" title="{{$m.HubNodeID}}">с {{if $m.HubNodeName}}{{$m.HubNodeName}}{{else}}hub{{end}}</span>
+            <div class="muted small">чужой alias</div>
+            {{else if $m.HubShare}}
+            <span class="pill hub">шарится</span>
+            <form method="post" action="/admin/models/{{$m.ID}}/hub-share" class="ctx-form" title="Убрать из каталога hub">
+              <input type="hidden" name="hub_share" value="0">
+              <button class="ghost btn-sm" type="submit">убрать</button>
+            </form>
+            {{else}}
+            <span class="muted small">нет</span>
+            <form method="post" action="/admin/models/{{$m.ID}}/hub-share" class="ctx-form" title="Отдавать этот alias через облачный hub (только chat)">
+              <input type="hidden" name="hub_share" value="1">
+              <button class="btn-sm" type="submit">шарить</button>
+            </form>
+            {{end}}
           </td>
           <td class="muted">{{$m.LBPolicy}}</td>
           <td class="col-act">

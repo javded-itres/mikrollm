@@ -20,6 +20,9 @@ func TestNormalizeKind(t *testing.T) {
 		"open-router":  KindOpenRouter,
 		"ollama-cloud": KindOllamaCloud,
 		"ollamacloud":  KindOllamaCloud,
+		"opencomfy":    KindOpenComfy,
+		"open-comfy":   KindOpenComfy,
+		"comfyui":      KindOpenComfy,
 	}
 	for in, want := range cases {
 		if g := NormalizeKind(in); g != want {
@@ -75,6 +78,20 @@ func TestBackendCaps(t *testing.T) {
 	if CanonicalBaseURL("ollama-cloud", "") != DefaultOllamaCloudURL {
 		t.Fatal("ollama-cloud default url")
 	}
+
+	oc := Backend{Kind: "opencomfy"}
+	if oc.CanLoad() || oc.CanPull() || oc.Cloud() {
+		t.Fatal("opencomfy caps")
+	}
+	if !RequiresToken(oc.Kind) || oc.Label() != "OpenComfy" || oc.DefaultPort() != "8788" {
+		t.Fatal("opencomfy token/label/port")
+	}
+	if oc.OpenAIChatPath() != "/v1/chat/completions" || oc.ModelsPath() != "/v1/models" {
+		t.Fatal("opencomfy paths")
+	}
+	if CanonicalBaseURL("opencomfy", "http://192.168.88.252:8788/v1/") != "http://192.168.88.252:8788" {
+		t.Fatalf("opencomfy trim /v1: %q", CanonicalBaseURL("opencomfy", "http://192.168.88.252:8788/v1/"))
+	}
 }
 
 func TestSanitizeBackendURL(t *testing.T) {
@@ -94,6 +111,10 @@ func TestSanitizeBackendURL(t *testing.T) {
 	got, err := SanitizeBackendURL("openrouter", "")
 	if err != nil || got != DefaultOpenRouterURL {
 		t.Fatalf("openrouter default %q %v", got, err)
+	}
+	got, err = SanitizeBackendURL("opencomfy", "http://192.168.88.252:8788/v1/")
+	if err != nil || got != "http://192.168.88.252:8788" {
+		t.Fatalf("opencomfy url %q %v", got, err)
 	}
 }
 

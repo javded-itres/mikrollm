@@ -11,6 +11,7 @@ MikroLLM is a gateway. A backend can be a **local process** on the LAN or a **cl
 | **OpenRouter** | `https://openrouter.ai/api/v1` | `/chat/completions` | `/models` | no: models already in the cloud |
 | **vLLM** | `http://<host>:8000` | `/v1/chat/completions` | `/health`, `/v1/models` | no API: the model is the process |
 | **LM Studio** | `http://<host>:1234` | `/v1/chat/completions` | `/api/v1/models` | yes, from admin |
+| **OpenComfy** | `http://<host>:8788` | image chat shim | `/health`, `/v1/models` | no: workflows live on the GPU box |
 
 Clients always talk to MikroLLM (`/v1/chat/completions`). If the client sends `/api/chat` and the backend is not Ollama / Ollama Cloud, the gateway rewrites the path to the provider’s OpenAI-compatible chat.
 
@@ -216,6 +217,35 @@ curl https://ollama.com/api/chat \
   -H "Authorization: Bearer $OLLAMA_API_KEY" \
   -d '{"model":"gpt-oss:120b","messages":[{"role":"user","content":"hi"}],"stream":false}'
 ```
+
+## OpenComfy
+
+Local **image and video** gateway in front of [ComfyUI](https://github.com/comfyanonymous/ComfyUI). Same OpenAI shapes as LiteLLM: `POST /v1/images/generations`, `POST /v1/videos`, poll `GET /v1/videos/{id}`. Not a chat LLM.
+
+1. Run OpenComfy next to ComfyUI (`opencomfy -config …`, listen `:8788`).
+2. Admin → **Add server** → kind **OpenComfy**. URL `http://<gpu>:8788` (**no** `/v1`). API key from OpenComfy `keys.yaml` (`sk-…`).
+3. **Refresh catalogs**. Image/video models appear with media tags (from `/v1/models`, `/v1/images/models`, `/v1/videos/models`).
+4. **Models** → connect the names you need (`flux-dev`, `minimax-hailuo-02`, …) as aliases, same as OpenRouter Flux/Sora.
+
+Clients keep talking to MikroLLM:
+
+```bash
+# images
+curl http://<mikrollm>:4000/v1/images/generations \
+  -H "Authorization: Bearer sk-…" \
+  -d '{"model":"toy-image","prompt":"a red cube"}'
+
+# videos (async job)
+curl http://<mikrollm>:4000/v1/videos \
+  -H "Authorization: Bearer sk-…" \
+  -d '{"model":"minimax-hailuo-02","prompt":"ocean waves","seconds":"6"}'
+```
+
+OpenComfy returns file URLs on `:8788`. MikroLLM inlines same-host URLs as `b64_json` (up to 4 MiB) so the admin playground can render them (`img-src` is `'self' data: blob:` and would otherwise hide the picture).
+
+Playground: pick the model and **image** / **video** (not chat). The right-hand panel loads OpenComfy `parameters` / `required_parameters` (`GET /admin/model-params`). Agents can also talk to OpenComfy `POST /mcp` (one `generate_<id>` tool per workflow, required fields in the schema). Video models are not chat backends — `POST /v1/chat/completions` with a video alias is not the generation path.
+
+Pull/load/delete are hidden: checkpoints and workflow JSON stay on the ComfyUI host.
 
 ## Mixed pool
 

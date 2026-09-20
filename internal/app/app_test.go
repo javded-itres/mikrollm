@@ -15,12 +15,48 @@ const testMCPToken = "mcp-test-token-aaaaaaaaaaaaaaaaaaaaaaaa"
 
 func testApp(t *testing.T) *App {
 	t.Helper()
+	t.Setenv("MIKROLLM_HUB_URL", "http://127.0.0.1:1")
 	a, err := New(Config{DataDir: t.TempDir(), AdminPassword: "secret99", ResetPassword: true, MCPToken: testMCPToken, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.Close() })
 	return a
+}
+
+func TestSeedLocalConnectsOllama(t *testing.T) {
+	t.Helper()
+	t.Setenv("MIKROLLM_HUB_URL", "http://127.0.0.1:1")
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/version":
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{"version":"0.0.0"}`))
+		case "/api/tags":
+			_, _ = w.Write([]byte(`{"models":[{"name":"llama3.2:latest","size":123}]}`))
+		case "/api/ps":
+			_, _ = w.Write([]byte(`{"models":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(up.Close)
+	a, err := New(Config{
+		DataDir: t.TempDir(), AdminPassword: "secret99", ResetPassword: true,
+		MCPToken: testMCPToken, Version: "test", Seed: "local", SeedOllamaURL: up.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	bs, err := a.Store.ListBackends()
+	if err != nil || len(bs) != 1 || bs[0].Name != "ollama" {
+		t.Fatalf("backends %+v %v", bs, err)
+	}
+	ms, err := a.Store.ListModels()
+	if err != nil || len(ms) != 1 || ms[0].Alias != "llama3.2:latest" {
+		t.Fatalf("models %+v %v", ms, err)
+	}
 }
 
 func TestHealthWired(t *testing.T) {
@@ -147,6 +183,36 @@ func TestAdminToggleBackend(t *testing.T) {
 	out := prec.Body.String()
 	if !strings.Contains(out, "Выкл") || !strings.Contains(out, "Включить") {
 		t.Fatalf("disabled card missing toggle: %s", out)
+	}
+}
+
+func TestAdminHubCard(t *testing.T) {
+	a := testApp(t)
+	cookies := login(t, a)
+	page := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	withCookies(page, cookies)
+	prec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(prec, page)
+	body := prec.Body.String()
+	if !strings.Contains(body, "Участник hub сети") {
+		t.Fatal("missing hub card")
+	}
+	m := regexp.MustCompile(`name="csrf-token" content="([^"]+)"`).FindStringSubmatch(body)
+	if len(m) != 2 {
+		t.Fatal("csrf")
+	}
+	form := url.Values{"csrf": {m[1]}, "enabled": {"1"}, "name": {"hap-test"}}.Encode()
+	req := httptest.NewRequest(http.MethodPost, "/admin/hub", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	withCookies(req, cookies)
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 302 {
+		t.Fatalf("save hub %d", rec.Code)
+	}
+	cfg, err := a.Store.HubSettings()
+	if err != nil || !cfg.Enabled || cfg.Name != "hap-test" {
+		t.Fatalf("%+v %v", cfg, err)
 	}
 }
 

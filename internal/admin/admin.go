@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,10 +12,19 @@ import (
 
 	"github.com/javded-itres/mikrollm/internal/auth"
 	"github.com/javded-itres/mikrollm/internal/domain"
+	"github.com/javded-itres/mikrollm/internal/hubclient"
 	"github.com/javded-itres/mikrollm/internal/ports"
 	"github.com/javded-itres/mikrollm/internal/queue"
 	"github.com/javded-itres/mikrollm/internal/web"
 )
+
+type HubClient interface {
+	Status() (state, err string)
+	URL() string
+	Kick()
+	RefreshCatalog()
+	Peers() (selfID string, peers []domain.HubPeer)
+}
 
 type Deps struct {
 	Store  ports.Store
@@ -24,6 +34,7 @@ type Deps struct {
 	Jobs   ports.Jobs
 	Chat   ports.ChatGateway
 	Queues *queue.Engine
+	Hub    HubClient
 }
 
 type UI struct {
@@ -34,6 +45,7 @@ type UI struct {
 	jobs   ports.Jobs
 	chat   ports.ChatGateway
 	queues *queue.Engine
+	hub    HubClient
 	pages  map[string]*template.Template
 	login  *template.Template
 }
@@ -61,7 +73,7 @@ func New(d Deps) *UI {
 		return template.Must(template.New("layout.html").Funcs(fm).ParseFS(web.FS, files...))
 	}
 	return &UI{
-		st: d.Store, health: d.Health, keys: d.Auth, host: d.Host, jobs: d.Jobs, chat: d.Chat, queues: d.Queues,
+		st: d.Store, health: d.Health, keys: d.Auth, host: d.Host, jobs: d.Jobs, chat: d.Chat, queues: d.Queues, hub: d.Hub,
 		login: template.Must(template.New("login.html").Funcs(fm).ParseFS(web.FS, "templates/login.html")),
 		pages: map[string]*template.Template{
 			"dash":     must("templates/layout.html", "templates/dash.html"),
@@ -89,6 +101,9 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/backends/{id}/delete", u.protect(u.delBackend))
 	mux.HandleFunc("POST /admin/password", u.protect(u.password))
 	mux.HandleFunc("POST /admin/mcp/token", u.protect(u.rotateMCP))
+	mux.HandleFunc("POST /admin/hub", u.protect(u.saveHub))
+	mux.HandleFunc("POST /admin/models/{id}/hub-share", u.protect(u.setModelHubShare))
+	mux.HandleFunc("POST /admin/models/hub-bulk", u.protect(u.bulkHubShare))
 	mux.HandleFunc("GET /admin/models", u.protect(u.models))
 	mux.HandleFunc("POST /admin/models", u.protect(u.saveModel))
 	mux.HandleFunc("POST /admin/models/connect", u.protect(u.connectModels))
@@ -112,6 +127,7 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/videos", u.protect(u.videosPost))
 	mux.HandleFunc("GET /admin/videos/{id}", u.protect(u.videoStatus))
 	mux.HandleFunc("GET /admin/videos/{id}/content", u.protect(u.videoContent))
+	mux.HandleFunc("GET /admin/model-params", u.protect(u.modelParams))
 	mux.HandleFunc("GET /admin/logs", u.protect(u.logs))
 	mux.HandleFunc("GET /admin/billing", u.protect(u.billing))
 	mux.HandleFunc("GET /admin/security", u.protect(u.securityPage))
@@ -238,14 +254,106 @@ func (u *UI) dash(w http.ResponseWriter, r *http.Request) {
 			billedUSD += l.UsageCost
 		}
 	}
+	hubCfg, _ := u.st.HubSettings()
+	hubURL := hubclient.HubURL()
+	hubState, hubErr := "off", ""
+	if u.hub != nil {
+		hubState, hubErr = u.hub.Status()
+		if u.hub.URL() != "" {
+			hubURL = u.hub.URL()
+		}
+	}
+	hubLabel := "выкл"
+	switch hubState {
+	case "online":
+		hubLabel = "в сети"
+	case "error":
+		hubLabel = "ошибка"
+	}
+	if hubCfg.Name == "" {
+		hubCfg.Name, _ = os.Hostname()
+	}
 	u.render(w, r, "dash", map[string]any{
 		"Title": "Статус", "Nav": "dash", "Backends": vms,
 		"Up": up, "Total": len(vms), "AliasCount": len(aliases),
 		"Queues": qviews, "QueueLive": waitN,
 		"CacheTokens": cacheTok, "SavedUSD": savedUSD, "UsageCost": billedUSD,
 		"MCPPrefix": prefix, "NewMCPToken": newMCP,
+		"HubURL": hubURL, "HubEnabled": hubCfg.Enabled, "HubName": hubCfg.Name,
+		"HubNodeID": hubCfg.NodeID, "HubState": hubState, "HubLabel": hubLabel, "HubError": hubErr,
 		"Flash": flash, "Error": errMsg(r.URL.Query().Get("err")),
 	})
+}
+
+func (u *UI) saveHub(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	cfg, err := u.st.HubSettings()
+	if err != nil {
+		http.Redirect(w, r, "/admin?err="+err.Error(), http.StatusFound)
+		return
+	}
+	cfg.Name = strings.TrimSpace(r.FormValue("name"))
+	if cfg.Name == "" {
+		cfg.Name, _ = os.Hostname()
+	}
+	cfg.Enabled = parseEnabled(r.FormValue("enabled"))
+	if err := u.st.SetHubSettings(cfg); err != nil {
+		http.Redirect(w, r, "/admin?err="+err.Error(), http.StatusFound)
+		return
+	}
+	if u.hub != nil {
+		u.hub.Kick()
+	}
+	http.Redirect(w, r, "/admin?ok=hub_saved", http.StatusFound)
+}
+
+func (u *UI) setModelHubShare(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	_ = r.ParseForm()
+	m, err := u.st.GetModel(id)
+	if err != nil {
+		http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
+		return
+	}
+	m.HubShare = parseEnabled(r.FormValue("hub_share"))
+	if _, err := u.st.SaveModel(m); err != nil {
+		http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
+		return
+	}
+	if u.hub != nil {
+		u.hub.Kick()
+	}
+	http.Redirect(w, r, "/admin/models?ok=hub_share_saved", http.StatusFound)
+}
+
+func (u *UI) bulkHubShare(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	share := parseEnabled(r.FormValue("hub_share"))
+	n := 0
+	for _, raw := range r.Form["id"] {
+		id, _ := strconv.ParseInt(raw, 10, 64)
+		if id <= 0 {
+			continue
+		}
+		m, err := u.st.GetModel(id)
+		if err != nil || m.HubNodeID != "" {
+			continue
+		}
+		m.HubShare = share
+		if _, err := u.st.SaveModel(m); err != nil {
+			http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
+			return
+		}
+		n++
+	}
+	if u.hub != nil {
+		u.hub.Kick()
+	}
+	if n == 0 {
+		http.Redirect(w, r, "/admin/models?err=select_models", http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, "/admin/models?ok=hub_share_saved", http.StatusFound)
 }
 
 func (u *UI) refresh(w http.ResponseWriter, r *http.Request) {
@@ -370,6 +478,8 @@ type catalogHost struct {
 	CanLoad   bool
 	CanDelete bool
 	Cloud     bool
+	Hub       bool
+	Online    bool
 	Hint      string
 }
 
@@ -382,7 +492,13 @@ type catalogVM struct {
 	CtxLabel     string
 	PriceLabel   string
 	PriceBand    string
+	CheckValue   string
+	ServersCSV   string
 	Hosts        []catalogHost
+}
+
+type serverOpt struct {
+	Value, Label, Group string
 }
 
 func (u *UI) models(w http.ResponseWriter, r *http.Request) {
@@ -405,11 +521,20 @@ func (u *UI) models(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	connected := map[string]bool{}
+	hubConnected := map[string]bool{}
 	var vms []modelVM
 	for _, m := range ms {
 		var names []string
 		for _, id := range m.BackendIDs {
 			names = append(names, bmap[id].Name)
+		}
+		if m.HubNodeID != "" {
+			if m.HubNodeName != "" {
+				names = []string{m.HubNodeName}
+			} else {
+				names = []string{"hub"}
+			}
+			hubConnected[m.HubNodeID+"|"+m.UpstreamName] = true
 		}
 		vm := modelVM{Model: m, BackendNames: strings.Join(names, ", ")}
 		if len(vm.Media) == 0 {
@@ -430,14 +555,39 @@ func (u *UI) models(w http.ResponseWriter, r *http.Request) {
 		for _, n := range e.LoadedOn {
 			loaded[n] = true
 		}
+		on := connected[e.Name]
+		check := e.Name
+		servers := e.BackendNames
+		if e.HubNodeID != "" {
+			on = hubConnected[e.HubNodeID+"|"+e.Name]
+			check = "hub|" + e.HubNodeID + "|" + e.Name
+			servers = []string{e.HubNodeName}
+			if e.HubNodeName == "" {
+				servers = []string{e.HubNodeID}
+			}
+		}
 		item := catalogVM{
-			CatalogEntry: e, Connected: connected[e.Name],
+			CatalogEntry: e, Connected: on, CheckValue: check,
 			BackendLabel: strings.Join(e.BackendNames, ", "),
 			SizeLabel:    humanSize(e.Size),
 			LoadedLabel:  strings.Join(e.LoadedOn, ", "),
 			CtxLabel:     domain.FormatContext(e.Context),
 			PriceLabel:   domain.FormatCatalogPrice(e.Priced, e.PromptUSD, e.CompletionUSD, e.ImageUSD, e.ImageTokUSD, e.VideoSecUSD),
 			PriceBand:    domain.PriceBand(e.Priced, domain.PriceBandValue(e.PromptUSD, e.ImageUSD, e.ImageTokUSD, e.VideoSecUSD)),
+			ServersCSV:   strings.Join(servers, ","),
+		}
+		if e.HubNodeID != "" {
+			short := e.HubNodeName
+			if short == "" {
+				short = e.HubNodeID
+				if len(short) > 8 {
+					short = short[:8]
+				}
+			}
+			item.Hosts = append(item.Hosts, catalogHost{
+				Name: e.HubNodeName, Short: short, Kind: domain.KindHub, Label: "Hub",
+				Hub: true, Online: e.HubOnline, Hint: "Модель на другом MikroLLM через hub",
+			})
 		}
 		for i, id := range e.BackendIDs {
 			name := e.BackendNames[i]
@@ -495,10 +645,29 @@ func (u *UI) models(w http.ResponseWriter, r *http.Request) {
 		providers = append(providers, p)
 	}
 	sort.Strings(providers)
+	var servers []serverOpt
+	for _, b := range bs {
+		if !b.Enabled {
+			continue
+		}
+		servers = append(servers, serverOpt{Value: b.Name, Label: b.Name + " · " + b.Label(), Group: "local"})
+	}
+	if u.hub != nil {
+		_, peers := u.hub.Peers()
+		for _, p := range peers {
+			lb := p.Name
+			if p.Online {
+				lb += " · онлайн"
+			} else {
+				lb += " · офлайн"
+			}
+			servers = append(servers, serverOpt{Value: p.Name, Label: lb, Group: "hub"})
+		}
+	}
 	u.render(w, r, "models", map[string]any{
 		"Title": "Модели", "Nav": "models", "Models": vms, "Backends": bs,
 		"PullBackends": pullers, "HasVLLM": hasVLLM, "HasCloud": hasCloud,
-		"Catalog": cat, "Available": available, "Providers": providers,
+		"Catalog": cat, "Available": available, "Providers": providers, "Servers": servers,
 		"PromptCache": u.st.PromptCacheMode(),
 		"Flash":       flashMsg(r.URL.Query().Get("ok")), "Error": errMsg(r.URL.Query().Get("err")),
 	})
@@ -514,6 +683,29 @@ func (u *UI) connectModels(w http.ResponseWriter, r *http.Request) {
 	}
 	n := 0
 	for _, name := range r.Form["model"] {
+		if strings.HasPrefix(name, "hub|") {
+			parts := strings.SplitN(strings.TrimPrefix(name, "hub|"), "|", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			nodeID, alias := parts[0], parts[1]
+			var e domain.CatalogEntry
+			for _, c := range cat {
+				if c.HubNodeID == nodeID && c.Name == alias {
+					e = c
+					break
+				}
+			}
+			if e.HubNodeID == "" {
+				continue
+			}
+			if err := u.st.ConnectHubModel(alias, e.HubNodeID, e.HubNodeName, e.Context, e.Media); err != nil {
+				http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
+				return
+			}
+			n++
+			continue
+		}
 		e, ok := byName[name]
 		if !ok || len(e.BackendIDs) == 0 {
 			continue
@@ -565,16 +757,36 @@ func (u *UI) saveModel(w http.ResponseWriter, r *http.Request) {
 				if m.UpstreamName == "" {
 					m.UpstreamName = e.Name
 				}
-				break
+				if m.HubNodeID == "" {
+					m.HubNodeID = e.HubNodeID
+					m.HubNodeName = e.HubNodeName
+				}
+				if len(m.Media) == 0 {
+					m.Media = e.Media
+				}
+				if len(m.BackendIDs) > 0 {
+					break
+				}
 			}
 		}
 	}
-	if len(m.BackendIDs) == 0 {
-		http.Redirect(w, r, "/admin/models?err=no_backend", http.StatusFound)
-		return
-	}
 	if existing, err := u.st.GetModelByAlias(m.Alias); err == nil {
 		m.ID = existing.ID
+		m.HubShare = existing.HubShare
+		if m.PromptCache == "" {
+			m.PromptCache = existing.PromptCache
+		}
+		if len(m.Media) == 0 {
+			m.Media = existing.Media
+		}
+		if m.HubNodeID == "" {
+			m.HubNodeID = existing.HubNodeID
+			m.HubNodeName = existing.HubNodeName
+		}
+	}
+	if len(m.BackendIDs) == 0 && m.HubNodeID == "" {
+		http.Redirect(w, r, "/admin/models?err=no_backend", http.StatusFound)
+		return
 	}
 	if _, err := u.st.SaveModel(m); err != nil {
 		http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
@@ -1032,6 +1244,10 @@ func flashMsg(code string) string {
 		return "Запасная модель сохранена."
 	case "prompt_cache_saved":
 		return "Настройка prompt cache сохранена."
+	case "hub_saved":
+		return "Настройка hub сохранена. Клиент сам зарегистрируется на хабе."
+	case "hub_share_saved":
+		return "Публикация alias в hub обновлена."
 	case "queue_saved":
 		return "Очередь сохранена."
 	case "queue_deleted":
@@ -1048,11 +1264,11 @@ func errMsg(code string) string {
 	case "select_models":
 		return "Выберите хотя бы одну модель."
 	case "no_backend":
-		return "Нет живого сервера с этой моделью. Нажмите «Обновить»."
+		return "Нет живого сервера с этой моделью. Нажмите «Обновить каталоги». Для OpenComfy: тип OpenComfy, URL без /v1, ключ sk-…, карточка online со списком моделей, затем «В шлюз»."
+	case "token+required":
+		return "Для OpenRouter, Ollama Cloud и OpenComfy нужен API-ключ."
 	case "name+and+url+required":
 		return "Нужны имя и URL."
-	case "token+required":
-		return "Для OpenRouter и Ollama Cloud нужен API-ключ."
 	case "min+6+chars", "min+8+chars":
 		return "Пароль не короче 8 символов."
 	default:

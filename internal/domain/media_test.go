@@ -16,3 +16,15 @@ func TestInferMedia(t *testing.T) {
 		t.Fatal("text-only")
 	}
 }
+
+func TestExclusiveMedia(t *testing.T) {
+	if ExclusiveMedia(InferMedia("minimax-hailuo-02", nil)) != MediaVideo {
+		t.Fatal("hailuo")
+	}
+	if ExclusiveMedia([]string{MediaImage}) != MediaImage {
+		t.Fatal("image")
+	}
+	if ExclusiveMedia(nil) != "" {
+		t.Fatal("chat")
+	}
+}
