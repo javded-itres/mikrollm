@@ -61,6 +61,8 @@ launchctl unload ~/Library/LaunchAgents/app.mikrollm.plist
 systemctl --user disable --now mikrollm.service
 ```
 
+Роутеры Keenetic — другой путь (Entware, не этот скрипт): [install-keenetic.md](install-keenetic.md).
+
 ## Windows
 
 Отдельного инсталлятора нет. [WSL](https://learn.microsoft.com/windows/wsl) и та же строка `curl … | sh` внутри дистрибутива. Нативный бинарь: `GOOS=windows go build ./cmd/mikrollm`.

@@ -72,6 +72,7 @@ An empty data dir **seeds** two backends `mac-82` / `mac-80` at `192.168.88.80/8
 | Dev machine with Go | [docs/install-local.md](docs/install-local.md) |
 | Linux server, Docker or systemd | [docs/install-docker.md](docs/install-docker.md) |
 | MikroTik RouterOS 7 container | [docs/install-mikrotik.md](docs/install-mikrotik.md) |
+| KeeneticOS (Entware) | [docs/install-keenetic.md](docs/install-keenetic.md) |
 | HTTPS | [docs/tls.md](docs/tls.md) |
 | Admin: models, RAM, keys, chat | [docs/admin.md](docs/admin.md) |
 | Ollama / Cloud / OpenRouter / vLLM / LM Studio | [docs/providers.md](docs/providers.md) |

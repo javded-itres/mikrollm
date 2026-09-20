@@ -6,6 +6,9 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+- **KeeneticOS:** Entware install (no Docker). `scripts/install-keenetic.sh` + `make build-keenetic` (`linux/arm64`: Peak / Ultra KN-1811 / Giga KN-1012 / Hopper KN-3811). MIPS waits on SQLite. [docs/install-keenetic.md](docs/install-keenetic.md)
+- Hub share **schedule** on Status (daily or selected weekdays + time window + timezone). Catalog shows the window and “not now”; relay is 503 outside it. **Rating** is lifetime minutes seen on the hub; Hub UI and Models filters **Top 10 / Top 100**.
+
 ## 0.0.5 — 2026-09-20
 
 - Compiled hub URL is `https://hub.mikrollm.ru` (`MIKROLLM_HUB_URL` still overrides). Hub guide: [docs/hub.md](docs/hub.md).

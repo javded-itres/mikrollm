@@ -29,6 +29,6 @@ See CHANGELOG.md for the full list.
 EOF
 ```
 
-Attach `dist/mikrollm` (arm64), `dist/mikrollm-linux-amd64` if built, and `dist/mikrollm-ros-legacy.tar`.
+Attach `dist/mikrollm` (arm64), `dist/mikrollm-linux-amd64` if built, and `dist/mikrollm-ros-legacy.tar`. The arm64 binary is also the Keenetic Entware asset (`make build-keenetic`).
 
 Do not paste RouterOS or admin passwords into release notes.

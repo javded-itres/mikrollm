@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- **KeeneticOS:** установка через Entware (без Docker). `scripts/install-keenetic.sh` + `make build-keenetic` (`linux/arm64`: Peak / Ultra KN-1811 / Giga KN-1012 / Hopper KN-3811). MIPS ждёт SQLite. [docs/ru/install-keenetic.md](docs/ru/install-keenetic.md)
+- **Расписание шаринга** на Статусе (каждый день или выбранные дни + окно + пояс). В каталоге hub видно окно и «не сейчас»; вне окна relay 503. **Рейтинг** — минуты в сети; фильтры **топ 10 / топ 100**.
+
 ## 0.0.5 — 2026-09-20
 
 - Зашитый адрес hub — `https://hub.mikrollm.ru` (`MIKROLLM_HUB_URL` по-прежнему переопределяет). Инструкция: [docs/ru/hub.md](docs/ru/hub.md).

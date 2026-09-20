@@ -61,6 +61,8 @@ launchctl unload ~/Library/LaunchAgents/app.mikrollm.plist
 systemctl --user disable --now mikrollm.service
 ```
 
+Keenetic routers use a different path (Entware, not this desktop installer): [install-keenetic.md](install-keenetic.md).
+
 ## Windows
 
 No first-class installer. Use [WSL](https://learn.microsoft.com/windows/wsl) and the same `curl … | sh` line inside the Linux distro. Building a native Windows binary is `GOOS=windows go build ./cmd/mikrollm`.

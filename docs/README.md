@@ -10,6 +10,7 @@ English is the default. Russian copies live in [ru/](ru/README.md). GitHub Relea
 | [install-local.md](install-local.md) | Run from source, flags, data dir |
 | [install-docker.md](install-docker.md) | Docker and systemd on a server |
 | [install-mikrotik.md](install-mikrotik.md) | RouterOS 7 container, veth, dst-nat, USB |
+| [install-keenetic.md](install-keenetic.md) | KeeneticOS Entware (USB, no Docker) |
 | [tls.md](tls.md) | HTTPS: your PEM or in-process self-signed |
 | [admin.md](admin.md) | Admin: servers, queues, models, RAM, keys, chat, log, billing |
 | [security.md](security.md) | Filters, system prompt, prompt injection |

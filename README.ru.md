@@ -72,6 +72,7 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 | Разработка на машине с Go | [docs/install-local.md](docs/ru/install-local.md) |
 | Linux-сервер, Docker или systemd | [docs/install-docker.md](docs/ru/install-docker.md) |
 | Контейнер MikroTik RouterOS 7 | [docs/install-mikrotik.md](docs/ru/install-mikrotik.md) |
+| KeeneticOS (Entware) | [docs/install-keenetic.md](docs/ru/install-keenetic.md) |
 | HTTPS | [docs/tls.md](docs/ru/tls.md) |
 | Админка: модели, RAM, ключи, чат | [docs/admin.md](docs/ru/admin.md) |
 | Ollama / Cloud / OpenRouter / vLLM / LM Studio | [docs/providers.md](docs/ru/providers.md) |
