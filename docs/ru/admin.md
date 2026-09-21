@@ -72,6 +72,7 @@ Health-check сам повторяется каждые 10 секунд.
 7. **Запасная модель** у alias: если апстрим вернул 402 / «кончились кредиты / подписка / квота», шлюз повторяет запрос на выбранный alias (ключ должен его разрешать). Цепочка до 4 шагов, без циклов.
 8. **Prompt cache** (глобально над таблицей alias и колонка «Кэш»): `auto` ставит Claude `cache_control` (первый ход 1.25× write). `off` выключает инжект. На дашборде — сумма `cached_tokens` и оценка $. [providers.md](providers.md#prompt-cache).
 9. **Hub** у alias: **в hub** публикует его в облачный каталог, если включён **Участник hub сети** (chat, картинки и видео). Чужие строки — **В шлюз**. [hub.md](hub.md).
+10. **Параметры** у alias — дефолтные настройки генерации, подставляемые в каждый проксируемый чат-запрос: `think` (`true`/`false`/`low`/`medium`/`high`/`max`), `temperature`, `num_predict`, `num_ctx` + произвольный JSON (`top_p`, `seed`, `x_…`). Поле, присланное клиентом, важнее профиля; галка `lock` перекрывает и его. Перевод по провайдеру: Ollama `/v1/chat/completions` → `reasoning_effort`/`max_tokens`, нейтивный `/api/chat` → `options.*` + верхнеуровневый `think` (только там работает `num_ctx`), OpenRouter → `reasoning`, vLLM/LM Studio → `chat_template_kwargs`. MCP: `save_model` принимает `params` объектом.
 
 Политики балансировки:
 

@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -131,6 +132,97 @@ func TestForwardHubToolCalls(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestParamsInjectedInProxy(t *testing.T) {
+	st, h, _, px, _ := setup(t)
+	var mu sync.Mutex
+	var captured []byte
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost:
+			mu.Lock()
+			captured, _ = io.ReadAll(r.Body)
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+		case r.URL.Path == "/api/version":
+			w.Write([]byte(`{"version":"0"}`))
+		case r.URL.Path == "/api/tags":
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]string{{"name": "qwen"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(up.Close)
+	bid, err := st.UpsertBackend("mac", up.URL, true, 1, "ollama", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SaveModel(store.Model{
+		Alias: "coder", UpstreamName: "qwen", Enabled: true, BackendIDs: []int64{bid},
+		Params: `{"think":"low","temperature":0.15,"num_predict":300}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.CheckOnce()
+	time.Sleep(10 * time.Millisecond)
+
+	post := func(body string) map[string]any {
+		mu.Lock()
+		captured = nil
+		mu.Unlock()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		px.ServeChat(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("%d %s", rec.Code, rec.Body.String())
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		var m map[string]any
+		if err := json.Unmarshal(captured, &m); err != nil {
+			t.Fatalf("upstream body not json: %s", captured)
+		}
+		return m
+	}
+
+	m := post(`{"model":"coder","messages":[{"role":"user","content":"hi"}]}`)
+	if m["temperature"] != 0.15 || m["max_tokens"] != float64(300) || m["reasoning_effort"] != "low" {
+		t.Fatalf("profile not injected: %v", m)
+	}
+
+	m = post(`{"model":"coder","messages":[],"temperature":0.9,"max_tokens":42}`)
+	if m["temperature"] != 0.9 || m["max_tokens"] != float64(42) {
+		t.Fatalf("client params lost: %v", m)
+	}
+	if m["reasoning_effort"] != "low" {
+		t.Fatalf("think still filled: %v", m)
+	}
+
+	// Native /api/chat needs a key; the profile must land in options/think there.
+	plain, prefix, hash, err := auth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.InsertKey(store.APIKey{Name: "t", Prefix: prefix, KeyHash: hash, AllowedModels: []string{"*"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"model":"coder","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Authorization", "Bearer "+plain)
+	rec := httptest.NewRecorder()
+	px.OllamaChat(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	var m2 map[string]any
+	if err := json.Unmarshal(captured, &m2); err != nil {
+		t.Fatalf("native body not json: %s", captured)
+	}
+	opts, _ := m2["options"].(map[string]any)
+	if opts["temperature"] != 0.15 || opts["num_predict"] != float64(300) || m2["think"] != "low" {
+		t.Fatalf("native params not injected: %v", m2)
+	}
 }
 
 func TestHubRelaySkipsAPIKey(t *testing.T) {

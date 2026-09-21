@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- **Профиль параметров у alias**: дефолты генерации (`think` true/false/low/medium/high/max, `temperature`, `num_predict`, `num_ctx`, `top_p`, `seed`, `x_*`) хранятся на алиасе и подставляются в каждый проксируемый чат-запрос — колонка «Параметры» на Models и `params` в MCP `save_model`. Поля клиента важнее; `lock` форсит значение профиля. Перевод по провайдеру: Ollama `/v1` → `reasoning_effort`/`max_tokens`, нейтивный `/api/chat` → `options.*` + `think` (только там работает `num_ctx`), OpenRouter → `reasoning`, vLLM / LM Studio → `chat_template_kwargs`. Панель playground показывает профиль как дефолты.
+
 ## 0.0.8 — 2026-09-21
 
 - **Инструменты работают через hub-алиасы**: релейный ответ чата теперь сохраняет `tool_calls`, `finish_reason`, `id`, `model` и `usage` (раньше выживали только `content`/`reasoning`, поэтому агенты видели пустые ответы). Стриминг-клиенты получают корректные SSE-чанки с `finish_reason`. Не-чат релей по-прежнему отдаётся как есть.

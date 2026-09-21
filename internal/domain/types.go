@@ -29,10 +29,13 @@ type Model struct {
 	MaxContext   int
 	Fallback     string
 	PromptCache  string
-	Media        []string
-	HubShare     bool
-	HubNodeID    string
-	HubNodeName  string
+	// Params is the alias params profile JSON (see internal/params):
+	// {"think":"low","temperature":0.2,"locked":["think"],...}. Empty = off.
+	Params      string
+	Media       []string
+	HubShare    bool
+	HubNodeID   string
+	HubNodeName string
 }
 
 type HubPeerAlias struct {

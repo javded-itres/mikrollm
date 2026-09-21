@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS ollama_jobs (
 	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN hub_share INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN hub_node_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN hub_node_name TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.DB.Exec(`ALTER TABLE models ADD COLUMN params TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN mcp_token_hash TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN mcp_token_prefix TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN prompt_cache TEXT NOT NULL DEFAULT 'auto'`)
@@ -408,7 +409,7 @@ func (s *Store) DeleteBackend(id int64) error {
 }
 
 func (s *Store) ListModels() ([]Model, error) {
-	rows, err := s.DB.Query(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media, hub_share, hub_node_id, hub_node_name FROM models ORDER BY alias`)
+	rows, err := s.DB.Query(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media, hub_share, hub_node_id, hub_node_name, params FROM models ORDER BY alias`)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +439,7 @@ func (s *Store) ListModels() ([]Model, error) {
 }
 
 func (s *Store) GetModel(id int64) (Model, error) {
-	m, err := scanModelRow(s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media, hub_share, hub_node_id, hub_node_name FROM models WHERE id=?`, id))
+	m, err := scanModelRow(s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media, hub_share, hub_node_id, hub_node_name, params FROM models WHERE id=?`, id))
 	if err != nil {
 		return m, err
 	}
@@ -447,7 +448,7 @@ func (s *Store) GetModel(id int64) (Model, error) {
 }
 
 func (s *Store) GetModelByAlias(alias string) (Model, error) {
-	m, err := scanModelRow(s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media, hub_share, hub_node_id, hub_node_name FROM models WHERE alias=?`, alias))
+	m, err := scanModelRow(s.DB.QueryRow(`SELECT id, alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media, hub_share, hub_node_id, hub_node_name, params FROM models WHERE alias=?`, alias))
 	if err != nil {
 		return m, err
 	}
@@ -459,7 +460,7 @@ func scanModelRow(r rowScanner) (Model, error) {
 	var m Model
 	var en, share int
 	var media string
-	if err := r.Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en, &m.MaxContext, &m.Fallback, &m.PromptCache, &media, &share, &m.HubNodeID, &m.HubNodeName); err != nil {
+	if err := r.Scan(&m.ID, &m.Alias, &m.UpstreamName, &m.LBPolicy, &en, &m.MaxContext, &m.Fallback, &m.PromptCache, &media, &share, &m.HubNodeID, &m.HubNodeName, &m.Params); err != nil {
 		return m, err
 	}
 	m.Enabled = en == 1
@@ -522,8 +523,8 @@ func (s *Store) SaveModel(m Model) (int64, error) {
 			m.HubShare = false
 			share = 0
 		}
-		res, err := s.DB.Exec(`INSERT INTO models (alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media, hub_share, hub_node_id, hub_node_name) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-			m.Alias, m.UpstreamName, m.LBPolicy, en, m.MaxContext, m.Fallback, m.PromptCache, domain.JoinMedia(m.Media), share, m.HubNodeID, m.HubNodeName)
+		res, err := s.DB.Exec(`INSERT INTO models (alias, upstream_name, lb_policy, enabled, max_context, fallback, prompt_cache, media, hub_share, hub_node_id, hub_node_name, params) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+			m.Alias, m.UpstreamName, m.LBPolicy, en, m.MaxContext, m.Fallback, m.PromptCache, domain.JoinMedia(m.Media), share, m.HubNodeID, m.HubNodeName, m.Params)
 		if err != nil {
 			return 0, err
 		}
@@ -534,8 +535,8 @@ func (s *Store) SaveModel(m Model) (int64, error) {
 			m.HubShare = false
 			share = 0
 		}
-		_, err := s.DB.Exec(`UPDATE models SET alias=?, upstream_name=?, lb_policy=?, enabled=?, max_context=?, fallback=?, prompt_cache=?, media=?, hub_share=?, hub_node_id=?, hub_node_name=? WHERE id=?`,
-			m.Alias, m.UpstreamName, m.LBPolicy, en, m.MaxContext, m.Fallback, m.PromptCache, domain.JoinMedia(m.Media), share, m.HubNodeID, m.HubNodeName, m.ID)
+		_, err := s.DB.Exec(`UPDATE models SET alias=?, upstream_name=?, lb_policy=?, enabled=?, max_context=?, fallback=?, prompt_cache=?, media=?, hub_share=?, hub_node_id=?, hub_node_name=?, params=? WHERE id=?`,
+			m.Alias, m.UpstreamName, m.LBPolicy, en, m.MaxContext, m.Fallback, m.PromptCache, domain.JoinMedia(m.Media), share, m.HubNodeID, m.HubNodeName, m.Params, m.ID)
 		if err != nil {
 			return 0, err
 		}

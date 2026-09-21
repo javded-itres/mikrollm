@@ -208,7 +208,7 @@
   <div class="table-wrap">
     <table class="tbl">
       <thead>
-        <tr><th class="col-check"></th><th>Клиентам</th><th>На сервере</th><th>Провайдер</th><th>Цена 1M</th><th>Серверы</th><th>Контекст</th><th>Запасная</th><th>Кэш</th><th>Hub</th><th>LB</th><th class="col-act"></th></tr>
+        <tr><th class="col-check"></th><th>Клиентам</th><th>На сервере</th><th>Провайдер</th><th>Цена 1M</th><th>Серверы</th><th>Контекст</th><th>Запасная</th><th>Кэш</th><th>Параметры</th><th>Hub</th><th>LB</th><th class="col-act"></th></tr>
       </thead>
       <tbody>
         {{range $m := .Models}}
@@ -255,6 +255,45 @@
               </select>
               <button class="btn-sm" type="submit">OK</button>
             </form>
+          </td>
+          <td>
+            <details class="params-editor">
+              <summary>{{if $m.ParamsSet}}<span class="pill" title="Дефолты подставляются в запросы, если клиент их не задал">заданы</span>{{else}}<span class="muted small">по умолч.</span>{{end}}</summary>
+              <form method="post" action="/admin/models/{{$m.ID}}/params" class="params-form">
+                <label>think
+                  <select name="think" title="Рассуждение: для Ollama /v1 уходит как reasoning_effort, для /api/chat — как think, OpenRouter — reasoning, vLLM/LM Studio — chat_template_kwargs">
+                    <option value="" {{if eq $m.ParamsThink ""}}selected{{end}}>не задан</option>
+                    <option value="true" {{if eq $m.ParamsThink "true"}}selected{{end}}>true</option>
+                    <option value="false" {{if eq $m.ParamsThink "false"}}selected{{end}}>false</option>
+                    <option value="low" {{if eq $m.ParamsThink "low"}}selected{{end}}>low</option>
+                    <option value="medium" {{if eq $m.ParamsThink "medium"}}selected{{end}}>medium</option>
+                    <option value="high" {{if eq $m.ParamsThink "high"}}selected{{end}}>high</option>
+                    <option value="max" {{if eq $m.ParamsThink "max"}}selected{{end}}>max</option>
+                  </select>
+                </label>
+                <label>temperature
+                  <input type="number" name="temperature" min="0" max="2" step="0.05" value="{{$m.ParamsTemp}}" placeholder="—">
+                </label>
+                <label>num_predict
+                  <input type="number" name="num_predict" min="1" step="256" value="{{$m.ParamsPredict}}" placeholder="—" title="Макс. токенов ответа; для OpenAI-пути уходит как max_tokens">
+                </label>
+                <label>num_ctx
+                  <input type="number" name="num_ctx" min="1024" step="1024" value="{{$m.ParamsCtx}}" placeholder="—" title="Контекст Ollama; работает только через /api/chat">
+                </label>
+                <div class="mlock muted small" title="lock — перезаписать даже если клиент прислал своё значение">
+                  lock:
+                  <label><input type="checkbox" name="lock" value="think" {{if $m.LockThink}}checked{{end}}> think</label>
+                  <label><input type="checkbox" name="lock" value="temperature" {{if $m.LockTemp}}checked{{end}}> temp</label>
+                  <label><input type="checkbox" name="lock" value="num_predict" {{if $m.LockPredict}}checked{{end}}> predict</label>
+                  <label><input type="checkbox" name="lock" value="num_ctx" {{if $m.LockCtx}}checked{{end}}> ctx</label>
+                </div>
+                <label>extra JSON
+                  <textarea name="extra" rows="2" placeholder='{"top_p":0.9,"seed":42,"x_key":…}'>{{$m.ParamsExtra}}</textarea>
+                </label>
+                <button class="btn-sm" type="submit">Сохранить</button>
+                <div class="muted small">Пустое поле — не подставлять. Клиентские значения важнее профиля, кроме lock.</div>
+              </form>
+            </details>
           </td>
           <td>
             {{if $m.HubNodeID}}

@@ -1,9 +1,11 @@
 package admin
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 	"github.com/javded-itres/mikrollm/internal/auth"
 	"github.com/javded-itres/mikrollm/internal/domain"
 	"github.com/javded-itres/mikrollm/internal/hubclient"
+	"github.com/javded-itres/mikrollm/internal/params"
 	"github.com/javded-itres/mikrollm/internal/ports"
 	"github.com/javded-itres/mikrollm/internal/queue"
 	"github.com/javded-itres/mikrollm/internal/web"
@@ -118,6 +121,7 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/models/{id}/context", u.protect(u.setModelContext))
 	mux.HandleFunc("POST /admin/models/{id}/fallback", u.protect(u.setModelFallback))
 	mux.HandleFunc("POST /admin/models/{id}/prompt-cache", u.protect(u.setModelPromptCache))
+	mux.HandleFunc("POST /admin/models/{id}/params", u.protect(u.setModelParams))
 	mux.HandleFunc("POST /admin/prompt-cache", u.protect(u.setPromptCache))
 	mux.HandleFunc("GET /admin/ollama/jobs", u.protect(u.ollamaJobs))
 	mux.HandleFunc("POST /admin/ollama/{id}/pull", u.protect(u.ollamaPull))
@@ -527,6 +531,17 @@ type modelVM struct {
 	Provider     string
 	PriceLabel   string
 	FallbackOK   bool
+	// Params profile for the alias params editor.
+	ParamsSet     bool
+	ParamsThink   string
+	ParamsTemp    string
+	ParamsPredict string
+	ParamsCtx     string
+	ParamsExtra   string
+	LockThink     bool
+	LockTemp      bool
+	LockPredict   bool
+	LockCtx       bool
 }
 
 type catalogHost struct {
@@ -598,6 +613,7 @@ func (u *UI) models(w http.ResponseWriter, r *http.Request) {
 			hubConnected[m.HubNodeID+"|"+m.UpstreamName] = true
 		}
 		vm := modelVM{Model: m, BackendNames: strings.Join(names, ", ")}
+		fillParamsVM(&vm)
 		if len(vm.Media) == 0 {
 			vm.Media = domain.InferMedia(m.Alias, nil)
 			vm.Media = domain.MergeMedia(vm.Media, domain.InferMedia(m.UpstreamName, nil))
@@ -838,6 +854,9 @@ func (u *UI) saveModel(w http.ResponseWriter, r *http.Request) {
 	if existing, err := u.st.GetModelByAlias(m.Alias); err == nil {
 		m.ID = existing.ID
 		m.HubShare = existing.HubShare
+		if m.Params == "" {
+			m.Params = existing.Params
+		}
 		if m.PromptCache == "" {
 			m.PromptCache = existing.PromptCache
 		}
@@ -936,6 +955,124 @@ func (u *UI) setModelPromptCache(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin/models?ok=prompt_cache_saved", http.StatusFound)
+}
+
+// fillParamsVM parses the stored profile and prepares the alias params editor.
+func fillParamsVM(vm *modelVM) {
+	pr, err := params.ParseProfile(vm.Params)
+	if err != nil {
+		return
+	}
+	num := func(key string) string {
+		v, ok := pr.Values[key]
+		if !ok {
+			return ""
+		}
+		switch t := v.(type) {
+		case float64:
+			if t == float64(int64(t)) {
+				return strconv.FormatInt(int64(t), 10)
+			}
+			return strconv.FormatFloat(t, 'f', -1, 64)
+		}
+		return ""
+	}
+	if v, ok := pr.Values["think"]; ok {
+		switch t := v.(type) {
+		case bool:
+			vm.ParamsThink = strconv.FormatBool(t)
+		case string:
+			vm.ParamsThink = t
+		}
+	}
+	vm.ParamsTemp = num("temperature")
+	vm.ParamsPredict = num("num_predict")
+	vm.ParamsCtx = num("num_ctx")
+	vm.LockThink = pr.Locked["think"]
+	vm.LockTemp = pr.Locked["temperature"]
+	vm.LockPredict = pr.Locked["num_predict"]
+	vm.LockCtx = pr.Locked["num_ctx"]
+	if len(pr.Extra) > 0 {
+		if b, mErr := json.Marshal(pr.Extra); mErr == nil {
+			vm.ParamsExtra = string(b)
+		}
+	}
+	vm.ParamsSet = vm.ParamsThink != "" || vm.ParamsTemp != "" || vm.ParamsPredict != "" ||
+		vm.ParamsCtx != "" || vm.ParamsExtra != "" || len(pr.Locked) > 0
+}
+
+// setModelParams saves the alias params profile (think/temperature/num_predict/
+// num_ctx + locked + free x_* JSON). Filled on /admin/models per alias row.
+func (u *UI) setModelParams(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	_ = r.ParseForm()
+	m, err := u.st.GetModel(id)
+	if err != nil {
+		http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
+		return
+	}
+	doc := map[string]any{}
+	if t := strings.TrimSpace(r.FormValue("think")); t != "" {
+		switch t {
+		case "true":
+			doc["think"] = true
+		case "false":
+			doc["think"] = false
+		default:
+			doc["think"] = t
+		}
+	}
+	if v := strings.TrimSpace(r.FormValue("temperature")); v != "" {
+		f, ferr := strconv.ParseFloat(v, 64)
+		if ferr != nil || f < 0 || f > 2 {
+			http.Redirect(w, r, "/admin/models?err=temperature+0..2", http.StatusFound)
+			return
+		}
+		doc["temperature"] = f
+	}
+	for _, f := range []string{"num_predict", "num_ctx"} {
+		if v := strings.TrimSpace(r.FormValue(f)); v != "" {
+			n, nerr := strconv.Atoi(v)
+			if nerr != nil || n <= 0 {
+				http.Redirect(w, r, "/admin/models?err="+f+"+must+be+%3E+0", http.StatusFound)
+				return
+			}
+			doc[f] = n
+		}
+	}
+	if extra := strings.TrimSpace(r.FormValue("extra")); extra != "" {
+		var x map[string]any
+		if json.Unmarshal([]byte(extra), &x) != nil {
+			http.Redirect(w, r, "/admin/models?err=extra+bad+JSON", http.StatusFound)
+			return
+		}
+		for k, v := range x {
+			if k != "locked" {
+				doc[k] = v
+			}
+		}
+	}
+	if locked := r.Form["lock"]; len(locked) > 0 {
+		list := make([]any, 0, len(locked))
+		for _, k := range locked {
+			list = append(list, k)
+		}
+		doc["locked"] = list
+	}
+	raw, _ := json.Marshal(doc)
+	if len(doc) == 0 {
+		raw = []byte("")
+	}
+	if _, err := params.ParseProfile(string(raw)); err != nil {
+		http.Redirect(w, r, "/admin/models?err="+neturl.QueryEscape(err.Error()), http.StatusFound)
+		return
+	}
+	m.Params = string(raw)
+	if _, err := u.st.SaveModel(m); err != nil {
+		http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, "/admin/models?ok=params_saved", http.StatusFound)
 }
 
 type keyVM struct {

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"runtime"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"github.com/javded-itres/mikrollm/internal/domain"
 	"github.com/javded-itres/mikrollm/internal/guard"
 	"github.com/javded-itres/mikrollm/internal/hubclient"
+	"github.com/javded-itres/mikrollm/internal/params"
 	"github.com/javded-itres/mikrollm/internal/ports"
 )
 
@@ -45,10 +47,11 @@ func (s *Server) buildTools() []toolDef {
 			"name": str, "names": map[string]any{"type": "array", "items": str},
 			"lb_policy": map[string]any{"type": "string", "description": "least_conn | round_robin | failover"},
 		}), Fn: s.toolConnectModel},
-		{Name: "save_model", Description: "Создать или обновить alias. Если backend_ids пусты — берёт их из каталога.", Schema: objSchema(map[string]any{
+		{Name: "save_model", Description: "Создать или обновить alias. Если backend_ids пусты — берёт их из каталога. params — профиль дефолтных параметров генерации (Ollama-имена: think true|false|low|medium|high|max, temperature, num_predict, num_ctx, top_p, seed…, locked:[] форсит поверх запроса клиента; подставляются при проксировании, если клиент поле не прислал).", Schema: objSchema(map[string]any{
 			"id": num, "alias": str, "upstream_name": str,
 			"backend_ids": map[string]any{"type": "array", "items": num},
 			"lb_policy":   str, "max_context": num, "fallback": str, "prompt_cache": str, "enabled": bol, "hub_share": bol,
+			"params": map[string]any{"type": "object", "description": "например {\"think\":\"low\",\"temperature\":0.2,\"num_predict\":2048,\"locked\":[\"think\"]}"},
 		}, "alias"), Fn: s.toolSaveModel},
 		{Name: "delete_model", Description: "Удалить alias по id или имени.", Schema: objSchema(map[string]any{"id": num, "alias": str}), Fn: s.toolDeleteModel},
 		{Name: "host_action", Description: "Операция на хосте: pull/load (фон) или unload/delete. vLLM/облако часть действий не умеют.", Schema: objSchema(map[string]any{
@@ -329,6 +332,7 @@ func (s *Server) toolListModels(map[string]any) (any, error) {
 			"id": m.ID, "alias": m.Alias, "upstream_name": m.UpstreamName,
 			"lb_policy": m.LBPolicy, "enabled": m.Enabled, "backend_ids": m.BackendIDs,
 			"backends": names, "max_context": m.MaxContext, "fallback": m.Fallback, "prompt_cache": m.PromptCache,
+			"params":  m.Params,
 			"context": m.ContextWindow(meta.Context), "provider": meta.Provider,
 			"priced": meta.Priced, "prompt_usd": meta.PromptUSD, "completion_usd": meta.CompletionUSD,
 			"media": domain.MergeMedia(m.Media, meta.Media), "hub_share": m.HubShare,
@@ -481,6 +485,23 @@ func (s *Server) toolSaveModel(args map[string]any) (any, error) {
 			m.Media = domain.ParseMedia(strArg(args, "media"))
 		}
 	}
+	if hasArg(args, "params") {
+		switch pv := args["params"].(type) {
+		case nil:
+			m.Params = ""
+		case string:
+			m.Params = pv
+		default:
+			raw, err := json.Marshal(pv)
+			if err != nil {
+				return nil, fmt.Errorf("params: %w", err)
+			}
+			m.Params = string(raw)
+		}
+		if _, err := params.ParseProfile(m.Params); err != nil {
+			return nil, fmt.Errorf("params: %w", err)
+		}
+	}
 	if id, ok := intArg(args, "id"); ok && id > 0 {
 		if old, err := s.st.GetModel(id); err == nil {
 			m.ID = old.ID
@@ -511,11 +532,17 @@ func (s *Server) toolSaveModel(args map[string]any) (any, error) {
 			if !hasArg(args, "backend_ids") {
 				m.BackendIDs = old.BackendIDs
 			}
+			if !hasArg(args, "params") {
+				m.Params = old.Params
+			}
 		}
 	} else if old, err := s.st.GetModelByAlias(alias); err == nil {
 		m.ID = old.ID
 		if !hasArg(args, "backend_ids") && len(m.BackendIDs) == 0 {
 			m.BackendIDs = old.BackendIDs
+		}
+		if !hasArg(args, "params") {
+			m.Params = old.Params
 		}
 		if m.UpstreamName == "" {
 			m.UpstreamName = old.UpstreamName

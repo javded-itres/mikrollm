@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/javded-itres/mikrollm/internal/domain"
+	"github.com/javded-itres/mikrollm/internal/params"
 )
 
 func (p *Proxy) ServeModelParams(w http.ResponseWriter, r *http.Request) {
@@ -45,6 +46,9 @@ func (p *Proxy) modelParams(alias string) map[string]any {
 		"modality":            modality,
 		"required_parameters": []string{},
 		"parameters":          defaultModelParams(modality),
+	}
+	if m, err := p.st.GetModelByAlias(alias); err == nil {
+		applyProfileToPanel(out, m.Params)
 	}
 	if kind != domain.KindOpenComfy || strings.TrimSpace(b.BaseURL) == "" {
 		return out
@@ -181,6 +185,61 @@ func ensureMediaKnobs(params []map[string]any, modality string, required []strin
 		required = []string{}
 	}
 	return params, required
+}
+
+// applyProfileToPanel surfaces the alias params profile in the playground panel:
+// profile values become the advertised defaults, think appears as a knob.
+func applyProfileToPanel(out map[string]any, rawParams string) {
+	if strings.TrimSpace(rawParams) == "" {
+		return
+	}
+	pr, err := params.ParseProfile(rawParams)
+	if err != nil || pr.Empty() {
+		return
+	}
+	plist, _ := asParamMaps(out["parameters"])
+	num := func(key string) (float64, bool) {
+		v, ok := pr.Values[key]
+		if !ok {
+			return 0, false
+		}
+		f, ok := v.(float64)
+		return f, ok
+	}
+	for _, pm := range plist {
+		switch pm["name"] {
+		case "temperature":
+			if f, ok := num("temperature"); ok {
+				pm["default"] = f
+			}
+		case "max_tokens":
+			if f, ok := num("num_predict"); ok {
+				pm["default"] = f
+			} else if f, ok := num("max_tokens"); ok {
+				pm["default"] = f
+			}
+		}
+	}
+	if v, ok := pr.Values["think"]; ok {
+		knob := map[string]any{"name": "think", "type": "string", "default": "inherit",
+			"options": []string{"inherit", "true", "false", "low", "medium", "high", "max"}}
+		switch t := v.(type) {
+		case bool:
+			knob["default"] = fmt.Sprintf("%t", t)
+		case string:
+			knob["default"] = t
+		}
+		has := false
+		for _, pm := range plist {
+			if pm["name"] == "think" {
+				has = true
+			}
+		}
+		if !has {
+			plist = append(plist, knob)
+		}
+	}
+	out["parameters"] = plist
 }
 
 func defaultModelParams(modality string) []map[string]any {

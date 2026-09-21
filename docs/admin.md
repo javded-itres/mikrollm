@@ -72,6 +72,7 @@ Catalog filters: name, **provider** (`openai/…` → OpenAI, local → Ollama /
 7. **Fallback model** on an alias: if upstream returns 402 / “out of credits / subscription / quota”, the gateway retries the chosen alias (the key must allow it). Chain up to 4 hops, no cycles.
 8. **Prompt cache** (global above the alias table and the Cache column): `auto` injects Claude `cache_control` (first turn 1.25× write). `off` disables inject. Dashboard sums `cached_tokens` and a $ estimate. [providers.md](providers.md#prompt-cache).
 9. **Hub** on an alias: **in hub** publishes it to the cloud catalog when **Hub network member** is on (chat, image, and video). Connect remote rows with **To gateway**. [hub.md](hub.md).
+10. **Params** on an alias — default generation knobs injected into every proxied chat request: `think` (`true`/`false`/`low`/`medium`/`high`/`max`), `temperature`, `num_predict`, `num_ctx`, plus free-form extra JSON (`top_p`, `seed`, `x_…`). Client-sent fields win; a `lock` checkbox per knob overrides even those. Translation is per provider: Ollama `/v1/chat/completions` gets `reasoning_effort`/`max_tokens`, native `/api/chat` gets `options.*` + top-level `think` (only there `num_ctx` works), OpenRouter gets `reasoning`, vLLM/LM Studio `chat_template_kwargs`. MCP: `save_model` accepts `params` as an object.
 
 LB policies:
 

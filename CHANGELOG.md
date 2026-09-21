@@ -6,6 +6,8 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+- **Params profile per alias**: default generation knobs (`think` true/false/low/medium/high/max, `temperature`, `num_predict`, `num_ctx`, `top_p`, `seed`, `x_*`) stored on the alias and injected into every proxied chat request — admin Models column plus MCP `save_model` `params`. Client fields win; per-knob `lock` forces the profile value. Provider translation: Ollama `/v1` → `reasoning_effort`/`max_tokens`, native `/api/chat` → `options.*` + `think` (only path where `num_ctx` works), OpenRouter → `reasoning`, vLLM / LM Studio → `chat_template_kwargs`. Playground panel shows the profile as defaults.
+
 ## 0.0.8 — 2026-09-21
 
 - **Tool calling works over hub aliases**: relayed chat completions now keep `tool_calls`, `finish_reason`, `id`, `model` and `usage` (previously only `content`/`reasoning` survived, so agents saw empty replies). Stream clients get a proper two-chunk SSE with `finish_reason`. Non-chat relay payloads still pass through untouched.

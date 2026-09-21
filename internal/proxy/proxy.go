@@ -19,6 +19,7 @@ import (
 	"github.com/javded-itres/mikrollm/internal/domain"
 	"github.com/javded-itres/mikrollm/internal/guard"
 	"github.com/javded-itres/mikrollm/internal/hubclient"
+	"github.com/javded-itres/mikrollm/internal/params"
 	"github.com/javded-itres/mikrollm/internal/ports"
 	"github.com/javded-itres/mikrollm/internal/promptcache"
 	"github.com/javded-itres/mikrollm/internal/queue"
@@ -522,8 +523,19 @@ func (p *Proxy) Forward(ctx context.Context, w http.ResponseWriter, k domain.API
 			mode = promptcache.Resolve(p.st.PromptCacheMode(), aliasMode)
 		}
 		meta := p.catalogMeta(upstream, model, requested)
+		body := filtered
+		switch kind := b.KindNorm(); kind {
+		case domain.KindHub, domain.KindOpenComfy:
+			// Hub peers apply their own alias profile; media is not chat-shaped.
+		default:
+			if m, e := p.st.GetModelByAlias(model); e == nil && strings.TrimSpace(m.Params) != "" {
+				if prof, pe := params.ParseProfile(m.Params); pe == nil {
+					body = params.Inject(body, prof, kind, b.NativeOllama() && path == "/api/chat")
+				}
+			}
+		}
 		payload, _ := promptcache.Prepare(promptcache.PrepInput{
-			Body:      filtered,
+			Body:      body,
 			SendAs:    upstream,
 			OrigModel: model,
 			Kind:      b.KindNorm(),
