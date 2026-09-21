@@ -754,4 +754,10 @@ a.btn, a.btn-sm {
 .chat-tab.is-busy { box-shadow: inset 0 -2px 0 var(--acc); }
 .chat-tab-x { opacity: .55; padding: 0 .15rem; }
 .chat-tab-x:hover { opacity: 1; color: var(--text); }
-.q-jobs .q-prev { color: var(--text); max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-jobs .q-prev, .chat-q-jobs .q-prev { color: var(--text); max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-q-jobs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
+.chat-q-jobs li {
+  display: flex; flex-wrap: wrap; gap: .4rem .7rem; align-items: center;
+  cursor: pointer; padding: .35rem .2rem;
+}
+.chat-q-jobs li:hover { color: var(--text); }

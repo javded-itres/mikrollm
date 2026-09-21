@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/javded-itres/mikrollm/internal/auth"
 	"github.com/javded-itres/mikrollm/internal/domain"
 	"github.com/javded-itres/mikrollm/internal/store"
 )
@@ -530,5 +531,77 @@ func TestImagesInlineDataURL(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), `"url"`) {
 		t.Fatalf("url left: %s", rec.Body.String())
+	}
+}
+
+func TestVideoStatusSkipsRPM(t *testing.T) {
+	st, h, _, px, _ := setup(t)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/health":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/v1/models" || r.URL.Path == "/v1/videos/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"toy-video"}]}`))
+		case r.URL.Path == "/v1/images/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/videos":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"vid_rpm","status":"in_progress"}`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/videos/"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"vid_rpm","status":"in_progress"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(up.Close)
+	bid, err := st.UpsertBackend("comfy", up.URL, true, 1, "opencomfy", "sk-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SaveModel(store.Model{
+		Alias: "toy-video", UpstreamName: "toy-video", Enabled: true, BackendIDs: []int64{bid},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	plain, prefix, hash, err := auth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.InsertKey(store.APIKey{Name: "t", Prefix: prefix, KeyHash: hash, AllowedModels: []string{"*"}, Enabled: true, RPM: 1}); err != nil {
+		t.Fatal(err)
+	}
+	h.CheckOnce()
+	time.Sleep(10 * time.Millisecond)
+
+	create := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{"model":"toy-video","prompt":"spin"}`))
+	create.Header.Set("Authorization", "Bearer "+plain)
+	crec := httptest.NewRecorder()
+	px.VideosCreate(crec, create)
+	if crec.Code != 200 {
+		t.Fatalf("create %d %s", crec.Code, crec.Body.String())
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/videos/{id}", px.VideosGet)
+	for i := 0; i < 4; i++ {
+		get := httptest.NewRequest(http.MethodGet, "/v1/videos/vid_rpm?model=toy-video", nil)
+		get.Header.Set("Authorization", "Bearer "+plain)
+		grec := httptest.NewRecorder()
+		mux.ServeHTTP(grec, get)
+		if grec.Code == http.StatusTooManyRequests {
+			t.Fatalf("status poll %d counted as RPM", i)
+		}
+		if grec.Code != 200 {
+			t.Fatalf("status %d %s", grec.Code, grec.Body.String())
+		}
+	}
+	again := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{"model":"toy-video","prompt":"spin2"}`))
+	again.Header.Set("Authorization", "Bearer "+plain)
+	arec := httptest.NewRecorder()
+	px.VideosCreate(arec, again)
+	if arec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second create should RPM, got %d %s", arec.Code, arec.Body.String())
 	}
 }

@@ -84,11 +84,22 @@ func (p *Proxy) requireKey(w http.ResponseWriter, r *http.Request) (domain.APIKe
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]any{"message": "invalid api key", "type": "auth"}})
 		return domain.APIKey{}, false
 	}
-	if !p.keys.AllowRPM(k) {
+	if !rpmExempt(r) && !p.keys.AllowRPM(k) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": map[string]any{"message": "rate limit", "type": "rate_limit"}})
 		return domain.APIKey{}, false
 	}
 	return k, true
+}
+
+func rpmExempt(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	p := r.URL.Path
+	return strings.HasPrefix(p, "/v1/videos/") || strings.HasPrefix(p, "/admin/videos/")
 }
 
 func (p *Proxy) ChatCompletions(w http.ResponseWriter, r *http.Request) {

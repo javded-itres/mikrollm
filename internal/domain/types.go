@@ -85,8 +85,14 @@ func (c HubCaps) For(kind string) int {
 	switch kind {
 	case "images":
 		return c.Images
-	case "videos", "videos_status", "videos_content":
+	case "videos":
 		return c.Videos
+	case "videos_status", "videos_content":
+		n := c.Chat
+		if n < 8 {
+			n = 8
+		}
+		return n
 	default:
 		return c.Chat
 	}

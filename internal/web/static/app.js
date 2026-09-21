@@ -706,24 +706,9 @@
 
   (function queueBoard() {
     var board = document.getElementById("q-board");
-    var dashBox = document.getElementById("q-list");
-    var chatBox = document.getElementById("chat-q-list");
-    if ((!board || !board.getAttribute("data-live")) && !chatBox) return;
-    var box = dashBox || chatBox;
-    if (!box && !chatBox) return;
-    var tog = document.getElementById("chat-q-toggle");
-    var panel = document.getElementById("chat-q-panel");
-    var qn = document.getElementById("chat-q-n");
-    if (tog && panel) {
-      function setOpen(open) {
-        panel.hidden = !open;
-        tog.classList.toggle("is-open", open);
-        tog.setAttribute("aria-expanded", open ? "true" : "false");
-        try { localStorage.setItem("ml-chat-q", open ? "1" : "0"); } catch (e) {}
-      }
-      tog.addEventListener("click", function () { setOpen(panel.hidden); });
-      setOpen(localStorage.getItem("ml-chat-q") === "1");
-    }
+    if (!board || !board.getAttribute("data-live")) return;
+    var box = document.getElementById("q-list");
+    if (!box) return;
     function esc(s) {
       return String(s || "").replace(/[&<>"]/g, function (c) {
         return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c];
@@ -762,24 +747,7 @@
     function tick() {
       fetch("/admin/queues/live", { credentials: "same-origin", headers: { Accept: "application/json" } })
         .then(function (r) { return r.json(); })
-        .then(function (data) {
-          var html;
-          if (dashBox) {
-            box = dashBox;
-            render(data);
-            html = dashBox.innerHTML;
-          } else {
-            render(data);
-            html = box.innerHTML;
-          }
-          if (chatBox) chatBox.innerHTML = html || "<p class=\"muted\">Сейчас ничего не генерируется.</p>";
-          var live = 0;
-          ((data && data.queues) || []).forEach(function (q) { live += (q.waiting || 0) + (q.running || 0); });
-          if (qn) {
-            qn.hidden = live < 1;
-            qn.textContent = String(live);
-          }
-        })
+        .then(render)
         .catch(function () {})
         .then(function () { setTimeout(tick, 1000); });
     }
@@ -1180,6 +1148,7 @@
         input.disabled = on;
       }
       renderTabs();
+      renderChatQueue();
     }
     function fillMedia(body, m) {
       if (m.image) {
@@ -1206,6 +1175,46 @@
           "<span>" + escHtml(c.title || "Новый чат") + "</span>" +
           "<span class=\"chat-tab-x\" data-close=\"" + c.id + "\" title=\"закрыть\">×</span></button>";
       }).join("") + "<button type=\"button\" class=\"chat-tab-new\" id=\"chat-tab-new\" title=\"Новый чат\">+</button>";
+      renderChatQueue();
+    }
+    function renderChatQueue() {
+      var box = document.getElementById("chat-q-list");
+      var qn = document.getElementById("chat-q-n");
+      if (!box) return;
+      var jobs = [];
+      chats.forEach(function (c) {
+        var last = (c.messages || [])[(c.messages || []).length - 1];
+        var pending = !!(c.busy || (last && last.pending));
+        if (!pending) return;
+        var prompt = "";
+        (c.messages || []).forEach(function (m) {
+          if (m.role === "user" && m.content) prompt = String(m.content);
+        });
+        var kind = c.genKind || "чат";
+        if (!c.genKind) {
+          if (last && (last.video || /видео/i.test(last.content || ""))) kind = "видео";
+          else if (last && (last.image || /изображ/i.test(last.content || ""))) kind = "изображение";
+        }
+        jobs.push({
+          id: c.id,
+          kind: kind,
+          prompt: prompt || c.title || "генерация",
+          status: (last && last.pending && last.content) ? last.content : "идёт"
+        });
+      });
+      if (qn) {
+        qn.hidden = jobs.length < 1;
+        qn.textContent = String(jobs.length);
+      }
+      if (!jobs.length) {
+        box.innerHTML = "<p class=\"muted\">Сейчас ничего не генерируется.</p>";
+        return;
+      }
+      box.innerHTML = "<ul class=\"chat-q-jobs\">" + jobs.map(function (j) {
+        return "<li data-chat=\"" + j.id + "\"><span class=\"pill\">" + escHtml(j.kind) + "</span>" +
+          "<span class=\"q-prev\">" + escHtml(j.prompt) + "</span>" +
+          "<span class=\"muted\">" + escHtml(j.status) + "</span></li>";
+      }).join("") + "</ul>";
     }
     function paintThread() {
       log.querySelectorAll(".chat-msg").forEach(function (n) { n.remove(); });
@@ -1400,6 +1409,25 @@
     document.getElementById("chat-clear").addEventListener("click", function () {
       newChat();
     });
+    var tog = document.getElementById("chat-q-toggle");
+    var panel = document.getElementById("chat-q-panel");
+    if (tog && panel) {
+      function setQOpen(open) {
+        panel.hidden = !open;
+        tog.classList.toggle("is-open", open);
+        tog.setAttribute("aria-expanded", open ? "true" : "false");
+        try { localStorage.setItem("ml-chat-q", open ? "1" : "0"); } catch (e) {}
+      }
+      tog.addEventListener("click", function () { setQOpen(panel.hidden); });
+      setQOpen(localStorage.getItem("ml-chat-q") === "1");
+    }
+    var qlist = document.getElementById("chat-q-list");
+    if (qlist) {
+      qlist.addEventListener("click", function (ev) {
+        var li = ev.target.closest ? ev.target.closest("li[data-chat]") : null;
+        if (li && li.getAttribute("data-chat")) switchChat(li.getAttribute("data-chat"));
+      });
+    }
     var tabsEl = document.getElementById("chat-tabs");
     if (tabsEl) {
       tabsEl.addEventListener("click", function (ev) {
@@ -1554,6 +1582,7 @@
         if (els.length) els[els.length - 1].textContent = text;
         if (status) status.textContent = text;
       }
+      renderChatQueue();
     }
     function finishAssistant(id, fields) {
       var c = chatById(id);
@@ -1563,6 +1592,7 @@
       else c.messages.push(Object.assign({ role: "assistant", content: "" }, fields, { pending: false }));
       c.busy = false;
       c.ac = null;
+      c.genKind = "";
       persist();
       if (id === activeId) {
         messages = c.messages;
@@ -1574,7 +1604,7 @@
       }
     }
     function pollVideo(vid, model, chatId, prompt, acLocal) {
-      var delay = 2500;
+      var delay = 5000;
       var t0 = Date.now();
       var maxWait = 45 * 60 * 1000;
       function tick() {
@@ -1596,6 +1626,12 @@
           });
         }).then(function (x) {
           var j = x.j || {};
+          var em = (j.error && (j.error.message || j.error)) || j.message || "";
+          if (!x.ok && /rate limit/i.test(String(em))) {
+            delay = Math.min(20000, Math.max(delay, 10000));
+            setPendingText(chatId, "проверка статуса, ждём лимит…");
+            return new Promise(function (res) { setTimeout(res, delay); }).then(tick);
+          }
           var st = videoJobStatus(j);
           var sec = Math.round((Date.now() - t0) / 1000);
           setPendingText(chatId, "видео " + vid + " · " + (st || "ожидание") + " · " + sec + " с");
@@ -1604,7 +1640,7 @@
             finishAssistant(chatId, { content: "Видео сгенерировано.", video: src });
             return;
           }
-          if (st === "failed" || st === "error" || st === "cancelled" || st === "canceled" || j.error) {
+          if (st === "failed" || st === "error" || st === "cancelled" || st === "canceled" || (j.error && !/rate limit/i.test(String(em)))) {
             var em = (j.error && (j.error.message || j.error)) || j.message || "генерация не удалась";
             var fe = new Error(typeof em === "string" ? em : JSON.stringify(em));
             fe.fatal = true;
@@ -1629,6 +1665,7 @@
       if (chatId === activeId && status) status.textContent = "генерация…";
       var acLocal = new AbortController();
       c.ac = acLocal;
+      c.genKind = mode === "image" ? "изображение" : "видео";
       var model = (chatId === activeId && modelEl) ? modelEl.value : (c.model || (modelEl && modelEl.value));
       var url = mode === "image" ? "/admin/images" : "/admin/videos";
       var extra = collectExtraParams();
@@ -1713,7 +1750,7 @@
       if (status) status.textContent = "генерация…";
       var acLocal = new AbortController();
       var owner = chatById(chatId);
-      if (owner) owner.ac = acLocal;
+      if (owner) { owner.ac = acLocal; owner.genKind = "чат"; }
       ac = acLocal;
       var t0 = Date.now();
       fetch("/admin/chat", {
