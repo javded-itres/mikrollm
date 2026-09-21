@@ -20,7 +20,7 @@ func TestCloudRejectsPull(t *testing.T) {
 		if err := m.Pull(context.Background(), b, "x", io.Discard); err == nil {
 			t.Fatalf("%s pull should fail", kind)
 		}
-		if err := m.Load(context.Background(), b, "x"); err == nil {
+		if err := m.Load(context.Background(), b, "x", 0); err == nil {
 			t.Fatalf("%s load should fail", kind)
 		}
 	}
@@ -29,7 +29,7 @@ func TestCloudRejectsPull(t *testing.T) {
 func TestVLLMLoadReturnsHelp(t *testing.T) {
 	m := New(http.DefaultClient)
 	b := domain.Backend{Kind: "vllm", BaseURL: "http://127.0.0.1:8000"}
-	err := m.Load(context.Background(), b, "Qwen/Qwen2.5-7B-Instruct")
+	err := m.Load(context.Background(), b, "Qwen/Qwen2.5-7B-Instruct", 0)
 	if err == nil || !strings.Contains(err.Error(), "vllm serve") {
 		t.Fatalf("got %v", err)
 	}
@@ -54,7 +54,7 @@ func TestLMStudioLoadAuth(t *testing.T) {
 	t.Cleanup(up.Close)
 	m := New(up.Client())
 	b := domain.Backend{Kind: "lmstudio", BaseURL: up.URL, Token: "lms-tok"}
-	if err := m.Load(context.Background(), b, "ibm/granite-4-micro"); err != nil {
+	if err := m.Load(context.Background(), b, "ibm/granite-4-micro", 0); err != nil {
 		t.Fatal(err)
 	}
 	if gotPath != "/api/v1/models/load" {

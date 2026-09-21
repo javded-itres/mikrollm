@@ -51,10 +51,12 @@ func (m *Manager) Delete(ctx context.Context, b domain.Backend, model string) er
 	return m.ollama.Delete(ctx, b.BaseURL, model)
 }
 
-func (m *Manager) Load(ctx context.Context, b domain.Backend, model string) error {
+// Load pins the model in RAM. numCtx > 0 sets the Ollama load context
+// (options.num_ctx); callers usually pass store.MaxAliasCtx(model).
+func (m *Manager) Load(ctx context.Context, b domain.Backend, model string, numCtx int) error {
 	switch b.KindNorm() {
 	case domain.KindOllama:
-		return m.ollama.Load(ctx, b.BaseURL, model)
+		return m.ollama.Load(ctx, b.BaseURL, model, numCtx)
 	case domain.KindLMStudio:
 		return m.lmsJSON(ctx, b, http.MethodPost, "/api/v1/models/load", map[string]any{"model": model})
 	default:

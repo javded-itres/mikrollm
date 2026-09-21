@@ -78,19 +78,25 @@ func (c *Client) Delete(ctx context.Context, base, model string) error {
 	return nil
 }
 
+// Load pins the model in RAM (keep_alive = -1). numCtx > 0 sets the loaded
+// context window (options.num_ctx) — Ollama's default is 4096 and every later
+// request with a different num_ctx forces a reload.
+func (c *Client) Load(ctx context.Context, base, model string, numCtx int) error {
+	return c.keepAlive(ctx, base, model, -1, "load", numCtx)
+}
+
 func (c *Client) Unload(ctx context.Context, base, model string) error {
-	return c.keepAlive(ctx, base, model, 0, "unload")
+	return c.keepAlive(ctx, base, model, 0, "unload", 0)
 }
 
-// Load pins the model in RAM (keep_alive = -1).
-func (c *Client) Load(ctx context.Context, base, model string) error {
-	return c.keepAlive(ctx, base, model, -1, "load")
-}
-
-func (c *Client) keepAlive(ctx context.Context, base, model string, alive int, op string) error {
+func (c *Client) keepAlive(ctx context.Context, base, model string, alive int, op string, numCtx int) error {
+	options := map[string]any{"num_predict": 0}
+	if numCtx > 0 {
+		options["num_ctx"] = numCtx
+	}
 	body, _ := json.Marshal(map[string]any{
 		"model": model, "prompt": "", "keep_alive": alive, "stream": false,
-		"options": map[string]any{"num_predict": 0},
+		"options": options,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/api/generate", bytes.NewReader(body))
 	if err != nil {

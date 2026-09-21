@@ -35,6 +35,7 @@ type ModelRepo interface {
 	ListModels() ([]domain.Model, error)
 	GetModel(id int64) (domain.Model, error)
 	GetModelByAlias(alias string) (domain.Model, error)
+	MaxAliasCtx(upstream string) (int, error)
 	SaveModel(m domain.Model) (int64, error)
 	DeleteModel(id int64) error
 	ConnectOllamaModel(name string, backendIDs []int64, policy string, maxContext int) error
@@ -158,7 +159,7 @@ type Host interface {
 	Pull(ctx context.Context, b domain.Backend, model string, w io.Writer) error
 	Delete(ctx context.Context, b domain.Backend, model string) error
 	Unload(ctx context.Context, b domain.Backend, model string) error
-	Load(ctx context.Context, b domain.Backend, model string) error
+	Load(ctx context.Context, b domain.Backend, model string, numCtx int) error
 }
 
 type ChatGateway interface {

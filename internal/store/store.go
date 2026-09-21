@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/javded-itres/mikrollm/internal/domain"
+	"github.com/javded-itres/mikrollm/internal/params"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
@@ -550,6 +551,39 @@ func (s *Store) SaveModel(m Model) (int64, error) {
 		}
 	}
 	return m.ID, nil
+}
+
+// MaxAliasCtx returns the context window to load an upstream model into RAM
+// with: the largest num_ctx across enabled alias profiles pointing at the
+// model (matched by upstream name or alias), falling back to alias MaxContext.
+// 0 = no opinion, Ollama will use its own default.
+func (s *Store) MaxAliasCtx(model string) (int, error) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return 0, nil
+	}
+	rows, err := s.DB.Query(`SELECT max_context, params FROM models WHERE enabled=1 AND (upstream_name=? OR alias=?)`, model, model)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	max := 0
+	for rows.Next() {
+		var mc int
+		var raw string
+		if err := rows.Scan(&mc, &raw); err != nil {
+			return max, err
+		}
+		if mc > max {
+			max = mc
+		}
+		if pr, err := params.ParseProfile(raw); err == nil {
+			if v, ok := pr.Values["num_ctx"].(float64); ok && int(v) > max {
+				max = int(v)
+			}
+		}
+	}
+	return max, rows.Err()
 }
 
 func (s *Store) DeleteModel(id int64) error {

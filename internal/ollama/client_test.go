@@ -58,10 +58,39 @@ func TestPullDeleteUnload(t *testing.T) {
 	if unloaded != "qwen:latest" {
 		t.Fatalf("unload %q", unloaded)
 	}
-	if err := c.Load(context.Background(), srv.URL, "qwen:latest"); err != nil {
+	if err := c.Load(context.Background(), srv.URL, "qwen:latest", 0); err != nil {
 		t.Fatal(err)
 	}
 	if loaded != "qwen:latest" {
 		t.Fatalf("load %q", loaded)
+	}
+}
+
+func TestLoadWithNumCtx(t *testing.T) {
+	var got map[string]any
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &got)
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(up.Close)
+	c := New(up.Client())
+	if err := c.Load(context.Background(), up.URL, "qwen3:32b", 65536); err != nil {
+		t.Fatal(err)
+	}
+	opts, ok := got["options"].(map[string]any)
+	if !ok || opts["num_ctx"] != float64(65536) {
+		t.Fatalf("num_ctx not sent: %s", got)
+	}
+	if got["keep_alive"] != float64(-1) {
+		t.Fatalf("keep_alive: %v", got["keep_alive"])
+	}
+	// 0 = no num_ctx key
+	got = nil
+	if err := c.Load(context.Background(), up.URL, "qwen3:32b", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := got["options"].(map[string]any)["num_ctx"]; has {
+		t.Fatalf("num_ctx should be omitted when 0: %v", got["options"])
 	}
 }

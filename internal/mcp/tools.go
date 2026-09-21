@@ -54,9 +54,9 @@ func (s *Server) buildTools() []toolDef {
 			"params": map[string]any{"type": "object", "description": "например {\"think\":\"low\",\"temperature\":0.2,\"num_predict\":2048,\"locked\":[\"think\"]}"},
 		}, "alias"), Fn: s.toolSaveModel},
 		{Name: "delete_model", Description: "Удалить alias по id или имени.", Schema: objSchema(map[string]any{"id": num, "alias": str}), Fn: s.toolDeleteModel},
-		{Name: "host_action", Description: "Операция на хосте: pull/load (фон) или unload/delete. vLLM/облако часть действий не умеют.", Schema: objSchema(map[string]any{
+		{Name: "host_action", Description: "Операция на хосте: pull/load (фон) или unload/delete. vLLM/облако часть действий не умеют. load грузит Ollama с контекстом = макс. num_ctx по профилям alias на эту модель; num_ctx переопределяет явно.", Schema: objSchema(map[string]any{
 			"action":     map[string]any{"type": "string", "description": "pull | load | unload | delete"},
-			"backend_id": num, "model": str,
+			"backend_id": num, "model": str, "num_ctx": num,
 		}, "action", "backend_id", "model"), Fn: s.toolHostAction},
 		{Name: "list_jobs", Description: "Фоновые pull/load: статус, процент, ошибка.", Schema: objSchema(nil), Fn: s.toolListJobs},
 		{Name: "list_queues", Description: "Очереди: шаги, слоты, ждущие/идущие, лента jobs, extra alias.", Schema: objSchema(nil), Fn: s.toolListQueues},
@@ -662,8 +662,16 @@ func (s *Server) toolHostAction(args map[string]any) (any, error) {
 				runErr = s.host.Pull(context.Background(), b, model, wr)
 				_ = wr.Close()
 			} else {
-				s.jobs.SetMessage(j.ID, "загрузка в RAM…")
-				runErr = s.host.Load(context.Background(), b, model)
+				nctx, _ := s.st.MaxAliasCtx(model)
+				if v, ok := intArg(args, "num_ctx"); ok && v > 0 {
+					nctx = int(v)
+				}
+				if nctx > 0 {
+					s.jobs.SetMessage(j.ID, fmt.Sprintf("загрузка в RAM, контекст %d…", nctx))
+				} else {
+					s.jobs.SetMessage(j.ID, "загрузка в RAM…")
+				}
+				runErr = s.host.Load(context.Background(), b, model, nctx)
 			}
 			if runErr != nil {
 				s.jobs.Fail(j.ID, runErr.Error())

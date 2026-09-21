@@ -69,8 +69,13 @@ func (u *UI) ollamaUnload(w http.ResponseWriter, r *http.Request) {
 
 func (u *UI) ollamaLoad(w http.ResponseWriter, r *http.Request) {
 	u.startJob(w, r, "load", "loading", func(id string, b domain.Backend, model string) error {
-		u.jobs.SetMessage(id, "загрузка в RAM…")
-		return u.host.Load(context.Background(), b, model)
+		ctx, _ := u.st.MaxAliasCtx(model)
+		if ctx > 0 {
+			u.jobs.SetMessage(id, fmt.Sprintf("загрузка в RAM, контекст %d…", ctx))
+		} else {
+			u.jobs.SetMessage(id, "загрузка в RAM…")
+		}
+		return u.host.Load(context.Background(), b, model, ctx)
 	})
 }
 

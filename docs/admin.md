@@ -64,7 +64,7 @@ One list from the disks of all live backends.
 Catalog filters: name, **provider** (`openai/…` → OpenAI, local → Ollama / vLLM / …), **input price** per 1M tokens. OpenRouter from `GET /models` (`pricing.prompt` / `pricing.completion`). Ollama Cloud from [ollama.com/pricing](https://ollama.com/pricing) (and `/library/<model>` if missing from the table). Each row shows provider and “in / out”.
 
 1. Check models → **To gateway** — an alias with the same name and the chosen LB policy.
-2. **RAM**: `82 · in RAM` loads weights (Ollama `keep_alive: -1`, LM Studio `/api/v1/models/load`); unload takes them out. A large model can take minutes. vLLM has no buttons: the model is the `vllm serve` process.
+2. **RAM**: `82 · in RAM` loads weights (Ollama `keep_alive: -1`, LM Studio `/api/v1/models/load`); unload takes them out. A large model can take minutes. Ollama loads with the largest `num_ctx` of the alias profiles on that model (else alias Context) — Ollama default is 4096 and a per-request num_ctx forces a reload, so set it in Params first, then press «in RAM» again. vLLM has no buttons: the model is the `vllm serve` process.
 3. **Disk**: `✕` deletes the file on Ollama only. LM Studio — its UI; vLLM — change the serve command.
 4. **Download model** — Ollama `pull` or LM Studio `download`. The progress bar **survives** a page refresh: the job runs on the gateway and is stored in SQLite. After a container restart an unfinished pull resumes.
 5. **Custom alias** — another name for clients (e.g. `fast` → `qwen3.8:27b-mlx`).

@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Загрузка Ollama в RAM фиксирует контекст alias: «в RAM» шлёт `options.num_ctx` = максимальный `num_ctx` из профилей «Параметры» на эту модель (fallback — Контекст alias). Дефолт Ollama — 4096, а num_ctx в запросе перегружает веса — задайте контекст в Параметрах и перегрузите. MCP `host_action` load принимает явный `num_ctx`.
+
 - **Профиль параметров у alias**: дефолты генерации (`think` true/false/low/medium/high/max, `temperature`, `num_predict`, `num_ctx`, `top_p`, `seed`, `x_*`) хранятся на алиасе и подставляются в каждый проксируемый чат-запрос — колонка «Параметры» на Models и `params` в MCP `save_model`. Поля клиента важнее; `lock` форсит значение профиля. Перевод по провайдеру: Ollama `/v1` → `reasoning_effort`/`max_tokens`, нейтивный `/api/chat` → `options.*` + `think` (только там работает `num_ctx`), OpenRouter → `reasoning`, vLLM / LM Studio → `chat_template_kwargs`. Панель playground показывает профиль как дефолты.
 
 ## 0.0.8 — 2026-09-21

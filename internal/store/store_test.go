@@ -372,3 +372,42 @@ func TestUpsertHubAuto(t *testing.T) {
 		t.Fatal("auto still there")
 	}
 }
+
+func TestMaxAliasCtx(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(filepath.Join(dir, "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	save := func(m Model) {
+		if _, err := st.SaveModel(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save(Model{Alias: "coder", UpstreamName: "qwen3:32b", Params: `{"num_ctx":65536}`, Enabled: true})
+	save(Model{Alias: "writer", UpstreamName: "qwen3:32b", Params: `{"num_ctx":32768}`, Enabled: true})
+	save(Model{Alias: "other", UpstreamName: "llama3", MaxContext: 4096, Enabled: true})
+
+	n, err := st.MaxAliasCtx("qwen3:32b")
+	if err != nil || n != 65536 {
+		t.Fatalf("want 65536 got %d %v", n, err)
+	}
+	// alias-name match wins too, MaxContext used when no profile
+	save(Model{Alias: "qwen3:32b", UpstreamName: "qwen3:32b", MaxContext: 131072, Enabled: true})
+	n, _ = st.MaxAliasCtx("qwen3:32b")
+	if n != 131072 {
+		t.Fatalf("MaxContext fallback: %d", n)
+	}
+	// disabled alias is skipped
+	m, _ := st.GetModelByAlias("coder")
+	m.Enabled = false
+	st.SaveModel(m)
+	n, _ = st.MaxAliasCtx("qwen3:32b")
+	if n != 131072 {
+		t.Fatalf("after disable: %d", n)
+	}
+	if n, _ = st.MaxAliasCtx("unknown"); n != 0 {
+		t.Fatalf("unknown model: %d", n)
+	}
+}

@@ -6,6 +6,8 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+- Ollama RAM load pins the alias context: «in RAM» now sends `options.num_ctx` = the largest `num_ctx` across alias profiles on that model (fallback: alias Context). Ollama default is 4096 and a per-request num_ctx triggers a reload — set it in alias Params, then reload. MCP `host_action` load accepts explicit `num_ctx`.
+
 - **Params profile per alias**: default generation knobs (`think` true/false/low/medium/high/max, `temperature`, `num_predict`, `num_ctx`, `top_p`, `seed`, `x_*`) stored on the alias and injected into every proxied chat request — admin Models column plus MCP `save_model` `params`. Client fields win; per-knob `lock` forces the profile value. Provider translation: Ollama `/v1` → `reasoning_effort`/`max_tokens`, native `/api/chat` → `options.*` + `think` (only path where `num_ctx` works), OpenRouter → `reasoning`, vLLM / LM Studio → `chat_template_kwargs`. Playground panel shows the profile as defaults.
 
 ## 0.0.8 — 2026-09-21
