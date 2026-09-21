@@ -706,9 +706,24 @@
 
   (function queueBoard() {
     var board = document.getElementById("q-board");
-    if (!board || !board.getAttribute("data-live")) return;
-    var box = document.getElementById("q-list");
-    if (!box) return;
+    var dashBox = document.getElementById("q-list");
+    var chatBox = document.getElementById("chat-q-list");
+    if ((!board || !board.getAttribute("data-live")) && !chatBox) return;
+    var box = dashBox || chatBox;
+    if (!box && !chatBox) return;
+    var tog = document.getElementById("chat-q-toggle");
+    var panel = document.getElementById("chat-q-panel");
+    var qn = document.getElementById("chat-q-n");
+    if (tog && panel) {
+      function setOpen(open) {
+        panel.hidden = !open;
+        tog.classList.toggle("is-open", open);
+        tog.setAttribute("aria-expanded", open ? "true" : "false");
+        try { localStorage.setItem("ml-chat-q", open ? "1" : "0"); } catch (e) {}
+      }
+      tog.addEventListener("click", function () { setOpen(panel.hidden); });
+      setOpen(localStorage.getItem("ml-chat-q") === "1");
+    }
     function esc(s) {
       return String(s || "").replace(/[&<>"]/g, function (c) {
         return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c];
@@ -747,7 +762,24 @@
     function tick() {
       fetch("/admin/queues/live", { credentials: "same-origin", headers: { Accept: "application/json" } })
         .then(function (r) { return r.json(); })
-        .then(render)
+        .then(function (data) {
+          var html;
+          if (dashBox) {
+            box = dashBox;
+            render(data);
+            html = dashBox.innerHTML;
+          } else {
+            render(data);
+            html = box.innerHTML;
+          }
+          if (chatBox) chatBox.innerHTML = html || "<p class=\"muted\">Сейчас ничего не генерируется.</p>";
+          var live = 0;
+          ((data && data.queues) || []).forEach(function (q) { live += (q.waiting || 0) + (q.running || 0); });
+          if (qn) {
+            qn.hidden = live < 1;
+            qn.textContent = String(live);
+          }
+        })
         .catch(function () {})
         .then(function () { setTimeout(tick, 1000); });
     }
@@ -1125,15 +1157,46 @@
       }
       return "Новый чат";
     }
+    function chatById(id) {
+      for (var i = 0; i < chats.length; i++) if (chats[i].id === id) return chats[i];
+      return null;
+    }
     function snapshotChat() {
-      var c = null;
-      for (var i = 0; i < chats.length; i++) if (chats[i].id === activeId) c = chats[i];
+      var c = chatById(activeId);
       if (!c) return;
       c.messages = messages;
       c.model = modelEl && modelEl.value;
       c.mode = genMode();
       c.title = chatTitle(messages);
       c.updated = Date.now();
+    }
+    function setChatBusy(id, on) {
+      var c = chatById(id);
+      if (c) c.busy = on;
+      if (id === activeId) {
+        send.disabled = on;
+        send.hidden = on;
+        stop.hidden = !on;
+        input.disabled = on;
+      }
+      renderTabs();
+    }
+    function fillMedia(body, m) {
+      if (m.image) {
+        body.textContent = "";
+        var img = document.createElement("img");
+        img.src = m.image;
+        img.alt = m.content || "";
+        body.appendChild(img);
+        return;
+      }
+      if (m.video) {
+        body.textContent = "";
+        var v = document.createElement("video");
+        v.controls = true;
+        v.src = m.video;
+        body.appendChild(v);
+      }
     }
     function renderTabs() {
       var bar = document.getElementById("chat-tabs");
@@ -1148,19 +1211,15 @@
       log.querySelectorAll(".chat-msg").forEach(function (n) { n.remove(); });
       if (empty) empty.hidden = messages.length > 0;
       messages.forEach(function (m) {
-        var text = m.content || (m.hadImage ? "изображение" : "");
+        var text = m.content || (m.video ? "видео" : (m.hadImage || m.image ? "изображение" : ""));
         var b = bubble(m.role === "user" ? "user" : "assistant", text, true);
         if (m.think && b.think) {
           b.think.hidden = false;
           b.think.textContent = m.think;
         }
-        if (m.image) {
-          b.body.textContent = "";
-          var img = document.createElement("img");
-          img.src = m.image;
-          img.alt = text;
-          b.body.appendChild(img);
-        }
+        fillMedia(b.body, m);
+        if (m.image) mediaActions(b, "image", m.image, m.content || "");
+        if (m.video) mediaActions(b, "video", m.video, m.content || "");
       });
       stickBottom(true);
       renderHist();
@@ -1207,8 +1266,9 @@
             return {
               id: c.id, title: c.title, model: c.model, mode: c.mode, updated: c.updated,
               messages: (c.messages || []).map(function (m) {
-                var row = { role: m.role, content: typeof m.content === "string" ? m.content : "", think: m.think || "", hadImage: !!(m.image || m.hadImage) };
+                var row = { role: m.role, content: typeof m.content === "string" ? m.content : "", think: m.think || "", hadImage: !!(m.image || m.hadImage), pending: !!m.pending };
                 if (withImage && m.image) row.image = m.image;
+                if (m.video) row.video = m.video;
                 return row;
               })
             };
@@ -1241,7 +1301,9 @@
       messages.forEach(function (m, i) {
         var li = document.createElement("li");
         var t = typeof m.content === "string" ? m.content : "(медиа)";
-        if (m.hadImage || m.image) t = "изображение";
+        if (m.video) t = "видео";
+        else if (m.hadImage || m.image) t = "изображение";
+        else if (m.pending) t = m.content || "генерация…";
         li.textContent = (m.role === "user" ? "Вы: " : "Модель: ") + t.slice(0, 80);
         if (i === 0 && m.role === "user") li.className = "is-task";
         list.appendChild(li);
@@ -1332,16 +1394,10 @@
     }
 
     function setBusy(on) {
-      for (var i = 0; i < chats.length; i++) if (chats[i].id === activeId) chats[i].busy = on;
-      send.disabled = on;
-      send.hidden = on;
-      stop.hidden = !on;
-      input.disabled = on;
-      renderTabs();
+      setChatBusy(activeId, on);
     }
 
     document.getElementById("chat-clear").addEventListener("click", function () {
-      if (ac) ac.abort();
       newChat();
     });
     var tabsEl = document.getElementById("chat-tabs");
@@ -1351,6 +1407,8 @@
         if (close) {
           ev.preventDefault();
           ev.stopPropagation();
+          var dying = chatById(close);
+          if (dying && dying.ac) dying.ac.abort();
           chats = chats.filter(function (c) { return c.id !== close; });
           if (!chats.length) {
             newChat();
@@ -1405,7 +1463,9 @@
     }
 
     stop.addEventListener("click", function () {
-      if (ac) ac.abort();
+      var c = chatById(activeId);
+      if (c && c.ac) c.ac.abort();
+      else if (ac) ac.abort();
     });
 
     input.addEventListener("keydown", function (ev) {
@@ -1458,12 +1518,18 @@
       rg.className = "ghost";
       rg.textContent = "Ещё раз";
       rg.addEventListener("click", function () {
-        if (send.disabled) return;
-        if (messages.length && messages[messages.length - 1].role === "assistant") messages.pop();
-        asst.body.textContent = "";
-        asst.body.querySelectorAll("img,video").forEach(function (n) { n.remove(); });
-        row.remove();
-        runMedia(kind, prompt, asst);
+        var id = activeId;
+        var c = chatById(id);
+        if (!c || c.busy) return;
+        if (c.messages.length && c.messages[c.messages.length - 1].role === "assistant") c.messages.pop();
+        if (id === activeId) {
+          messages = c.messages;
+          paintThread();
+        }
+        var asst2 = bubble("assistant", "генерация…");
+        c.messages.push({ role: "assistant", content: "генерация…", pending: true });
+        persist();
+        runMedia(kind, prompt, id);
       });
       row.appendChild(dl);
       row.appendChild(rg);
@@ -1475,12 +1541,44 @@
       if (!s && j.data && typeof j.data === "object") s = j.data.status || j.data.state;
       return String(s || "").toLowerCase();
     }
-    function pollVideo(id, model, asst, prompt) {
+    function setPendingText(id, text) {
+      var c = chatById(id);
+      if (!c) return;
+      var last = c.messages[c.messages.length - 1];
+      if (last && last.role === "assistant") {
+        last.content = text;
+        last.pending = true;
+      }
+      if (id === activeId) {
+        var els = log.querySelectorAll(".chat-msg.assistant .txt");
+        if (els.length) els[els.length - 1].textContent = text;
+        if (status) status.textContent = text;
+      }
+    }
+    function finishAssistant(id, fields) {
+      var c = chatById(id);
+      if (!c) return;
+      var last = c.messages[c.messages.length - 1];
+      if (last && last.role === "assistant") Object.assign(last, fields, { pending: false });
+      else c.messages.push(Object.assign({ role: "assistant", content: "" }, fields, { pending: false }));
+      c.busy = false;
+      c.ac = null;
+      persist();
+      if (id === activeId) {
+        messages = c.messages;
+        paintThread();
+        setChatBusy(id, false);
+        if (status) status.textContent = "";
+      } else {
+        renderTabs();
+      }
+    }
+    function pollVideo(vid, model, chatId, prompt, acLocal) {
       var delay = 2500;
       var t0 = Date.now();
       var maxWait = 45 * 60 * 1000;
       function tick() {
-        if (ac && ac.signal.aborted) {
+        if (acLocal && acLocal.signal.aborted) {
           var e = new Error("остановлено");
           e.name = "AbortError";
           return Promise.reject(e);
@@ -1488,9 +1586,9 @@
         if (Date.now() - t0 > maxWait) {
           return Promise.reject(new Error("видео всё ещё не готово (ждали 45 мин)"));
         }
-        return fetch("/admin/videos/" + encodeURIComponent(id) + "?model=" + encodeURIComponent(model), {
+        return fetch("/admin/videos/" + encodeURIComponent(vid) + "?model=" + encodeURIComponent(model), {
           credentials: "same-origin",
-          signal: ac ? ac.signal : undefined,
+          signal: acLocal ? acLocal.signal : undefined,
           headers: { "X-CSRF-Token": csrfToken() }
         }).then(function (r) {
           return r.json().then(function (j) { return { ok: r.ok, j: j }; }).catch(function () {
@@ -1500,17 +1598,10 @@
           var j = x.j || {};
           var st = videoJobStatus(j);
           var sec = Math.round((Date.now() - t0) / 1000);
-          asst.body.textContent = "видео " + id + " · " + (st || "ожидание") + " · " + sec + " с";
-          if (status) status.textContent = "ожидание генерации… " + sec + " с · Стоп отменяет опрос";
-          stickBottom();
+          setPendingText(chatId, "видео " + vid + " · " + (st || "ожидание") + " · " + sec + " с");
           if (st === "completed" || st === "complete" || st === "succeeded" || st === "success") {
-            asst.body.textContent = "";
-            var src = "/admin/videos/" + encodeURIComponent(id) + "/content?model=" + encodeURIComponent(model);
-            var v = document.createElement("video");
-            v.controls = true;
-            v.src = src;
-            asst.body.appendChild(v);
-            mediaActions(asst, "video", src, prompt);
+            var src = "/admin/videos/" + encodeURIComponent(vid) + "/content?model=" + encodeURIComponent(model);
+            finishAssistant(chatId, { content: "Видео сгенерировано.", video: src });
             return;
           }
           if (st === "failed" || st === "error" || st === "cancelled" || st === "canceled" || j.error) {
@@ -1525,25 +1616,30 @@
           if (e && e.name === "AbortError") throw e;
           if (e && e.fatal) throw e;
           delay = Math.min(10000, delay + 400);
-          asst.body.textContent = "видео " + id + " · повтор запроса статуса…";
+          setPendingText(chatId, "видео " + vid + " · повтор запроса статуса…");
           return new Promise(function (res) { setTimeout(res, delay); }).then(tick);
         });
       }
       return tick();
     }
-    function runMedia(mode, text, asst) {
-      setBusy(true);
-      status.textContent = "генерация…";
-      ac = new AbortController();
-      var model = modelEl && modelEl.value;
+    function runMedia(mode, text, chatId) {
+      var c = chatById(chatId);
+      if (!c) return;
+      setChatBusy(chatId, true);
+      if (chatId === activeId && status) status.textContent = "генерация…";
+      var acLocal = new AbortController();
+      c.ac = acLocal;
+      var model = (chatId === activeId && modelEl) ? modelEl.value : (c.model || (modelEl && modelEl.value));
       var url = mode === "image" ? "/admin/images" : "/admin/videos";
       var extra = collectExtraParams();
-      var payload = { model: model, prompt: text, messages: historyForAPI() };
+      var payload = { model: model, prompt: text, messages: (c.messages || []).filter(function (m) { return !m.pending; }).map(function (m) {
+        return { role: m.role, content: m.content };
+      }) };
       Object.keys(extra).forEach(function (k) { payload[k] = extra[k]; });
       if (payload.n == null) payload.n = 1;
       if (!payload.size) payload.size = mode === "video" ? "720x1280" : "1024x1024";
       if (mode === "video" && (payload.seconds == null || payload.seconds === "")) payload.seconds = "4";
-      if (refs.length) {
+      if (refs.length && chatId === activeId) {
         payload.input_image = refs[0];
         payload.input_images = refs.slice();
         payload.input_references = refs.map(function (u) {
@@ -1553,7 +1649,7 @@
       fetch(url, {
         method: "POST",
         credentials: "same-origin",
-        signal: ac.signal,
+        signal: acLocal.signal,
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
         body: JSON.stringify(payload)
       }).then(function (r) {
@@ -1563,45 +1659,19 @@
         if (mode === "image") {
           var d = (x.j.data && x.j.data[0]) || {};
           var src = d.b64_json ? ("data:image/png;base64," + d.b64_json) : (d.url || "");
-          if (src) {
-            asst.body.textContent = "";
-            var img = document.createElement("img");
-            img.src = src;
-            img.alt = text;
-            asst.body.appendChild(img);
-            messages.push({ role: "assistant", content: "Изображение сгенерировано.", image: src });
-            mediaActions(asst, "image", src, text);
-          } else {
-            asst.body.textContent = JSON.stringify(x.j);
-            messages.push({ role: "assistant", content: asst.body.textContent });
-          }
-        } else {
-          if (!x.j.id) throw new Error("провайдер не вернул id задачи");
-          asst.body.textContent = "видео " + x.j.id + " · " + (x.j.status || "ожидание");
-          status.textContent = "ожидание генерации…";
-          return pollVideo(x.j.id, model, asst, text).then(function () {
-            messages.push({ role: "assistant", content: "Видео сгенерировано." });
-            persist();
-            setBusy(false);
-            status.textContent = "";
-          });
-        }
-        persist();
-        setBusy(false);
-        status.textContent = "";
-      }).catch(function (e) {
-        if (e && e.name === "AbortError") {
-          asst.body.textContent = asst.body.textContent || "остановлено";
-          status.textContent = "остановлено";
-          persist();
-          setBusy(false);
+          if (src) finishAssistant(chatId, { content: "Изображение сгенерировано.", image: src });
+          else finishAssistant(chatId, { content: JSON.stringify(x.j) });
           return;
         }
-        asst.body.textContent = String(e.message || e);
-        messages.push({ role: "assistant", content: asst.body.textContent });
-        persist();
-        setBusy(false);
-        status.textContent = "";
+        if (!x.j.id) throw new Error("провайдер не вернул id задачи");
+        setPendingText(chatId, "видео " + x.j.id + " · " + (x.j.status || "ожидание"));
+        return pollVideo(x.j.id, model, chatId, text, acLocal);
+      }).catch(function (e) {
+        if (e && e.name === "AbortError") {
+          finishAssistant(chatId, { content: "остановлено" });
+          return;
+        }
+        finishAssistant(chatId, { content: String(e.message || e) });
       });
     }
 
@@ -1625,26 +1695,31 @@
       }
       if (!text) text = "по референсам";
       input.value = "";
+      var chatId = activeId;
       messages.push({ role: "user", content: text });
+      messages.push({ role: "assistant", content: "генерация…", pending: true });
       persist();
       var userB = bubble("user", text);
       if (mode === "image" || mode === "video") appendRefsToBubble(userB, shot);
-      var asst = bubble("assistant", "");
+      var asst = bubble("assistant", "генерация…");
       if (mode === "image" || mode === "video") {
-        runMedia(mode, text, asst);
+        runMedia(mode, text, chatId);
         clearRefs();
         return;
       }
       var acc = "";
       var think = "";
-      setBusy(true);
-      status.textContent = "генерация…";
-      ac = new AbortController();
+      setChatBusy(chatId, true);
+      if (status) status.textContent = "генерация…";
+      var acLocal = new AbortController();
+      var owner = chatById(chatId);
+      if (owner) owner.ac = acLocal;
+      ac = acLocal;
       var t0 = Date.now();
       fetch("/admin/chat", {
         method: "POST",
         credentials: "same-origin",
-        signal: ac.signal,
+        signal: acLocal.signal,
         headers: { "Content-Type": "application/json", "Accept": "text/event-stream", "X-CSRF-Token": csrfToken() },
         body: JSON.stringify({
           model: model,
@@ -1659,7 +1734,7 @@
             if (extra.max_tokens != null) return extra.max_tokens;
             return parseInt(document.getElementById("chat-max").value, 10) || 1024;
           })(),
-          messages: messages
+          messages: messages.filter(function (m) { return !m.pending; })
         })
       }).then(function (r) {
         if (!r.ok) {
@@ -1691,37 +1766,31 @@
                 var em = j.error.message || j.error;
                 if (typeof em === "string") acc += em;
               }
-              asst.body.textContent = acc;
-              if (asst.think) {
-                asst.think.hidden = !think;
-                asst.think.textContent = think;
+              if (chatId === activeId) {
+                asst.body.textContent = acc;
+                if (asst.think) {
+                  asst.think.hidden = !think;
+                  asst.think.textContent = think;
+                }
+                stickBottom();
+              } else {
+                setPendingText(chatId, acc || "генерация…");
               }
-              stickBottom();
             });
             return pump();
           });
         }
         return pump();
       }).then(function () {
-        if (acc) messages.push({ role: "assistant", content: acc, think: think || undefined });
-        else if (think) messages.push({ role: "assistant", content: think });
-        status.textContent = ((Date.now() - t0) / 1000).toFixed(1) + " с";
-        persist();
-        stickBottom();
+        var body = acc || think || "";
+        finishAssistant(chatId, { content: body, think: think || undefined });
+        if (chatId === activeId) status.textContent = ((Date.now() - t0) / 1000).toFixed(1) + " с";
       }).catch(function (e) {
         if (e.name === "AbortError") {
-          status.textContent = "остановлено";
-          if (acc) messages.push({ role: "assistant", content: acc, think: think || undefined });
-          persist();
+          finishAssistant(chatId, { content: acc || "остановлено", think: think || undefined });
           return;
         }
-        status.textContent = e.message || "ошибка";
-        asst.body.textContent = asst.body.textContent || (e.message || "ошибка");
-      }).finally(function () {
-        setBusy(false);
-        ac = null;
-        persist();
-        stickBottom();
+        finishAssistant(chatId, { content: e.message || "ошибка" });
       });
     });
     restore();

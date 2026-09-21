@@ -6,6 +6,8 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+- Admin chat: live queue is a collapsible panel at the top (arrow). Video/image generation stays on its tab after switching away.
+
 ## 0.0.7 — 2026-09-21
 
 - Queue wait timeout no longer cancels a job that already started (fixes `context deadline exceeded` on long chat/video).

@@ -1,5 +1,15 @@
 {{define "content"}}
 <div class="chat-shell">
+  <div class="chat-q" id="chat-q">
+    <button type="button" class="chat-q-toggle" id="chat-q-toggle" aria-expanded="false" title="Очередь запросов">
+      <span class="chat-q-arrow" aria-hidden="true">▾</span>
+      Очередь
+      <span class="pill" id="chat-q-n" hidden>0</span>
+    </button>
+    <div class="chat-q-panel" id="chat-q-panel" hidden>
+      <div id="chat-q-list" class="q-list"></div>
+    </div>
+  </div>
   <div class="chat-tabs" id="chat-tabs"></div>
   <div class="toolbar chat-toolbar">
     <select id="gen-mode" class="sel-sm" title="Тип контента">

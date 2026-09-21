@@ -715,6 +715,31 @@ a.btn, a.btn-sm {
   .bill-stats { grid-template-columns: 1fr 1fr; }
   .bill-periods a { padding: .55rem .7rem; }
 }
+.chat-q { flex: 0 0 auto; margin: 0 0 .45rem; }
+.chat-q-toggle {
+  display: inline-flex; align-items: center; gap: .4rem;
+  min-height: 36px; padding: .2rem .55rem;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: #10161f; color: var(--muted); font: inherit; cursor: pointer;
+}
+.chat-q-toggle:hover, .chat-q-toggle.is-open { color: var(--text); background: #152033; }
+.chat-q-arrow {
+  display: inline-block; width: 1em; text-align: center;
+  transition: transform .15s ease;
+}
+.chat-q-toggle.is-open .chat-q-arrow { transform: rotate(-180deg); }
+@media (prefers-reduced-motion: reduce) {
+  .chat-q-arrow { transition: none; }
+}
+.chat-q-panel {
+  margin-top: .45rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #10161f;
+  padding: .55rem .7rem;
+  max-height: 40vh;
+  overflow: auto;
+}
 .chat-tabs {
   display: flex; gap: .35rem; flex-wrap: wrap; align-items: center;
   margin: 0 0 .55rem;
