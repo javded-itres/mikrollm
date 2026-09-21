@@ -86,6 +86,53 @@ func TestForwardHubAlias(t *testing.T) {
 	}
 }
 
+func TestForwardHubToolCalls(t *testing.T) {
+	setupHub := func(t *testing.T, px *Proxy) {
+		t.Helper()
+		hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"chatcmpl-7","object":"chat.completion","model":"coder","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","reasoning":"will call","tool_calls":[{"id":"call_1","index":0,"type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Moscow\"}"}}]}}],"usage":{"prompt_tokens":9,"completion_tokens":3,"total_tokens":12}}`))
+		}))
+		t.Cleanup(hub.Close)
+		px.SetHubDial(fakeHubDial{url: hub.URL})
+	}
+
+	t.Run("non-stream passes tool_calls through", func(t *testing.T) {
+		st, _, _, px, _ := setup(t)
+		setupHub(t, px)
+		if _, err := st.SaveModel(store.Model{Alias: "remote-coder", UpstreamName: "coder", Enabled: true, HubNodeID: "npeer", HubNodeName: "ams-1"}); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"remote-coder","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object"}}}]}`))
+		rec := httptest.NewRecorder()
+		px.ServeChat(rec, req)
+		body := rec.Body.String()
+		if rec.Code != 200 || !strings.Contains(body, `"tool_calls"`) || !strings.Contains(body, `"finish_reason":"tool_calls"`) || !strings.Contains(body, `get_weather`) {
+			t.Fatalf("%d %s", rec.Code, body)
+		}
+	})
+
+	t.Run("stream emits tool_calls and finish chunk", func(t *testing.T) {
+		st, _, _, px, _ := setup(t)
+		setupHub(t, px)
+		if _, err := st.SaveModel(store.Model{Alias: "remote-coder", UpstreamName: "coder", Enabled: true, HubNodeID: "npeer", HubNodeName: "ams-1"}); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"remote-coder","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+		rec := httptest.NewRecorder()
+		px.ServeChat(rec, req)
+		body := rec.Body.String()
+		if rec.Code != 200 || rec.Header().Get("Content-Type") != "text/event-stream" {
+			t.Fatalf("%d %s %s", rec.Code, rec.Header().Get("Content-Type"), body)
+		}
+		for _, want := range []string{`"tool_calls"`, `get_weather`, `"{\"city\":\"Moscow\"}"`, `"finish_reason":"tool_calls"`, `"total_tokens":12`, "data: [DONE]"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("stream missing %q: %s", want, body)
+			}
+		}
+	})
+}
+
 func TestHubRelaySkipsAPIKey(t *testing.T) {
 	_, _, _, px, _ := setup(t)
 	px.SetHubRelay("hub-secret")

@@ -6,6 +6,7 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+- **Tool calling works over hub aliases**: relayed chat completions now keep `tool_calls`, `finish_reason`, `id`, `model` and `usage` (previously only `content`/`reasoning` survived, so agents saw empty replies). Stream clients get a proper two-chunk SSE with `finish_reason`. Non-chat relay payloads still pass through untouched.
 - Admin chat: live queue is a collapsible panel at the top (arrow). Video/image generation stays on its tab after switching away.
 - Chat «Генерация» lists this session’s in-flight prompts, not gateway step queues. GET video status/content does not consume API-key RPM.
 

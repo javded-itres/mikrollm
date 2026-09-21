@@ -90,34 +90,85 @@ type Catalog struct {
 	Nodes    []NodePublic `json:"nodes"`
 }
 
-// CollapseChat turns an OpenAI JSON completion or an SSE stream into one JSON object.
-func CollapseChat(body []byte) []byte {
-	content, reasoning := ChatText(body)
-	if content == "" && reasoning == "" {
-		return bytes.TrimSpace(body)
-	}
-	msg := map[string]any{"role": "assistant", "content": content}
-	if reasoning != "" {
-		msg["reasoning"] = reasoning
-	}
-	out, err := json.Marshal(map[string]any{
-		"choices": []any{map[string]any{"message": msg}},
-	})
-	if err != nil {
-		return body
-	}
-	return out
+// ToolCall is one function invocation requested by the model.
+type ToolCall struct {
+	ID       string       `json:"id,omitempty"`
+	Index    int          `json:"index"`
+	Type     string       `json:"type,omitempty"`
+	Function ToolFunction `json:"function"`
 }
 
-func ChatText(body []byte) (content, reasoning string) {
+// ToolFunction is the invoked function name plus its JSON arguments (a string per OpenAI spec).
+type ToolFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// ChatResult is a full chat completion reassembled from either a non-stream
+// JSON response or a sequence of SSE chunks. Nothing the model produced is
+// dropped: content, reasoning, tool calls, finish reason and usage.
+type ChatResult struct {
+	ID           string
+	Model        string
+	Content      string
+	Reasoning    string
+	ToolCalls    []ToolCall
+	FinishReason string
+	Usage        json.RawMessage
+
+	found   bool
+	callPos map[int]int
+}
+
+// toolCallRaw tolerates providers that send arguments as an object instead of a string.
+type toolCallRaw struct {
+	ID       string `json:"id"`
+	Index    *int   `json:"index"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	} `json:"function"`
+}
+
+func (t toolCallRaw) idx() int {
+	if t.Index == nil {
+		return 0
+	}
+	return *t.Index
+}
+
+func (t toolCallRaw) arguments() string {
+	raw := bytes.TrimSpace(t.Function.Arguments)
+	if len(raw) == 0 {
+		return ""
+	}
+	if raw[0] == '"' {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			return s
+		}
+		return ""
+	}
+	var buf bytes.Buffer
+	if json.Compact(&buf, raw) == nil {
+		return buf.String()
+	}
+	return ""
+}
+
+// ParseChat reads an OpenAI chat completion body (plain JSON or an SSE stream)
+// and returns everything the model produced, merged across chunks.
+func ParseChat(body []byte) ChatResult {
+	var r ChatResult
 	trim := bytes.TrimSpace(body)
 	if len(trim) == 0 {
-		return "", ""
+		return r
 	}
 	if json.Valid(trim) && !bytes.HasPrefix(trim, []byte("data:")) {
-		return chatParts(trim)
+		r.mergeChunk(trim)
+		return r
 	}
-	var c, r strings.Builder
 	for _, line := range bytes.Split(body, []byte("\n")) {
 		line = bytes.TrimSpace(line)
 		if !bytes.HasPrefix(line, []byte("data:")) {
@@ -127,38 +178,140 @@ func ChatText(body []byte) (content, reasoning string) {
 		if bytes.Equal(data, []byte("[DONE]")) || len(data) == 0 {
 			continue
 		}
-		cc, rr := chatParts(data)
-		c.WriteString(cc)
-		r.WriteString(rr)
+		r.mergeChunk(data)
 	}
-	return c.String(), r.String()
+	return r
 }
 
-func chatParts(raw []byte) (content, reasoning string) {
+func (r *ChatResult) mergeChunk(raw []byte) {
 	var j struct {
+		ID      string          `json:"id"`
+		Model   string          `json:"model"`
+		Usage   json.RawMessage `json:"usage"`
 		Choices []struct {
-			Message struct {
-				Content          any `json:"content"`
-				Reasoning        any `json:"reasoning"`
-				ReasoningContent any `json:"reasoning_content"`
+			FinishReason *string `json:"finish_reason"`
+			Message      struct {
+				Content          any           `json:"content"`
+				Reasoning        any           `json:"reasoning"`
+				ReasoningContent any           `json:"reasoning_content"`
+				ToolCalls        []toolCallRaw `json:"tool_calls"`
 			} `json:"message"`
 			Delta struct {
-				Content          any `json:"content"`
-				Reasoning        any `json:"reasoning"`
-				ReasoningContent any `json:"reasoning_content"`
+				Content          any           `json:"content"`
+				Reasoning        any           `json:"reasoning"`
+				ReasoningContent any           `json:"reasoning_content"`
+				ToolCalls        []toolCallRaw `json:"tool_calls"`
 			} `json:"delta"`
 		} `json:"choices"`
 	}
-	if json.Unmarshal(raw, &j) != nil || len(j.Choices) == 0 {
-		return "", ""
+	if json.Unmarshal(raw, &j) != nil {
+		return
 	}
+	if j.ID != "" && r.ID == "" {
+		r.ID = j.ID
+	}
+	if j.Model != "" && r.Model == "" {
+		r.Model = j.Model
+	}
+	if len(bytes.TrimSpace(j.Usage)) > 0 {
+		r.Usage = j.Usage
+	}
+	if len(j.Choices) == 0 {
+		return
+	}
+	r.found = true
 	m, d := j.Choices[0].Message, j.Choices[0].Delta
-	content = anyText(m.Content)
-	if content == "" {
-		content = anyText(d.Content)
+	r.Content += anyText(m.Content) + anyText(d.Content)
+	r.Reasoning += anyText(m.Reasoning) + anyText(m.ReasoningContent) + anyText(d.Reasoning) + anyText(d.ReasoningContent)
+	r.mergeCalls(m.ToolCalls)
+	r.mergeCalls(d.ToolCalls)
+	if j.Choices[0].FinishReason != nil && *j.Choices[0].FinishReason != "" {
+		r.FinishReason = *j.Choices[0].FinishReason
 	}
-	reasoning = anyText(m.Reasoning) + anyText(m.ReasoningContent) + anyText(d.Reasoning) + anyText(d.ReasoningContent)
-	return content, reasoning
+}
+
+func (r *ChatResult) mergeCalls(calls []toolCallRaw) {
+	// positions maps stream index to the slot in r.ToolCalls.
+	r.mergeIndexInit()
+	for _, c := range calls {
+		pos, ok := r.callPos[c.idx()]
+		if !ok {
+			pos = len(r.ToolCalls)
+			r.callPos[c.idx()] = pos
+			r.ToolCalls = append(r.ToolCalls, ToolCall{Index: c.idx()})
+		}
+		t := &r.ToolCalls[pos]
+		if c.ID != "" {
+			t.ID = c.ID
+		}
+		if c.Type != "" {
+			t.Type = c.Type
+		}
+		if name := c.Function.Name; name != "" {
+			if t.Function.Name == "" {
+				t.Function.Name = name
+			} else if name != t.Function.Name {
+				// A few providers stream the name in fragments.
+				t.Function.Name += name
+			}
+		}
+		t.Function.Arguments += c.arguments()
+	}
+}
+
+func (r *ChatResult) mergeIndexInit() {
+	if r.callPos != nil {
+		return
+	}
+	r.callPos = map[int]int{}
+	for i, tc := range r.ToolCalls {
+		r.callPos[tc.Index] = i
+	}
+}
+
+// CollapseChat turns an OpenAI JSON completion or an SSE stream into one JSON
+// object, preserving tool calls, finish reason, ids and usage. Bodies that do
+// not look like a chat completion (errors, media payloads) pass through as-is.
+func CollapseChat(body []byte) []byte {
+	r := ParseChat(body)
+	if !r.found {
+		return bytes.TrimSpace(body)
+	}
+	msg := map[string]any{"role": "assistant", "content": r.Content}
+	if r.Reasoning != "" {
+		msg["reasoning"] = r.Reasoning
+	}
+	if len(r.ToolCalls) > 0 {
+		msg["tool_calls"] = r.ToolCalls
+	}
+	choice := map[string]any{"index": 0, "message": msg}
+	if r.FinishReason != "" {
+		choice["finish_reason"] = r.FinishReason
+	}
+	resp := map[string]any{
+		"object":  "chat.completion",
+		"choices": []any{choice},
+	}
+	if r.ID != "" {
+		resp["id"] = r.ID
+	}
+	if r.Model != "" {
+		resp["model"] = r.Model
+	}
+	if len(r.Usage) > 0 {
+		resp["usage"] = r.Usage
+	}
+	out, err := json.Marshal(resp)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+// ChatText extracts just the text (content and reasoning) of a completion.
+func ChatText(body []byte) (content, reasoning string) {
+	r := ParseChat(body)
+	return r.Content, r.Reasoning
 }
 
 func anyText(v any) string {

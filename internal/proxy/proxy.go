@@ -771,21 +771,48 @@ func (p *Proxy) forwardHub(ctx context.Context, w http.ResponseWriter, k domain.
 	}
 	p.st.Log(k.Prefix, requested, b.Name, code, time.Since(start), int64(len(out)), domain.TokenUsage{})
 	if suffix == "/chat" && wantStream && code < 400 {
-		text, reasoning := hubclient.ChatText(out)
-		if text == "" {
+		res := hubclient.ParseChat(out)
+		text, reasoning := res.Content, res.Reasoning
+		if text == "" && len(res.ToolCalls) == 0 {
 			text = reasoning
 			reasoning = ""
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		delta := map[string]any{"content": text}
+		delta := map[string]any{"role": "assistant", "content": text}
 		if reasoning != "" {
 			delta["reasoning"] = reasoning
 		}
-		chunk, _ := json.Marshal(map[string]any{
-			"choices": []any{map[string]any{"delta": delta}},
-		})
-		_, _ = w.Write([]byte("data: " + string(chunk) + "\n\ndata: [DONE]\n\n"))
+		if len(res.ToolCalls) > 0 {
+			delta["tool_calls"] = res.ToolCalls
+		}
+		base := map[string]any{"object": "chat.completion.chunk", "created": time.Now().Unix()}
+		if res.ID != "" {
+			base["id"] = res.ID
+		} else {
+			base["id"] = "chatcmpl-hub"
+		}
+		if res.Model != "" {
+			base["model"] = res.Model
+		}
+		finish := res.FinishReason
+		if finish == "" {
+			finish = "stop"
+		}
+		emit := func(choice map[string]any, usage json.RawMessage) {
+			chunk := map[string]any{"choices": []any{choice}}
+			for k, v := range base {
+				chunk[k] = v
+			}
+			if len(usage) > 0 {
+				chunk["usage"] = usage
+			}
+			b, _ := json.Marshal(chunk)
+			_, _ = w.Write([]byte("data: " + string(b) + "\n\n"))
+		}
+		emit(map[string]any{"index": 0, "delta": delta, "finish_reason": nil}, nil)
+		emit(map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": finish}, res.Usage)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		return 200, nil
 	}
 	ct := resp.Header.Get("Content-Type")

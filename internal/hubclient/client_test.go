@@ -187,6 +187,55 @@ func TestLocalRelayKinds(t *testing.T) {
 	}
 }
 
+func TestRunJobPreservesToolCalls(t *testing.T) {
+	var got Result
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/result" {
+			_ = json.NewDecoder(r.Body).Decode(&got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(hs.Close)
+
+	st := &memStore{models: []domain.Model{
+		{Alias: "coder", Enabled: true, HubShare: true},
+	}}
+	c := New(st, nil, ":4000")
+	c.HubURL = hs.URL
+	c.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-7","model":"kimi","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"","reasoning":"call it","tool_calls":[{"id":"call_1","index":0,"type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Moscow\"}"}}]}}],"usage":{"prompt_tokens":9,"completion_tokens":3,"total_tokens":12}}`))
+	})
+
+	job := Job{ID: "j1", Alias: "coder", Body: json.RawMessage(`{"model":"coder","messages":[{"role":"user","content":"weather?"}],"tools":[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object"}}}]}`)}
+	c.runJob(Settings{}, job)
+
+	if got.JobID != "j1" || got.Status != 200 {
+		t.Fatalf("result not posted: %+v", got)
+	}
+	collapsed := got.Body
+	if !bytes.Contains(collapsed, []byte(`"get_weather"`)) ||
+		!bytes.Contains(collapsed, []byte(`"arguments":"{\"city\":\"Moscow\"}"`)) ||
+		!bytes.Contains(collapsed, []byte(`"finish_reason":"tool_calls"`)) ||
+		!bytes.Contains(collapsed, []byte(`"total_tokens":12`)) {
+		t.Fatalf("tool call data lost in relay: %s", collapsed)
+	}
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				ToolCalls []ToolCall `json:"tool_calls"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if json.Unmarshal(collapsed, &parsed) != nil || len(parsed.Choices[0].Message.ToolCalls) != 1 {
+		t.Fatalf("collapsed body not parseable: %s", collapsed)
+	}
+}
+
 func TestCollapseChatSSE(t *testing.T) {
 	sse := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\ndata: [DONE]\n")
 	got := CollapseChat(sse)
