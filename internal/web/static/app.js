@@ -1833,4 +1833,59 @@
     restore();
     syncModeToModel();
   })();
+
+  // Params dialog on /admin/models: chips button opens one shared <dialog>.
+  (function () {
+    var dlg = document.getElementById("params-dialog");
+    if (!dlg) return;
+    var form = document.getElementById("params-form");
+    var aliasEl = document.getElementById("pd-alias");
+    var tempNum = document.getElementById("pd-temp");
+    var tempRange = document.getElementById("pd-temp-range");
+
+    function setRadio(name, val) {
+      form.querySelectorAll('input[name="' + name + '"]').forEach(function (r) {
+        r.checked = r.value === val;
+      });
+    }
+    function setLock(id, on) {
+      var el = document.getElementById(id);
+      if (el) el.checked = on === "true" || on === true;
+    }
+
+    function syncTempFromNum() {
+      var v = tempNum.value.trim();
+      tempRange.value = v === "" ? 0 : v;
+      tempRange.classList.toggle("unset", v === "");
+    }
+    tempNum.addEventListener("input", syncTempFromNum);
+    tempRange.addEventListener("input", function () { tempNum.value = tempRange.value; tempRange.classList.remove("unset"); });
+
+    document.querySelectorAll(".js-params").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var d = btn.dataset;
+        form.setAttribute("action", "/admin/models/" + d.id + "/params");
+        aliasEl.textContent = d.alias;
+        setRadio("think", d.think || "");
+        tempNum.value = d.temp || "";
+        document.getElementById("pd-predict").value = d.predict || "";
+        document.getElementById("pd-ctx").value = d.ctx || "";
+        document.getElementById("pd-extra").value = d.extra || "";
+        setLock("pd-lock-think", d.lockThink);
+        setLock("pd-lock-temp", d.lockTemp);
+        setLock("pd-lock-predict", d.lockPredict);
+        setLock("pd-lock-ctx", d.lockCtx);
+        syncTempFromNum();
+        dlg.showModal();
+      });
+    });
+
+    dlg.querySelectorAll("[data-pd-close]").forEach(function (b) {
+      b.addEventListener("click", function () { dlg.close(); });
+    });
+    dlg.addEventListener("click", function (e) {
+      if (e.target === dlg) dlg.close();
+    });
+  })();
+
 })();

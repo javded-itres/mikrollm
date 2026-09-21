@@ -299,13 +299,71 @@ progress { width: 100%; margin-top: .75rem; height: .55rem; }
 }
 .ctx-form { display: flex; gap: .3rem; align-items: center; margin: 0; }
 .ctx-form input { width: 7.2rem; padding: .25rem .4rem; font-size: 12px; }
-.params-editor summary { cursor: pointer; list-style: none; }
-.params-form { display: flex; flex-direction: column; gap: .45rem; margin-top: .5rem; min-width: 15rem; }
-.params-form label { display: flex; justify-content: space-between; align-items: center; gap: .5rem; font-size: 12px; color: var(--muted); }
-.params-form input, .params-form select { width: 8.4rem; padding: .25rem .4rem; font-size: 12px; }
-.params-form textarea { width: 100%; font-size: 12px; font-family: monospace; resize: vertical; }
-.params-form .mlock { display: flex; gap: .5rem; flex-wrap: wrap; }
-.params-form .mlock label { display: inline-flex; gap: .2rem; font-weight: 400; }
+/* Params per alias: chips in the row + one shared dialog editor. */
+.col-params { min-width: 8.5rem; }
+.params-btn {
+  display: inline-flex; gap: .25rem; flex-wrap: wrap; align-items: center;
+  background: transparent; border: 1px dashed var(--line); border-radius: 8px;
+  padding: .3rem .45rem; cursor: pointer; color: var(--text); font: inherit;
+}
+.params-btn:hover { border-color: var(--acc); border-style: solid; }
+.params-btn.on { border-style: solid; border-color: var(--line); background: #1a2230; }
+.pchip {
+  display: inline-flex; align-items: center; gap: .15rem;
+  background: #22304a; color: #cfe0ff; border-radius: 6px;
+  padding: .08rem .4rem; font-size: 12px; white-space: nowrap;
+}
+
+.pdialog {
+  border: 1px solid var(--line); border-radius: 14px;
+  background: var(--card); color: var(--text);
+  padding: 0; width: min(560px, 94vw); max-height: 90vh;
+}
+.pdialog::backdrop { background: rgba(4, 8, 14, .62); backdrop-filter: blur(2px); }
+.pdialog form { margin: 0; padding: 1.1rem 1.2rem; }
+.pdialog-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .3rem; }
+.pdialog-head h3 { margin: 0; font-size: 1.05rem; font-weight: 650; }
+.pdialog-head code { color: var(--acc); }
+.pdialog-x { padding: .1rem .5rem; }
+.pdialog-foot { display: flex; justify-content: flex-end; gap: .6rem; margin-top: 1rem; }
+.pdialog-foot .primary {
+  background: var(--acc); border: 0; color: #0b1220; font-weight: 650;
+  padding: .45rem 1.1rem; border-radius: 8px; cursor: pointer;
+}
+
+.psec { border-top: 1px solid var(--line); padding: .8rem 0; }
+.psec:first-of-type { border-top: 0; }
+.psec-title { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: .55rem; }
+.psec-title code { color: var(--muted); font-weight: 500; }
+.plock input { margin: 0 .15rem 0 0; vertical-align: -1px; }
+
+.pseg { display: flex; gap: .35rem; flex-wrap: wrap; }
+.pseg label { position: relative; }
+.pseg input { position: absolute; opacity: 0; pointer-events: none; }
+.pseg span {
+  display: inline-block; padding: .3rem .7rem; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--muted);
+  cursor: pointer; transition: border-color .12s, color .12s, background .12s;
+}
+.pseg span:hover { border-color: var(--acc); color: var(--text); }
+.pseg input:checked + span { border-color: var(--acc); background: #1d3252; color: #dbe9ff; }
+.pseg .pv-off input:checked + span { border-color: var(--bad); background: #3d2026; color: #ffc9cd; }
+.pseg .pv-on input:checked + span { border-color: var(--ok); background: #17352a; color: #baf3d4; }
+
+.prow { display: flex; align-items: center; gap: .7rem; margin-bottom: .5rem; }
+.prow .plabel { flex: 0 0 7.4rem; font-size: 13px; font-family: ui-monospace, Menlo, monospace; color: var(--text); }
+.prow input[type="number"] { width: 6.5rem; padding: .3rem .5rem; font-size: 13px; background: #0f1520; border: 1px solid var(--line); border-radius: 8px; color: var(--text); }
+.prow .phint { flex: 1; }
+.prow input[type="range"] { flex: 1; accent-color: var(--acc); }
+.prow input[type="range"].unset { opacity: .35; }
+.psec .phint { margin-top: .15rem; }
+.mlock2 { display: flex; gap: .8rem; align-items: center; font-size: 12px; }
+.mlock2 label { display: inline-flex; gap: .25rem; align-items: center; }
+#pd-extra {
+  width: 100%; font: 12.5px ui-monospace, Menlo, monospace;
+  background: #0f1520; border: 1px solid var(--line); border-radius: 8px;
+  color: var(--text); padding: .5rem .6rem; resize: vertical;
+}
 a.btn, a.btn-sm {
   display: inline-flex; align-items: center; text-decoration: none;
 }

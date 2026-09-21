@@ -256,44 +256,25 @@
               <button class="btn-sm" type="submit">OK</button>
             </form>
           </td>
-          <td>
-            <details class="params-editor">
-              <summary>{{if $m.ParamsSet}}<span class="pill" title="Дефолты подставляются в запросы, если клиент их не задал">заданы</span>{{else}}<span class="muted small">по умолч.</span>{{end}}</summary>
-              <form method="post" action="/admin/models/{{$m.ID}}/params" class="params-form">
-                <label>think
-                  <select name="think" title="Рассуждение: для Ollama /v1 уходит как reasoning_effort, для /api/chat — как think, OpenRouter — reasoning, vLLM/LM Studio — chat_template_kwargs">
-                    <option value="" {{if eq $m.ParamsThink ""}}selected{{end}}>не задан</option>
-                    <option value="true" {{if eq $m.ParamsThink "true"}}selected{{end}}>true</option>
-                    <option value="false" {{if eq $m.ParamsThink "false"}}selected{{end}}>false</option>
-                    <option value="low" {{if eq $m.ParamsThink "low"}}selected{{end}}>low</option>
-                    <option value="medium" {{if eq $m.ParamsThink "medium"}}selected{{end}}>medium</option>
-                    <option value="high" {{if eq $m.ParamsThink "high"}}selected{{end}}>high</option>
-                    <option value="max" {{if eq $m.ParamsThink "max"}}selected{{end}}>max</option>
-                  </select>
-                </label>
-                <label>temperature
-                  <input type="number" name="temperature" min="0" max="2" step="0.05" value="{{$m.ParamsTemp}}" placeholder="—">
-                </label>
-                <label>num_predict
-                  <input type="number" name="num_predict" min="1" step="256" value="{{$m.ParamsPredict}}" placeholder="—" title="Макс. токенов ответа; для OpenAI-пути уходит как max_tokens">
-                </label>
-                <label>num_ctx
-                  <input type="number" name="num_ctx" min="1024" step="1024" value="{{$m.ParamsCtx}}" placeholder="—" title="Контекст Ollama; работает только через /api/chat">
-                </label>
-                <div class="mlock muted small" title="lock — перезаписать даже если клиент прислал своё значение">
-                  lock:
-                  <label><input type="checkbox" name="lock" value="think" {{if $m.LockThink}}checked{{end}}> think</label>
-                  <label><input type="checkbox" name="lock" value="temperature" {{if $m.LockTemp}}checked{{end}}> temp</label>
-                  <label><input type="checkbox" name="lock" value="num_predict" {{if $m.LockPredict}}checked{{end}}> predict</label>
-                  <label><input type="checkbox" name="lock" value="num_ctx" {{if $m.LockCtx}}checked{{end}}> ctx</label>
-                </div>
-                <label>extra JSON
-                  <textarea name="extra" rows="2" placeholder='{"top_p":0.9,"seed":42,"x_key":…}'>{{$m.ParamsExtra}}</textarea>
-                </label>
-                <button class="btn-sm" type="submit">Сохранить</button>
-                <div class="muted small">Пустое поле — не подставлять. Клиентские значения важнее профиля, кроме lock.</div>
-              </form>
-            </details>
+          <td class="col-params">
+            <button type="button" class="params-btn{{if $m.ParamsSet}} on{{end}} js-params"
+              data-id="{{$m.ID}}" data-alias="{{$m.Alias}}"
+              data-think="{{$m.ParamsThink}}" data-temp="{{$m.ParamsTemp}}"
+              data-predict="{{$m.ParamsPredict}}" data-ctx="{{$m.ParamsCtx}}"
+              data-extra="{{$m.ParamsExtra}}"
+              data-lock-think="{{$m.LockThink}}" data-lock-temp="{{$m.LockTemp}}"
+              data-lock-predict="{{$m.LockPredict}}" data-lock-ctx="{{$m.LockCtx}}"
+              title="Параметры генерации по умолчанию для {{$m.Alias}}">
+              {{if $m.ParamsSet}}
+                {{if $m.ParamsThink}}<span class="pchip">🧠 {{$m.ParamsThink}}{{if $m.LockThink}}🔒{{end}}</span>{{end}}
+                {{if $m.ParamsTemp}}<span class="pchip">🌡 {{$m.ParamsTemp}}{{if $m.LockTemp}}🔒{{end}}</span>{{end}}
+                {{if $m.ParamsPredict}}<span class="pchip">↧ {{$m.ParamsPredict}}{{if $m.LockPredict}}🔒{{end}}</span>{{end}}
+                {{if $m.ParamsCtx}}<span class="pchip">▭ {{$m.ParamsCtx}}{{if $m.LockCtx}}🔒{{end}}</span>{{end}}
+                {{if $m.ParamsExtra}}<span class="pchip" title="{{$m.ParamsExtra}}">+x</span>{{end}}
+              {{else}}
+                <span class="muted small">по умолч.</span>
+              {{end}}
+            </button>
           </td>
           <td>
             {{if $m.HubNodeID}}
@@ -330,6 +311,71 @@
   </div>
 </div>
 {{end}}
+
+<dialog id="params-dialog" class="pdialog">
+  <form method="post" id="params-form">
+    <div class="pdialog-head">
+      <h3>🎛 Параметры · <code id="pd-alias"></code></h3>
+      <button type="button" class="ghost btn-sm pdialog-x" data-pd-close aria-label="Закрыть">✕</button>
+    </div>
+    <p class="muted small">Значения подставляются в каждый запрос к модели, если клиент сам их не прислал. 🔒 lock — принудительно, поверх клиента.</p>
+
+    <section class="psec">
+      <div class="psec-title">
+        <span>Рассуждение <code>think</code></span>
+        <label class="plock muted small" title="Игнорировать think от клиента"><input type="checkbox" id="pd-lock-think" name="lock" value="think"> 🔒</label>
+      </div>
+      <div class="pseg" id="pd-think">
+        <label><input type="radio" name="think" value=""><span>по умолч.</span></label>
+        <label class="pv-off"><input type="radio" name="think" value="false"><span>выкл</span></label>
+        <label><input type="radio" name="think" value="low"><span>low</span></label>
+        <label><input type="radio" name="think" value="medium"><span>medium</span></label>
+        <label><input type="radio" name="think" value="high"><span>high</span></label>
+        <label><input type="radio" name="think" value="max"><span>max</span></label>
+        <label class="pv-on"><input type="radio" name="think" value="true"><span>вкл</span></label>
+      </div>
+      <div class="muted small phint">Ollama /v1 → reasoning_effort · /api/chat → think · OpenRouter → reasoning · vLLM/LM Studio → chat_template_kwargs</div>
+    </section>
+
+    <section class="psec">
+      <div class="psec-title">
+        <span>Семплирование</span>
+        <label class="plock muted small" title="Игнорировать temperature клиента"><input type="checkbox" id="pd-lock-temp" name="lock" value="temperature"> 🔒</label>
+      </div>
+      <div class="prow">
+        <span class="plabel">temperature</span>
+        <input type="range" id="pd-temp-range" min="0" max="2" step="0.05">
+        <input type="number" id="pd-temp" name="temperature" min="0" max="2" step="0.05" placeholder="—">
+      </div>
+      <div class="prow">
+        <span class="plabel">num_predict</span>
+        <input type="number" id="pd-predict" name="num_predict" min="1" step="256" placeholder="—">
+        <span class="muted small phint">лимит токенов ответа (OpenAI → max_tokens)</span>
+      </div>
+      <div class="prow">
+        <span class="plabel">num_ctx</span>
+        <input type="number" id="pd-ctx" name="num_ctx" min="1024" step="1024" placeholder="—">
+        <span class="muted small phint">контекст Ollama; только /api/chat</span>
+      </div>
+      <div class="mlock2 muted small">
+        🔒 <label><input type="checkbox" id="pd-lock-predict" name="lock" value="num_predict"> num_predict</label>
+        <label><input type="checkbox" id="pd-lock-ctx" name="lock" value="num_ctx"> num_ctx</label>
+      </div>
+    </section>
+
+    <section class="psec">
+      <div class="psec-title"><span>Дополнительно <code>extra</code></span></div>
+      <textarea id="pd-extra" name="extra" rows="3" spellcheck="false"
+        placeholder='{"top_p":0.9, "seed":42, "x_key": "…"}'></textarea>
+      <div class="muted small phint">Известные ключи (top_p, top_k, min_p, seed, repeat_penalty, stop…) идут в маппинг; свои — с префиксом x_.</div>
+    </section>
+
+    <div class="pdialog-foot">
+      <button type="button" class="ghost" data-pd-close>Отмена</button>
+      <button type="submit" class="primary">Сохранить</button>
+    </div>
+  </form>
+</dialog>
 
 {{if .Catalog}}
 <details class="card">
