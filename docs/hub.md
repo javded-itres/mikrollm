@@ -40,6 +40,7 @@ Online in the catalog = the node is pulling (last seen **&lt; 45 s**). Announce 
 2. Section **Hub network member** (`Участник hub сети`).
 3. Set a short **name** (e.g. `hap-ax3`, `ams-1`, `home-mac`). This is what others see in the catalog.
 4. Check **Hub network member** → Save.
+5. Optional: **Share on a schedule** (`Шарить по расписанию`) — time window and weekdays (empty days = every day). Timezone is IANA (default `Europe/Moscow`). Outside the window the node stays listed but aliases show as unavailable and relay returns 503.
 
 The client:
 
@@ -48,6 +49,8 @@ The client:
 - `GET /v1/pull` in a loop (~20 s long-poll).
 
 Status LED: **online** / **off** / **error** (message next to it).
+
+While the box is on, the gateway keeps a reserved alias **`auto`**. The hub operator (UI **Operator → Settings**) picks the default **node + alias**; MikroLLM copies that into `auto` on each catalog refresh (~15 s). Chat and `/v1` can call `model: "auto"`. Leave the network (or the operator clears the default) and `auto` is removed.
 
 Uncheck the box to leave. The **node id is kept**; enable again to reuse the same registration.
 

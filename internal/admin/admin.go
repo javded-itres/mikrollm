@@ -90,6 +90,8 @@ func New(d Deps) *UI {
 
 func (u *UI) Mount(mux *http.ServeMux) {
 	mux.Handle("GET /admin/static/", staticHandler())
+	mux.HandleFunc("GET /admin/manifest.webmanifest", pwaManifest)
+	mux.HandleFunc("GET /admin/sw.js", pwaServiceWorker)
 	mux.HandleFunc("GET /admin/login", u.loginPage)
 	mux.HandleFunc("POST /admin/login", u.loginPost)
 	mux.HandleFunc("POST /admin/logout", u.protect(u.logout))
@@ -273,6 +275,13 @@ func (u *UI) dash(w http.ResponseWriter, r *http.Request) {
 	if hubCfg.Name == "" {
 		hubCfg.Name, _ = os.Hostname()
 	}
+	hubAutoNode, hubAutoModel := "", ""
+	if autoM, err := u.st.GetModelByAlias(domain.HubAutoAlias); err == nil && domain.IsHubAuto(autoM) {
+		hubAutoNode, hubAutoModel = autoM.HubNodeName, autoM.UpstreamName
+		if hubAutoNode == "" {
+			hubAutoNode = autoM.HubNodeID
+		}
+	}
 	u.render(w, r, "dash", map[string]any{
 		"Title": "Статус", "Nav": "dash", "Backends": vms,
 		"Up": up, "Total": len(vms), "AliasCount": len(aliases),
@@ -281,7 +290,11 @@ func (u *UI) dash(w http.ResponseWriter, r *http.Request) {
 		"MCPPrefix": prefix, "NewMCPToken": newMCP,
 		"HubURL": hubURL, "HubEnabled": hubCfg.Enabled, "HubName": hubCfg.Name,
 		"HubNodeID": hubCfg.NodeID, "HubState": hubState, "HubLabel": hubLabel, "HubError": hubErr,
-		"Flash": flash, "Error": errMsg(r.URL.Query().Get("err")),
+		"HubAutoNode": hubAutoNode, "HubAutoModel": hubAutoModel,
+		"HubSchedule": hubCfg.Schedule, "HubSharingNow": hubCfg.Schedule.SharingAt(time.Now()),
+		"HubShareDays": shareDaySet(hubCfg.Schedule.Days),
+		"HubTZ":        hubTZ(hubCfg.Schedule.TZ),
+		"Flash":        flash, "Error": errMsg(r.URL.Query().Get("err")),
 	})
 }
 
@@ -297,6 +310,16 @@ func (u *UI) saveHub(w http.ResponseWriter, r *http.Request) {
 		cfg.Name, _ = os.Hostname()
 	}
 	cfg.Enabled = parseEnabled(r.FormValue("enabled"))
+	cfg.Schedule = domain.HubSchedule{
+		Enabled: parseEnabled(r.FormValue("share_sched")),
+		Days:    domain.ParseShareDays(r.Form["share_day"]),
+		Start:   strings.TrimSpace(r.FormValue("share_start")),
+		End:     strings.TrimSpace(r.FormValue("share_end")),
+		TZ:      strings.TrimSpace(r.FormValue("share_tz")),
+	}
+	if cfg.Schedule.TZ == "" {
+		cfg.Schedule.TZ = "Europe/Moscow"
+	}
 	if err := u.st.SetHubSettings(cfg); err != nil {
 		http.Redirect(w, r, "/admin?err="+err.Error(), http.StatusFound)
 		return
@@ -313,6 +336,10 @@ func (u *UI) setModelHubShare(w http.ResponseWriter, r *http.Request) {
 	m, err := u.st.GetModel(id)
 	if err != nil {
 		http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
+		return
+	}
+	if domain.IsHubAuto(m) {
+		http.Redirect(w, r, "/admin/models?err=reserved_auto", http.StatusFound)
 		return
 	}
 	m.HubShare = parseEnabled(r.FormValue("hub_share"))
@@ -393,6 +420,22 @@ func (u *UI) addBackend(w http.ResponseWriter, r *http.Request) {
 	}
 	go u.health.CheckOnce()
 	http.Redirect(w, r, "/admin?ok=backend_saved", http.StatusFound)
+}
+
+func shareDaySet(days []int) map[string]bool {
+	out := map[string]bool{}
+	for _, d := range days {
+		out[strconv.Itoa(d)] = true
+	}
+	return out
+}
+
+func hubTZ(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "Europe/Moscow"
+	}
+	return v
 }
 
 func parseEnabled(v string) bool {
@@ -749,6 +792,10 @@ func (u *UI) saveModel(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/models?err=select_models", http.StatusFound)
 		return
 	}
+	if strings.EqualFold(m.Alias, domain.HubAutoAlias) {
+		http.Redirect(w, r, "/admin/models?err=reserved_auto", http.StatusFound)
+		return
+	}
 	if len(m.BackendIDs) == 0 {
 		bs, _ := u.st.ListBackends()
 		for _, e := range u.health.Catalog(bs) {
@@ -797,6 +844,10 @@ func (u *UI) saveModel(w http.ResponseWriter, r *http.Request) {
 
 func (u *UI) delModel(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if m, err := u.st.GetModel(id); err == nil && domain.IsHubAuto(m) {
+		http.Redirect(w, r, "/admin/models?err=reserved_auto", http.StatusFound)
+		return
+	}
 	_ = u.st.DeleteModel(id)
 	http.Redirect(w, r, "/admin/models?ok=deleted", http.StatusFound)
 }
@@ -1261,6 +1312,8 @@ func flashMsg(code string) string {
 
 func errMsg(code string) string {
 	switch code {
+	case "reserved_auto":
+		return "Alias auto задаёт оператор хаба. Его нельзя создать, шарить или удалить вручную."
 	case "select_models":
 		return "Выберите хотя бы одну модель."
 	case "no_backend":

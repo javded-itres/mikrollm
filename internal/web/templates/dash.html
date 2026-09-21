@@ -92,7 +92,48 @@
       <input type="checkbox" name="enabled" value="1" {{if .HubEnabled}}checked{{end}}>
       Участник hub сети
     </label>
+    <label class="inline span2">
+      <input type="checkbox" name="share_sched" value="1" data-reveal="#hub-sched" {{if .HubSchedule.Enabled}}checked{{end}}>
+      Шарить по расписанию
+    </label>
+    <div class="span2" id="hub-sched" {{if not .HubSchedule.Enabled}}hidden{{end}}>
+      <p class="muted small" style="margin:0 0 .5rem">Когда alias с пометкой «в hub» доступны другим. Вне окна узел остаётся в каталоге, но модели показывают «не сейчас».</p>
+      <div class="grid2">
+        <div>
+          <label>С</label>
+          <input type="time" name="share_start" value="{{if .HubSchedule.Start}}{{.HubSchedule.Start}}{{else}}00:00{{end}}">
+        </div>
+        <div>
+          <label>До</label>
+          <input type="time" name="share_end" value="{{if .HubSchedule.End}}{{.HubSchedule.End}}{{else}}06:00{{end}}">
+        </div>
+        <div class="span2">
+          <label>Часовой пояс</label>
+          <select name="share_tz">
+            <option value="Europe/Moscow" {{if eq .HubTZ "Europe/Moscow"}}selected{{end}}>Europe/Moscow</option>
+            <option value="UTC" {{if eq .HubTZ "UTC"}}selected{{end}}>UTC</option>
+            <option value="Europe/Samara" {{if eq .HubTZ "Europe/Samara"}}selected{{end}}>Europe/Samara</option>
+            <option value="Asia/Yekaterinburg" {{if eq .HubTZ "Asia/Yekaterinburg"}}selected{{end}}>Asia/Yekaterinburg</option>
+            <option value="Asia/Novosibirsk" {{if eq .HubTZ "Asia/Novosibirsk"}}selected{{end}}>Asia/Novosibirsk</option>
+            <option value="Asia/Vladivostok" {{if eq .HubTZ "Asia/Vladivostok"}}selected{{end}}>Asia/Vladivostok</option>
+          </select>
+        </div>
+        <div class="span2 checks">
+          <label class="inline"><input type="checkbox" name="share_day" value="1" {{if index .HubShareDays "1"}}checked{{end}}> пн</label>
+          <label class="inline"><input type="checkbox" name="share_day" value="2" {{if index .HubShareDays "2"}}checked{{end}}> вт</label>
+          <label class="inline"><input type="checkbox" name="share_day" value="3" {{if index .HubShareDays "3"}}checked{{end}}> ср</label>
+          <label class="inline"><input type="checkbox" name="share_day" value="4" {{if index .HubShareDays "4"}}checked{{end}}> чт</label>
+          <label class="inline"><input type="checkbox" name="share_day" value="5" {{if index .HubShareDays "5"}}checked{{end}}> пт</label>
+          <label class="inline"><input type="checkbox" name="share_day" value="6" {{if index .HubShareDays "6"}}checked{{end}}> сб</label>
+          <label class="inline"><input type="checkbox" name="share_day" value="0" {{if index .HubShareDays "0"}}checked{{end}}> вс</label>
+        </div>
+      </div>
+      <p class="muted small" style="margin:.5rem 0 0">Пустые дни = каждый день. Сейчас: {{if .HubSharingNow}}<strong>шаринг открыт</strong>{{else}}<strong>окно закрыто</strong>{{end}} · {{.HubSchedule.Label}}</p>
+    </div>
     {{if .HubNodeID}}<p class="muted small span2">id узла: <code>{{.HubNodeID}}</code></p>{{end}}
+    {{if .HubEnabled}}
+    <p class="muted small span2">Пока оператор хаба задал модель по умолчанию, в шлюзе появляется alias <code>auto</code> (чат и API).{{if .HubAutoModel}} Сейчас: <code>auto</code> → {{.HubAutoNode}} / {{.HubAutoModel}}.{{else}} Сейчас оператор ещё не указал узел и модель.{{end}}</p>
+    {{end}}
     <div class="span2"><button type="submit">Сохранить</button></div>
   </form>
 </section>

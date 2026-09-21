@@ -294,12 +294,18 @@ func TestHubSettingsAndShare(t *testing.T) {
 	if err != nil || got.Enabled || got.Token != "" {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if err := st.SetHubSettings(domain.HubSettings{Enabled: true, NodeID: "n1", Token: "hk", Name: "hap"}); err != nil {
+	if err := st.SetHubSettings(domain.HubSettings{
+		Enabled: true, NodeID: "n1", Token: "hk", Name: "hap",
+		Schedule: domain.HubSchedule{Enabled: true, Days: []int{1, 3, 0}, Start: "00:00", End: "12:00", TZ: "UTC"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got, err = st.HubSettings()
 	if err != nil || !got.Enabled || got.NodeID != "n1" || got.Token != "hk" || got.Name != "hap" {
 		t.Fatalf("%+v %v", got, err)
+	}
+	if !got.Schedule.Enabled || got.Schedule.Start != "00:00" || len(got.Schedule.Days) != 3 {
+		t.Fatalf("schedule %+v", got.Schedule)
 	}
 	bid, err := st.UpsertBackend("mac", "http://127.0.0.1:11434", true, 1, "ollama", "")
 	if err != nil {
@@ -330,5 +336,36 @@ func TestHubSettingsAndShare(t *testing.T) {
 	}
 	if err != nil || hm.HubNodeID != "n1" {
 		t.Fatalf("hub model %+v %v", hm, err)
+	}
+}
+
+func TestUpsertHubAuto(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.EnsureAdmin("x", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertHubAuto("n1", "ams-1", "coder", 8192, []string{"chat"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := st.GetModelByAlias("auto")
+	if err != nil || m.HubNodeID != "n1" || m.UpstreamName != "coder" || m.HubShare {
+		t.Fatalf("%+v %v", m, err)
+	}
+	if err := st.UpsertHubAuto("n2", "hap", "qwen", 4096, []string{"chat"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err = st.GetModelByAlias("auto")
+	if err != nil || m.HubNodeID != "n2" || m.UpstreamName != "qwen" || m.Alias != "auto" {
+		t.Fatalf("update %+v %v", m, err)
+	}
+	if err := st.DeleteHubAuto(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetModelByAlias("auto"); err == nil {
+		t.Fatal("auto still there")
 	}
 }

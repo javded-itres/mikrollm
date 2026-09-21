@@ -11,6 +11,7 @@
 | [install-docker.md](install-docker.md) | Docker и systemd на сервере |
 | [install-mikrotik.md](install-mikrotik.md) | Контейнер RouterOS 7, veth, dst-nat, USB |
 | [install-keenetic.md](install-keenetic.md) | KeeneticOS Entware (USB, без Docker) |
+| [install-ios.md](install-ios.md) | iOS, первый шаг: gomobile + WKWebView |
 | [tls.md](tls.md) | HTTPS: свой PEM или self-signed в контейнере |
 | [admin.md](admin.md) | Админка: серверы, очереди, модели, RAM, ключи, чат, лог, биллинг |
 | [security.md](security.md) | Фильтры, системный промпт, prompt injection |

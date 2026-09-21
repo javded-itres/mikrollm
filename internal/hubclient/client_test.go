@@ -41,6 +41,42 @@ func (m *memStore) ListModels() ([]domain.Model, error) {
 	return out, nil
 }
 
+func (m *memStore) UpsertHubAuto(nodeID, nodeName, upstream string, maxContext int, media []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.models {
+		if m.models[i].Alias == domain.HubAutoAlias {
+			m.models[i].HubNodeID = nodeID
+			m.models[i].HubNodeName = nodeName
+			m.models[i].UpstreamName = upstream
+			m.models[i].MaxContext = maxContext
+			m.models[i].Media = media
+			m.models[i].Enabled = true
+			m.models[i].HubShare = false
+			return nil
+		}
+	}
+	m.models = append(m.models, domain.Model{
+		Alias: domain.HubAutoAlias, UpstreamName: upstream, Enabled: true,
+		HubNodeID: nodeID, HubNodeName: nodeName, MaxContext: maxContext, Media: media,
+	})
+	return nil
+}
+
+func (m *memStore) DeleteHubAuto() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := m.models[:0]
+	for _, x := range m.models {
+		if x.Alias == domain.HubAutoAlias && x.HubNodeID != "" {
+			continue
+		}
+		out = append(out, x)
+	}
+	m.models = out
+	return nil
+}
+
 func TestClientRegistersAndAnnounces(t *testing.T) {
 	var mu sync.Mutex
 	var announced []Alias
@@ -106,6 +142,38 @@ func TestClientRegistersAndAnnounces(t *testing.T) {
 	}
 	state, errStr := c.Status()
 	t.Fatalf("not online: %s %s cfg=%+v announced=%+v", state, errStr, st.cfg, announced)
+}
+
+func TestClientSyncsAuto(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/catalog" {
+			_ = json.NewEncoder(w).Encode(Catalog{
+				Online: 1, Total: 1,
+				Defaults: &Defaults{NodeID: "npeer", NodeName: "ams-1", Alias: "coder"},
+				Nodes: []NodePublic{{
+					ID: "npeer", Name: "ams-1", Online: true,
+					Aliases: []Alias{{Alias: "coder", Media: []string{"chat"}, Context: 8192}},
+				}},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(hs.Close)
+	st := &memStore{cfg: Settings{Enabled: true, Name: "hap-test", NodeID: "nself", Token: "hk"}}
+	c := New(st, nil, ":4000")
+	c.HubURL = hs.URL
+	c.RefreshCatalog()
+	ms, _ := st.ListModels()
+	if len(ms) != 1 || ms[0].Alias != "auto" || ms[0].HubNodeID != "npeer" || ms[0].UpstreamName != "coder" {
+		t.Fatalf("auto %+v", ms)
+	}
+	st.cfg.Enabled = false
+	c.RefreshCatalog()
+	ms, _ = st.ListModels()
+	if len(ms) != 0 {
+		t.Fatalf("auto lingered %+v", ms)
+	}
 }
 
 func TestLocalRelayKinds(t *testing.T) {

@@ -127,7 +127,15 @@ func isLocalSeed(s string) bool {
 	return s == "local" || s == "desktop"
 }
 
+func isEmptySeed(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	return s == "none" || s == "mobile" || s == "ios" || s == "android"
+}
+
 func seedBackends(cfg Config) []domain.Backend {
+	if isEmptySeed(cfg.Seed) {
+		return nil
+	}
 	if isLocalSeed(cfg.Seed) {
 		u := strings.TrimSpace(cfg.SeedOllamaURL)
 		if u == "" {
@@ -196,8 +204,13 @@ func secureHeaders(next http.Handler) http.Handler {
 		h.Set("X-Robots-Tag", "noindex, nofollow")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		if strings.HasPrefix(r.URL.Path, "/admin") {
-			h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
-			h.Set("Cache-Control", "no-store")
+			h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+			p := r.URL.Path
+			if p == "/admin/sw.js" || p == "/admin/manifest.webmanifest" || strings.HasPrefix(p, "/admin/static/") {
+				h.Set("Cache-Control", "public, max-age=3600")
+			} else {
+				h.Set("Cache-Control", "no-store")
+			}
 		}
 		next.ServeHTTP(w, r)
 	})

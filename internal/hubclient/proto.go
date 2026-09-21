@@ -29,9 +29,18 @@ type RegisterRes struct {
 	Hub    string `json:"hub"`
 }
 
+type ShareSchedule struct {
+	Enabled bool   `json:"enabled"`
+	Days    []int  `json:"days,omitempty"`
+	Start   string `json:"start,omitempty"`
+	End     string `json:"end,omitempty"`
+	TZ      string `json:"tz,omitempty"`
+}
+
 type AnnounceReq struct {
-	Name    string  `json:"name"`
-	Aliases []Alias `json:"aliases"`
+	Name     string         `json:"name"`
+	Aliases  []Alias        `json:"aliases"`
+	Schedule *ShareSchedule `json:"schedule,omitempty"`
 }
 
 type Job struct {
@@ -51,16 +60,26 @@ type Result struct {
 }
 
 type NodePublic struct {
-	ID      string  `json:"id"`
-	Name    string  `json:"name"`
-	Online  bool    `json:"online"`
-	Aliases []Alias `json:"aliases"`
+	ID         string         `json:"id"`
+	Name       string         `json:"name"`
+	Online     bool           `json:"online"`
+	Aliases    []Alias        `json:"aliases"`
+	Rating     int            `json:"rating,omitempty"`
+	Schedule   *ShareSchedule `json:"schedule,omitempty"`
+	SharingNow bool           `json:"sharing_now"`
+}
+
+type Defaults struct {
+	NodeID   string `json:"node_id"`
+	NodeName string `json:"node_name,omitempty"`
+	Alias    string `json:"alias"`
 }
 
 type Catalog struct {
-	Online int          `json:"online"`
-	Total  int          `json:"total"`
-	Nodes  []NodePublic `json:"nodes"`
+	Online   int          `json:"online"`
+	Total    int          `json:"total"`
+	Defaults *Defaults    `json:"defaults,omitempty"`
+	Nodes    []NodePublic `json:"nodes"`
 }
 
 // CollapseChat turns an OpenAI JSON completion or an SSE stream into one JSON object.

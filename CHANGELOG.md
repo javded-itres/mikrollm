@@ -6,6 +6,11 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+## 0.0.6 — 2026-09-21
+
+- Hub member mode grows a reserved alias **`auto`**: it follows the hub operator’s default node+model from `GET /v1/catalog` `defaults`. [docs/hub.md](docs/hub.md)
+- **iOS first slice:** `mobile` package (`Start`/`Stop`) + SwiftUI WKWebView shell (`ios/`). `make ios` builds the gomobile xcframework. No on-device LLM yet. [docs/install-ios.md](docs/install-ios.md)
+- Admin is a **Chrome installable app** (PWA): `/admin/manifest.webmanifest`, icons, service worker, **В приложение** when Chrome offers `beforeinstallprompt`. Needs HTTPS or localhost.
 - **KeeneticOS:** Entware install (no Docker). `scripts/install-keenetic.sh` + `make build-keenetic` (`linux/arm64`: Peak / Ultra KN-1811 / Giga KN-1012 / Hopper KN-3811). MIPS waits on SQLite. [docs/install-keenetic.md](docs/install-keenetic.md)
 - Hub share **schedule** on Status (daily or selected weekdays + time window + timezone). Catalog shows the window and “not now”; relay is 503 outside it. **Rating** is lifetime minutes seen on the hub; Hub UI and Models filters **Top 10 / Top 100**.
 

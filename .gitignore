@@ -7,4 +7,9 @@
 *.db-shm
 .idea/
 .DS_Store
+ios/Mobile.xcframework
+ios/MikroLLM.xcodeproj
+ios/DerivedData
+ios/xcuserdata
+*.xcuserstate
 *.tar

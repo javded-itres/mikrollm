@@ -57,6 +57,8 @@
     <select id="model-server" class="sel-sm" title="Сервер">
       <option value="">Все серверы</option>
       <option value="__hub__">Все с hub</option>
+      <option value="__hub_top10__">Hub · топ 10</option>
+      <option value="__hub_top100__">Hub · топ 100</option>
       {{range .Servers}}
       {{if eq .Group "local"}}<option value="{{.Value}}">{{.Label}}</option>{{end}}
       {{end}}
@@ -122,7 +124,7 @@
       </thead>
       <tbody>
         {{range $m := .Catalog}}
-        <tr class="model-tr {{if $m.Connected}}is-on{{end}}" data-name="{{$m.Name}}" data-provider="{{$m.Provider}}" data-band="{{$m.PriceBand}}" data-prompt="{{$m.PromptUSD}}" data-title="{{$m.Title}}" data-media="{{join $m.Media ","}}" data-servers="{{$m.ServersCSV}}" data-hub="{{if $m.HubNodeID}}1{{else}}0{{end}}">
+        <tr class="model-tr {{if $m.Connected}}is-on{{end}}" data-name="{{$m.Name}}" data-provider="{{$m.Provider}}" data-band="{{$m.PriceBand}}" data-prompt="{{$m.PromptUSD}}" data-title="{{$m.Title}}" data-media="{{join $m.Media ","}}" data-servers="{{$m.ServersCSV}}" data-hub="{{if $m.HubNodeID}}1{{else}}0{{end}}" data-hub-rating="{{$m.HubRating}}" data-hub-node="{{$m.HubNodeID}}">
           <td class="col-check">
             <input type="checkbox" form="catalog-form" name="model" value="{{$m.CheckValue}}" {{if or $m.Connected (and $m.HubNodeID (not $m.HubOnline))}}disabled{{end}} title="Подключить к шлюзу">
           </td>
@@ -130,6 +132,7 @@
             <div class="name" title="{{if $m.Title}}{{$m.Title}} · {{end}}{{$m.Name}}">{{$m.Name}}</div>
             {{if $m.Title}}<div class="muted small">{{$m.Title}}</div>{{end}}
             {{range $m.Media}}<span class="pill media-{{.}}">{{.}}</span>{{end}}
+            {{if $m.HubNodeID}}<span class="pill hub" title="{{$m.HubSchedule}}">рейтинг {{$m.HubRating}}</span>{{if $m.HubSchedule}}<span class="muted small"> · {{$m.HubSchedule}}</span>{{end}}{{if and $m.HubOnline (not $m.HubSharingNow)}}<span class="pill off">не сейчас</span>{{end}}{{end}}
           </td>
           <td>{{if $m.Provider}}<span class="pill">{{$m.Provider}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
           <td class="col-num muted">{{if $m.SizeLabel}}{{$m.SizeLabel}}{{else}}—{{end}}</td>
@@ -215,6 +218,7 @@
           </td>
           <td>
             <code>{{$m.Alias}}</code>
+            {{if and (eq $m.Alias "auto") $m.HubNodeID}}<span class="pill hub" title="Задаёт оператор хаба: узел и модель по умолчанию">auto из hub</span>{{end}}
             {{if $m.HubShare}}<span class="pill hub" title="Alias отдаётся в каталог hub сети">в hub</span>{{end}}
             {{if $m.HubNodeID}}<span class="pill hub-peer" title="Модель с другого MikroLLM ({{$m.HubNodeID}})">с {{if $m.HubNodeName}}{{$m.HubNodeName}}{{else}}hub{{end}}</span>{{end}}
             {{range $m.Media}} <span class="pill media-{{.}}">{{.}}</span>{{end}}
@@ -272,9 +276,13 @@
           </td>
           <td class="muted">{{$m.LBPolicy}}</td>
           <td class="col-act">
+            {{if and (eq $m.Alias "auto") $m.HubNodeID}}
+            <span class="muted small">системный</span>
+            {{else}}
             <form method="post" action="/admin/models/{{$m.ID}}/delete" onsubmit="return confirm('Убрать {{$m.Alias}} из шлюза? Файл на сервере останется.')">
               <button class="btn-sm danger-text" type="submit">Убрать</button>
             </form>
+            {{end}}
           </td>
         </tr>
         {{end}}

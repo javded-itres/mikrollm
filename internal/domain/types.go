@@ -12,6 +12,13 @@ type Backend struct {
 	Weight  int
 }
 
+// HubAutoAlias is the reserved gateway name filled from hub operator settings.
+const HubAutoAlias = "auto"
+
+func IsHubAuto(m Model) bool {
+	return m.Alias == HubAutoAlias && m.HubNodeID != ""
+}
+
 type Model struct {
 	ID           int64
 	Alias        string
@@ -35,18 +42,22 @@ type HubPeerAlias struct {
 }
 
 type HubPeer struct {
-	ID      string
-	Name    string
-	Online  bool
-	Aliases []HubPeerAlias
+	ID         string
+	Name       string
+	Online     bool
+	Aliases    []HubPeerAlias
+	Rating     int
+	Schedule   HubSchedule
+	SharingNow bool
 }
 
 // HubSettings is the outbound hub-client config (MikroLLM → cloud hub).
 type HubSettings struct {
-	Enabled bool
-	NodeID  string
-	Token   string
-	Name    string
+	Enabled  bool
+	NodeID   string
+	Token    string
+	Name     string
+	Schedule HubSchedule
 }
 
 type APIKey struct {
@@ -185,6 +196,9 @@ type CatalogEntry struct {
 	HubNodeID     string
 	HubNodeName   string
 	HubOnline     bool
+	HubRating     int
+	HubSchedule   string
+	HubSharingNow bool
 }
 
 type Job struct {

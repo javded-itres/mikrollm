@@ -5,8 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Title}} — MikroLLM</title>
   <meta name="csrf-token" content="{{.CSRF}}">
+  <meta name="theme-color" content="#0e1218">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="MikroLLM">
   <link rel="icon" href="/admin/static/logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/admin/static/app.css?v=34">
+  <link rel="apple-touch-icon" href="/admin/static/apple-touch-icon.png">
+  <link rel="manifest" href="/admin/manifest.webmanifest">
+  <link rel="stylesheet" href="/admin/static/app.css?v=36">
 </head>
 <body>
 <header>
@@ -21,6 +27,7 @@
     <a href="/admin/logs" {{if eq .Nav "logs"}}class="active"{{end}}>Лог</a>
     <a href="/admin/billing" {{if eq .Nav "billing"}}class="active"{{end}}>Биллинг</a>
   </nav>
+  <button type="button" class="ghost" id="pwa-install" hidden title="Установить как приложение Chrome">В приложение</button>
   <form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="ghost" type="submit">Выйти</button></form>
 </header>
 <div class="wrap {{if or (eq .Nav "models") (eq .Nav "keys") (eq .Nav "queues") (eq .Nav "logs") (eq .Nav "security") (eq .Nav "billing")}}wrap-wide{{end}}{{if eq .Nav "dash"}} wrap-dash{{end}}{{if eq .Nav "chat"}} wrap-chat{{end}}">
@@ -37,6 +44,7 @@
   {{end}}
   {{template "content" .}}
 </div>
-<script src="/admin/static/app.js?v=34"></script>
+<script src="/admin/static/app.js?v=36"></script>
+<script src="/admin/static/pwa.js"></script>
 </body>
 </html>

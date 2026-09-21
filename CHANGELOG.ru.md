@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+## 0.0.6 — 2026-09-21
+
+- В режиме участника hub появляется alias **`auto`**: берёт узел и модель из настроек оператора (`defaults` в каталоге). [docs/ru/hub.md](docs/ru/hub.md)
+- **iOS, первый шаг:** пакет `mobile` (`Start`/`Stop`) + оболочка SwiftUI/WKWebView (`ios/`). `make ios` собирает gomobile xcframework. Локальной модели ещё нет. [docs/ru/install-ios.md](docs/ru/install-ios.md)
+- Админку можно **поставить как приложение Chrome** (PWA): манифест, иконки, service worker, кнопка **В приложение**. Нужен HTTPS или localhost.
 - **KeeneticOS:** установка через Entware (без Docker). `scripts/install-keenetic.sh` + `make build-keenetic` (`linux/arm64`: Peak / Ultra KN-1811 / Giga KN-1012 / Hopper KN-3811). MIPS ждёт SQLite. [docs/ru/install-keenetic.md](docs/ru/install-keenetic.md)
 - **Расписание шаринга** на Статусе (каждый день или выбранные дни + окно + пояс). В каталоге hub видно окно и «не сейчас»; вне окна relay 503. **Рейтинг** — минуты в сети; фильтры **топ 10 / топ 100**.
 

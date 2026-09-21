@@ -17,6 +17,29 @@ func staticHandler() http.Handler {
 	return http.StripPrefix("/admin/static/", http.FileServer(http.FS(sub)))
 }
 
+func pwaManifest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	b, err := fs.ReadFile(web.FS, "static/manifest.webmanifest")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	_, _ = w.Write(b)
+}
+
+func pwaServiceWorker(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Header().Set("Service-Worker-Allowed", "/admin")
+	w.Header().Set("Cache-Control", "no-cache")
+	b, err := fs.ReadFile(web.FS, "static/sw.js")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	_, _ = w.Write(b)
+}
+
 func (u *UI) protect(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !u.keys.ValidSession(r) {

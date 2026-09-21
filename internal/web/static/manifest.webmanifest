@@ -1,0 +1,35 @@
+{
+  "id": "/admin",
+  "name": "MikroLLM",
+  "short_name": "MikroLLM",
+  "description": "Шлюз LLM: чат, модели, очереди, hub",
+  "start_url": "/admin",
+  "scope": "/admin",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0e1218",
+  "theme_color": "#0e1218",
+  "lang": "ru",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/admin/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/admin/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/admin/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

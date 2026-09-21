@@ -59,6 +59,26 @@ func TestSeedLocalConnectsOllama(t *testing.T) {
 	}
 }
 
+func TestEmptySeedsSkipLAN(t *testing.T) {
+	for _, seed := range []string{"none", "mobile", "ios", "android"} {
+		t.Run(seed, func(t *testing.T) {
+			t.Setenv("MIKROLLM_HUB_URL", "http://127.0.0.1:1")
+			a, err := New(Config{
+				DataDir: t.TempDir(), AdminPassword: "secret99", ResetPassword: true,
+				MCPToken: testMCPToken, Version: "test", Seed: seed,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = a.Close() })
+			bs, err := a.Store.ListBackends()
+			if err != nil || len(bs) != 0 {
+				t.Fatalf("backends %+v %v", bs, err)
+			}
+		})
+	}
+}
+
 func TestHealthWired(t *testing.T) {
 	a := testApp(t)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -214,6 +234,13 @@ func TestAdminHubCard(t *testing.T) {
 	if err != nil || !cfg.Enabled || cfg.Name != "hap-test" {
 		t.Fatalf("%+v %v", cfg, err)
 	}
+	page = httptest.NewRequest(http.MethodGet, "/admin", nil)
+	withCookies(page, cookies)
+	prec = httptest.NewRecorder()
+	a.Handler.ServeHTTP(prec, page)
+	if !strings.Contains(prec.Body.String(), `alias <code>auto</code>`) {
+		t.Fatal("missing auto alias hint")
+	}
 }
 
 func TestAdminChatHasMediaMode(t *testing.T) {
@@ -245,6 +272,31 @@ func TestAdminSecurityPage(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "Безопасность") || !strings.Contains(body, "prompt_injection") {
 		t.Fatal("missing security form")
+	}
+}
+
+func TestPWAManifestAndSW(t *testing.T) {
+	a := testApp(t)
+	req := httptest.NewRequest(http.MethodGet, "/admin/manifest.webmanifest", nil)
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Type"), "manifest") {
+		t.Fatalf("manifest %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(rec.Body.String(), `"start_url": "/admin"`) {
+		t.Fatalf("%s", rec.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodGet, "/admin/sw.js", nil)
+	rec = httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 200 || rec.Header().Get("Service-Worker-Allowed") != "/admin" {
+		t.Fatalf("sw %d %s", rec.Code, rec.Header().Get("Service-Worker-Allowed"))
+	}
+	req = httptest.NewRequest(http.MethodGet, "/admin/static/icon-192.png", nil)
+	rec = httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Type"), "image/png") {
+		t.Fatalf("icon %d %s", rec.Code, rec.Header().Get("Content-Type"))
 	}
 }
 

@@ -27,6 +27,8 @@ type Store interface {
 	HubSettings() (Settings, error)
 	SetHubSettings(Settings) error
 	ListModels() ([]domain.Model, error)
+	UpsertHubAuto(nodeID, nodeName, upstream string, maxContext int, media []string) error
+	DeleteHubAuto() error
 }
 
 type Client struct {
@@ -105,6 +107,7 @@ func (c *Client) Loop(ctx context.Context) {
 		cfg, err := c.Store.HubSettings()
 		if err != nil || !cfg.Enabled {
 			c.set("off", "")
+			_ = c.Store.DeleteHubAuto()
 			c.sleep(ctx, 5*time.Second)
 			continue
 		}
@@ -180,6 +183,42 @@ func (c *Client) RefreshCatalog() {
 	c.cat = cat
 	c.selfID = self
 	c.catMu.Unlock()
+	c.applyAuto()
+}
+
+func (c *Client) applyAuto() {
+	if c.Store == nil {
+		return
+	}
+	cfg, err := c.Store.HubSettings()
+	if err != nil || !cfg.Enabled {
+		_ = c.Store.DeleteHubAuto()
+		return
+	}
+	c.catMu.Lock()
+	def := c.cat.Defaults
+	nodes := c.cat.Nodes
+	c.catMu.Unlock()
+	if def == nil || strings.TrimSpace(def.NodeID) == "" || strings.TrimSpace(def.Alias) == "" {
+		_ = c.Store.DeleteHubAuto()
+		return
+	}
+	name, ctxN, media := def.NodeName, 0, []string(nil)
+	for _, n := range nodes {
+		if n.ID != def.NodeID {
+			continue
+		}
+		if n.Name != "" {
+			name = n.Name
+		}
+		for _, a := range n.Aliases {
+			if a.Alias == def.Alias {
+				ctxN = a.Context
+				media = a.Media
+			}
+		}
+	}
+	_ = c.Store.UpsertHubAuto(def.NodeID, name, def.Alias, ctxN, media)
 }
 
 func (c *Client) Peers() (selfID string, peers []domain.HubPeer) {
@@ -196,7 +235,13 @@ func (c *Client) Peers() (selfID string, peers []domain.HubPeer) {
 		if n.ID == "" || n.ID == selfID {
 			continue
 		}
-		p := domain.HubPeer{ID: n.ID, Name: n.Name, Online: n.Online}
+		p := domain.HubPeer{ID: n.ID, Name: n.Name, Online: n.Online, Rating: n.Rating, SharingNow: n.SharingNow}
+		if n.Schedule != nil {
+			p.Schedule = domain.HubSchedule{
+				Enabled: n.Schedule.Enabled, Days: n.Schedule.Days,
+				Start: n.Schedule.Start, End: n.Schedule.End, TZ: n.Schedule.TZ,
+			}
+		}
 		if p.Name == "" {
 			p.Name = n.ID
 			if len(p.Name) > 10 {
@@ -259,7 +304,7 @@ func (c *Client) announce(cfg Settings) error {
 	ms, _ := c.Store.ListModels()
 	var aliases []Alias
 	for _, m := range ms {
-		if !m.Enabled || !m.HubShare {
+		if !m.Enabled || !m.HubShare || domain.IsHubAuto(m) || m.Alias == domain.HubAutoAlias {
 			continue
 		}
 		media := domain.MergeMedia(m.Media, domain.InferMedia(m.Alias, nil), domain.InferMedia(m.UpstreamName, nil))
@@ -272,7 +317,14 @@ func (c *Client) announce(cfg Settings) error {
 	if name == "" {
 		name = "mikrollm"
 	}
-	body, _ := json.Marshal(AnnounceReq{Name: name, Aliases: aliases})
+	ann := AnnounceReq{Name: name, Aliases: aliases}
+	if cfg.Schedule.Enabled {
+		ann.Schedule = &ShareSchedule{
+			Enabled: true, Days: cfg.Schedule.Days,
+			Start: cfg.Schedule.Start, End: cfg.Schedule.End, TZ: cfg.Schedule.TZ,
+		}
+	}
+	body, _ := json.Marshal(ann)
 	req, err := http.NewRequest(http.MethodPut, c.HubURL+"/v1/announce", bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -339,6 +391,10 @@ func (c *Client) runJob(cfg Settings, job Job) {
 	}
 	if !c.aliasShared(job.Alias) {
 		c.postResult(cfg, Result{JobID: job.ID, Status: 404, Body: []byte(`{"error":{"message":"alias not shared"}}`)})
+		return
+	}
+	if !cfg.Schedule.SharingAt(time.Now()) {
+		c.postResult(cfg, Result{JobID: job.ID, Status: 503, Body: []byte(`{"error":{"message":"sharing window closed"}}`)})
 		return
 	}
 	kind := job.Kind

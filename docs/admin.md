@@ -2,7 +2,9 @@
 
 **English** · [Русский](ru/admin.md)
 
-URL: `http://<host>:4000/admin` (or `https://…`, [tls.md](tls.md)).  
+URL: `http://<host>:4000/admin` (or `https://…`, [tls.md](tls.md)).
+
+Chrome can **install MikroLLM as an app** (PWA): address-bar install icon, or **В приложение** in the header. Needs a [secure context](tls.md) (HTTPS or localhost). Scope is `/admin`.  
 Login is a password (cookie `mikrollm_session`, 12 hours, HttpOnly, SameSite=Lax, path `/admin`; on HTTPS also `Secure`). After five failed attempts from one IP, a 10-minute pause. State changes only via POST with a CSRF token. A new API key is shown once and never put in the URL.
 
 Menu: **Status · Queues · Models · Security · Keys · Chat · Log · Billing**.

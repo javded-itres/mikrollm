@@ -4,8 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MikroLLM — вход</title>
+  <meta name="theme-color" content="#0e1218">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="MikroLLM">
   <link rel="icon" href="/admin/static/logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/admin/static/app.css?v=20">
+  <link rel="apple-touch-icon" href="/admin/static/apple-touch-icon.png">
+  <link rel="manifest" href="/admin/manifest.webmanifest">
+  <link rel="stylesheet" href="/admin/static/app.css?v=36">
 </head>
 <body>
   <form class="card login" method="post" action="/admin/login">
@@ -16,5 +22,6 @@
     <input type="password" name="password" autofocus required autocomplete="current-password">
     <p><button type="submit">Войти</button></p>
   </form>
+  <script src="/admin/static/pwa.js"></script>
 </body>
 </html>

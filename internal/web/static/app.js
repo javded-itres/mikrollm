@@ -32,6 +32,16 @@
     sync();
   });
 
+  document.querySelectorAll("[data-reveal]").forEach(function (el) {
+    function sync() {
+      var root = document.querySelector(el.getAttribute("data-reveal"));
+      if (!root) return;
+      root.hidden = !el.checked;
+    }
+    el.addEventListener("change", sync);
+    sync();
+  });
+
   document.querySelectorAll("[data-toggle]").forEach(function (el) {
     el.addEventListener("change", function () {
       var root = document.querySelector(el.getAttribute("data-toggle"));
@@ -157,6 +167,21 @@
     btn("→", catalogPage + 1, catalogPage >= pages);
   }
 
+  function hubNodeRanks() {
+    var best = {};
+    document.querySelectorAll(".model-tr[data-hub='1']").forEach(function (el) {
+      var id = el.getAttribute("data-hub-node") || "";
+      var r = parseInt(el.getAttribute("data-hub-rating") || "0", 10) || 0;
+      if (!id) return;
+      if (best[id] == null || r > best[id]) best[id] = r;
+    });
+    var ids = Object.keys(best);
+    ids.sort(function (a, b) { return best[b] - best[a]; });
+    var rank = {};
+    ids.forEach(function (id, i) { rank[id] = i + 1; });
+    return rank;
+  }
+
   function bindModelFilters(nameId, provId, priceId, rowSel, countId) {
     var nameEl = document.getElementById(nameId);
     var provEl = document.getElementById(provId);
@@ -186,7 +211,16 @@
         if (q && name.indexOf(q) < 0 && title.indexOf(q) < 0 && provider.toLowerCase().indexOf(q) < 0) ok = false;
         if (prov && provider !== prov) ok = false;
         if (server === "__hub__" && !isHub) ok = false;
-        if (server && server !== "__hub__") {
+        if (server === "__hub_top10__" || server === "__hub_top100__") {
+          if (!isHub) ok = false;
+          else {
+            var lim = server === "__hub_top10__" ? 10 : 100;
+            var ranks = hubNodeRanks();
+            var node = el.getAttribute("data-hub-node") || "";
+            if (!ranks[node] || ranks[node] > lim) ok = false;
+          }
+        }
+        if (server && server !== "__hub__" && server !== "__hub_top10__" && server !== "__hub_top100__") {
           var hit = false;
           for (var i = 0; i < servers.length; i++) {
             if (servers[i] === server) { hit = true; break; }

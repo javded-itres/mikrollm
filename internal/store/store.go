@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS ollama_jobs (
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_node_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_token TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_name TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_schedule TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`)
@@ -623,6 +624,52 @@ func (s *Store) ConnectHubModel(alias, nodeID, nodeName string, maxContext int, 
 	return err
 }
 
+func (s *Store) UpsertHubAuto(nodeID, nodeName, upstream string, maxContext int, media []string) error {
+	nodeID = strings.TrimSpace(nodeID)
+	upstream = strings.TrimSpace(upstream)
+	if nodeID == "" || upstream == "" {
+		return fmt.Errorf("hub auto node and alias required")
+	}
+	if nodeName == "" {
+		nodeName = nodeID
+		if len(nodeName) > 10 {
+			nodeName = nodeName[:10]
+		}
+	}
+	m, err := s.GetModelByAlias(domain.HubAutoAlias)
+	if err != nil {
+		m = Model{Alias: domain.HubAutoAlias, LBPolicy: "least_conn"}
+	}
+	m.Alias = domain.HubAutoAlias
+	m.UpstreamName = upstream
+	m.Enabled = true
+	m.HubShare = false
+	m.HubNodeID = nodeID
+	m.HubNodeName = nodeName
+	m.BackendIDs = nil
+	if maxContext > 0 {
+		m.MaxContext = maxContext
+	}
+	if len(media) > 0 {
+		m.Media = media
+	} else if len(m.Media) == 0 {
+		m.Media = domain.InferMedia(upstream, nil)
+	}
+	_, err = s.SaveModel(m)
+	return err
+}
+
+func (s *Store) DeleteHubAuto() error {
+	m, err := s.GetModelByAlias(domain.HubAutoAlias)
+	if err != nil {
+		return nil
+	}
+	if m.HubNodeID == "" {
+		return nil
+	}
+	return s.DeleteModel(m.ID)
+}
+
 func (s *Store) ListKeys() ([]APIKey, error) {
 	rows, err := s.DB.Query(`SELECT id, name, prefix, key_hash, allowed_models, rpm, enabled, created_at, last_used_at, request_count FROM api_keys ORDER BY id DESC`)
 	if err != nil {
@@ -732,15 +779,19 @@ func (s *Store) SetPromptCacheMode(mode string) error {
 
 func (s *Store) HubSettings() (domain.HubSettings, error) {
 	var en int
-	var id, tok, name string
-	err := s.DB.QueryRow(`SELECT hub_enabled, hub_node_id, hub_token, hub_name FROM admin_meta WHERE id=1`).Scan(&en, &id, &tok, &name)
+	var id, tok, name, sched string
+	err := s.DB.QueryRow(`SELECT hub_enabled, hub_node_id, hub_token, hub_name, hub_schedule FROM admin_meta WHERE id=1`).Scan(&en, &id, &tok, &name, &sched)
 	if err == sql.ErrNoRows {
 		return domain.HubSettings{}, nil
 	}
 	if err != nil {
 		return domain.HubSettings{}, err
 	}
-	return domain.HubSettings{Enabled: en == 1, NodeID: id, Token: tok, Name: name}, nil
+	h := domain.HubSettings{Enabled: en == 1, NodeID: id, Token: tok, Name: name}
+	if strings.TrimSpace(sched) != "" {
+		_ = json.Unmarshal([]byte(sched), &h.Schedule)
+	}
+	return h, nil
 }
 
 func (s *Store) SetHubSettings(h domain.HubSettings) error {
@@ -748,8 +799,9 @@ func (s *Store) SetHubSettings(h domain.HubSettings) error {
 	if h.Enabled {
 		en = 1
 	}
-	res, err := s.DB.Exec(`UPDATE admin_meta SET hub_enabled=?, hub_node_id=?, hub_token=?, hub_name=? WHERE id=1`,
-		en, h.NodeID, h.Token, strings.TrimSpace(h.Name))
+	raw, _ := json.Marshal(h.Schedule)
+	res, err := s.DB.Exec(`UPDATE admin_meta SET hub_enabled=?, hub_node_id=?, hub_token=?, hub_name=?, hub_schedule=? WHERE id=1`,
+		en, h.NodeID, h.Token, strings.TrimSpace(h.Name), string(raw))
 	if err != nil {
 		return err
 	}

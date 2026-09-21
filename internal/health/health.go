@@ -1211,6 +1211,7 @@ func (c *Checker) Catalog(backends []domain.Backend) []CatalogEntry {
 					Name: a.Alias, Provider: p.Name, BackendNames: []string{p.Name},
 					Context: a.Context, Media: media,
 					HubNodeID: p.ID, HubNodeName: p.Name, HubOnline: p.Online,
+					HubRating: p.Rating, HubSchedule: p.Schedule.Label(), HubSharingNow: p.SharingNow,
 				})
 			}
 		}

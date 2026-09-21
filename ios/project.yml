@@ -1,0 +1,43 @@
+name: MikroLLM
+options:
+  bundleIdPrefix: ru.mikrollm
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "16.0"
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: ru.mikrollm.app
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_PREVIEWS: "NO"
+targets:
+  MikroLLM:
+    type: application
+    platform: iOS
+    sources:
+      - path: MikroLLM
+    info:
+      path: MikroLLM/Info.plist
+      properties:
+        CFBundleDisplayName: MikroLLM
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UILaunchScreen: {}
+    dependencies:
+      - framework: Mobile.xcframework
+        embed: false
+        link: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ru.mikrollm.app
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: 1
+        FRAMEWORK_SEARCH_PATHS:
+          - $(PROJECT_DIR)
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -ObjC
+          - -lresolv
+        ENABLE_BITCODE: "NO"
+        INFOPLIST_FILE: MikroLLM/Info.plist
+        GENERATE_INFOPLIST_FILE: false
