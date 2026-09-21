@@ -227,10 +227,10 @@ func (s *Store) InsertQueueJob(j *domain.QueueJob) error {
 	if j.CreatedAt.IsZero() {
 		j.CreatedAt = time.Now().UTC()
 	}
-	_, err := s.DB.Exec(`INSERT INTO queue_jobs (id, queue_id, seq, status, alias, assigned_model, assigned_backend, provider, key_prefix, path, body, bytes, error, created_at, started_at, finished_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.DB.Exec(`INSERT INTO queue_jobs (id, queue_id, seq, status, alias, assigned_model, assigned_backend, provider, key_prefix, path, body, bytes, error, preview, created_at, started_at, finished_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.ID, j.QueueID, j.Seq, j.Status, j.Alias, j.AssignedModel, j.AssignedBackend, j.Provider, j.KeyPrefix, j.Path,
-		j.Body, j.Bytes, j.Error, j.CreatedAt.Format(time.RFC3339Nano), nullTime(j.StartedAt), nullTime(j.FinishedAt))
+		j.Body, j.Bytes, j.Error, j.Preview, j.CreatedAt.Format(time.RFC3339Nano), nullTime(j.StartedAt), nullTime(j.FinishedAt))
 	return err
 }
 
@@ -241,7 +241,7 @@ func (s *Store) UpdateQueueJob(j domain.QueueJob) error {
 }
 
 func (s *Store) GetQueueJob(id string) (domain.QueueJob, error) {
-	row := s.DB.QueryRow(`SELECT id, queue_id, seq, status, alias, assigned_model, assigned_backend, provider, key_prefix, path, body, bytes, error, created_at, started_at, finished_at FROM queue_jobs WHERE id=?`, id)
+	row := s.DB.QueryRow(`SELECT id, queue_id, seq, status, alias, assigned_model, assigned_backend, provider, key_prefix, path, body, bytes, error, preview, created_at, started_at, finished_at FROM queue_jobs WHERE id=?`, id)
 	return scanQueueJob(row)
 }
 
@@ -249,7 +249,7 @@ func (s *Store) ListQueueJobs(queueID int64, limit int) ([]domain.QueueJob, erro
 	if limit <= 0 {
 		limit = 40
 	}
-	rows, err := s.DB.Query(`SELECT id, queue_id, seq, status, alias, assigned_model, assigned_backend, provider, key_prefix, path, body, bytes, error, created_at, started_at, finished_at
+	rows, err := s.DB.Query(`SELECT id, queue_id, seq, status, alias, assigned_model, assigned_backend, provider, key_prefix, path, body, bytes, error, preview, created_at, started_at, finished_at
 FROM queue_jobs WHERE queue_id=? ORDER BY seq DESC LIMIT ?`, queueID, limit)
 	if err != nil {
 		return nil, err
@@ -273,7 +273,7 @@ func (s *Store) WaitingStats() (jobs int, bytes int64, err error) {
 }
 
 func (s *Store) OldestWaiting(n int) ([]domain.QueueJob, error) {
-	rows, err := s.DB.Query(`SELECT id, queue_id, seq, status, alias, assigned_model, assigned_backend, provider, key_prefix, path, body, bytes, error, created_at, started_at, finished_at
+	rows, err := s.DB.Query(`SELECT id, queue_id, seq, status, alias, assigned_model, assigned_backend, provider, key_prefix, path, body, bytes, error, preview, created_at, started_at, finished_at
 FROM queue_jobs WHERE status='waiting' ORDER BY seq ASC LIMIT ?`, n)
 	if err != nil {
 		return nil, err
@@ -347,7 +347,7 @@ func scanQueueJob(r rowScanner) (domain.QueueJob, error) {
 	var created string
 	var started, finished sql.NullString
 	var body []byte
-	err := r.Scan(&j.ID, &j.QueueID, &j.Seq, &j.Status, &j.Alias, &j.AssignedModel, &j.AssignedBackend, &j.Provider, &j.KeyPrefix, &j.Path, &body, &j.Bytes, &j.Error, &created, &started, &finished)
+	err := r.Scan(&j.ID, &j.QueueID, &j.Seq, &j.Status, &j.Alias, &j.AssignedModel, &j.AssignedBackend, &j.Provider, &j.KeyPrefix, &j.Path, &body, &j.Bytes, &j.Error, &j.Preview, &created, &started, &finished)
 	if err != nil {
 		return j, err
 	}

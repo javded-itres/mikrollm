@@ -34,6 +34,8 @@ Dashboard **Request queues**: steps (busy/cap), strip “waiting / running / don
 
 ## Queues
 
+Hub **Status** form: concurrent slots the node accepts (chat / images / videos, default 4 / 2 / 1). Extra network jobs wait on the hub until a slot frees; they are not rejected as busy.
+
 `/admin/queues`. The client puts one of these in `model`:
 
 | Client sends | Example (queue name `itres`, alias `coder`) |

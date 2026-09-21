@@ -37,10 +37,17 @@ type ShareSchedule struct {
 	TZ      string `json:"tz,omitempty"`
 }
 
+type Caps struct {
+	Chat   int `json:"chat"`
+	Images int `json:"images"`
+	Videos int `json:"videos"`
+}
+
 type AnnounceReq struct {
 	Name     string         `json:"name"`
 	Aliases  []Alias        `json:"aliases"`
 	Schedule *ShareSchedule `json:"schedule,omitempty"`
+	Caps     *Caps          `json:"caps,omitempty"`
 }
 
 type Job struct {
@@ -67,6 +74,7 @@ type NodePublic struct {
 	Rating     int            `json:"rating,omitempty"`
 	Schedule   *ShareSchedule `json:"schedule,omitempty"`
 	SharingNow bool           `json:"sharing_now"`
+	Caps       *Caps          `json:"caps,omitempty"`
 }
 
 type Defaults struct {

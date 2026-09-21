@@ -48,6 +48,7 @@ type UI struct {
 	hub    HubClient
 	pages  map[string]*template.Template
 	login  *template.Template
+	docs   *template.Template
 }
 
 func New(d Deps) *UI {
@@ -75,6 +76,7 @@ func New(d Deps) *UI {
 	return &UI{
 		st: d.Store, health: d.Health, keys: d.Auth, host: d.Host, jobs: d.Jobs, chat: d.Chat, queues: d.Queues, hub: d.Hub,
 		login: template.Must(template.New("login.html").Funcs(fm).ParseFS(web.FS, "templates/login.html")),
+		docs:  template.Must(template.New("docs.html").ParseFS(web.FS, "templates/docs.html")),
 		pages: map[string]*template.Template{
 			"dash":     must("templates/layout.html", "templates/dash.html"),
 			"models":   must("templates/layout.html", "templates/models.html"),
@@ -92,6 +94,9 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.Handle("GET /admin/static/", staticHandler())
 	mux.HandleFunc("GET /admin/manifest.webmanifest", pwaManifest)
 	mux.HandleFunc("GET /admin/sw.js", pwaServiceWorker)
+	mux.HandleFunc("GET /openapi.json", serveOpenAPI)
+	mux.HandleFunc("GET /docs", u.docsPage)
+	mux.HandleFunc("GET /admin/docs", u.docsPage)
 	mux.HandleFunc("GET /admin/login", u.loginPage)
 	mux.HandleFunc("POST /admin/login", u.loginPost)
 	mux.HandleFunc("POST /admin/logout", u.protect(u.logout))
@@ -152,6 +157,14 @@ func (u *UI) Mount(mux *http.ServeMux) {
 		}
 		http.NotFound(w, r)
 	})
+}
+
+func (u *UI) docsPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := u.docs.Execute(w, nil); err != nil {
+		http.Error(w, err.Error(), 500)
+	}
 }
 
 func (u *UI) loginPage(w http.ResponseWriter, r *http.Request) {
@@ -294,7 +307,8 @@ func (u *UI) dash(w http.ResponseWriter, r *http.Request) {
 		"HubSchedule": hubCfg.Schedule, "HubSharingNow": hubCfg.Schedule.SharingAt(time.Now()),
 		"HubShareDays": shareDaySet(hubCfg.Schedule.Days),
 		"HubTZ":        hubTZ(hubCfg.Schedule.TZ),
-		"Flash":        flash, "Error": errMsg(r.URL.Query().Get("err")),
+		"HubCapChat":   hubCfg.Caps.Norm().Chat, "HubCapImages": hubCfg.Caps.Norm().Images, "HubCapVideos": hubCfg.Caps.Norm().Videos,
+		"Flash": flash, "Error": errMsg(r.URL.Query().Get("err")),
 	})
 }
 
@@ -317,6 +331,10 @@ func (u *UI) saveHub(w http.ResponseWriter, r *http.Request) {
 		End:     strings.TrimSpace(r.FormValue("share_end")),
 		TZ:      strings.TrimSpace(r.FormValue("share_tz")),
 	}
+	chatN, _ := strconv.Atoi(r.FormValue("cap_chat"))
+	imgN, _ := strconv.Atoi(r.FormValue("cap_images"))
+	vidN, _ := strconv.Atoi(r.FormValue("cap_videos"))
+	cfg.Caps = domain.HubCaps{Chat: chatN, Images: imgN, Videos: vidN}.Norm()
 	if cfg.Schedule.TZ == "" {
 		cfg.Schedule.TZ = "Europe/Moscow"
 	}

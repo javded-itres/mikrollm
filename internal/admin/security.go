@@ -17,6 +17,18 @@ func staticHandler() http.Handler {
 	return http.StripPrefix("/admin/static/", http.FileServer(http.FS(sub)))
 }
 
+func serveOpenAPI(w http.ResponseWriter, r *http.Request) {
+	b, err := fs.ReadFile(web.FS, "static/openapi.json")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	_, _ = w.Write(b)
+}
+
 func pwaManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=3600")

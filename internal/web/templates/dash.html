@@ -130,6 +130,14 @@
       </div>
       <p class="muted small" style="margin:.5rem 0 0">Пустые дни = каждый день. Сейчас: {{if .HubSharingNow}}<strong>шаринг открыт</strong>{{else}}<strong>окно закрыто</strong>{{end}} · {{.HubSchedule.Label}}</p>
     </div>
+    <div class="span2">
+      <p class="muted small" style="margin:0 0 .4rem">Сколько запросов узел берёт сразу (остальные ждут в очереди сети):</p>
+      <div class="pull-row" style="flex-wrap:wrap">
+        <label class="inline">чат <input name="cap_chat" type="number" min="1" max="32" value="{{.HubCapChat}}" class="sel-sm"></label>
+        <label class="inline">изображения <input name="cap_images" type="number" min="1" max="16" value="{{.HubCapImages}}" class="sel-sm"></label>
+        <label class="inline">видео <input name="cap_videos" type="number" min="1" max="8" value="{{.HubCapVideos}}" class="sel-sm"></label>
+      </div>
+    </div>
     {{if .HubNodeID}}<p class="muted small span2">id узла: <code>{{.HubNodeID}}</code></p>{{end}}
     {{if .HubEnabled}}
     <p class="muted small span2">Пока оператор хаба задал модель по умолчанию, в шлюзе появляется alias <code>auto</code> (чат и API).{{if .HubAutoModel}} Сейчас: <code>auto</code> → {{.HubAutoNode}} / {{.HubAutoModel}}.{{else}} Сейчас оператор ещё не указал узел и модель.{{end}}</p>

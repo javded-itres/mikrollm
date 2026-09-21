@@ -734,8 +734,9 @@
         }).join("");
         var jobs = (q.jobs || []).slice(0, 12).map(function (j) {
           var where = j.status === "waiting" ? "в очереди" : esc([j.provider, j.backend, j.model].filter(Boolean).join(" · "));
+          var prev = j.preview ? "<span class=\"q-prev\">" + esc(j.preview) + "</span>" : "";
           return "<li><span class=\"seq\">#" + j.seq + "</span><span class=\"st-" + esc(j.status) + "\">" + stLabel(j.status) + "</span>" +
-            "<span>" + where + "</span><span class=\"muted\">" + (j.key_prefix || "") + "</span></li>";
+            prev + "<span>" + where + "</span><span class=\"muted\">" + (j.key_prefix || "") + "</span></li>";
         }).join("");
         return "<article class=\"q-card\"><div class=\"q-title\"><span class=\"host-name\">" + esc(q.name) + "</span> <code>" + esc(q.alias) + "</code>" +
           "<span class=\"pill\">ждет " + q.waiting + "</span><span class=\"pill ram\">идёт " + q.running + "</span></div>" +
@@ -766,6 +767,8 @@
     var modeEl = document.getElementById("gen-mode");
     var pathEl = document.getElementById("gen-path");
     var messages = [];
+    var chats = [];
+    var activeId = "";
     var ac = null;
     var pinBottom = true;
     var refs = [];
@@ -1116,24 +1119,109 @@
       pinBottom = nearBottom();
     });
 
+    function chatTitle(msgs) {
+      for (var i = 0; i < (msgs || []).length; i++) {
+        if (msgs[i].role === "user" && msgs[i].content) return String(msgs[i].content).slice(0, 32);
+      }
+      return "Новый чат";
+    }
+    function snapshotChat() {
+      var c = null;
+      for (var i = 0; i < chats.length; i++) if (chats[i].id === activeId) c = chats[i];
+      if (!c) return;
+      c.messages = messages;
+      c.model = modelEl && modelEl.value;
+      c.mode = genMode();
+      c.title = chatTitle(messages);
+      c.updated = Date.now();
+    }
+    function renderTabs() {
+      var bar = document.getElementById("chat-tabs");
+      if (!bar) return;
+      bar.innerHTML = chats.map(function (c) {
+        return "<button type=\"button\" class=\"chat-tab" + (c.id === activeId ? " active" : "") + (c.busy ? " is-busy" : "") + "\" data-id=\"" + c.id + "\">" +
+          "<span>" + escHtml(c.title || "Новый чат") + "</span>" +
+          "<span class=\"chat-tab-x\" data-close=\"" + c.id + "\" title=\"закрыть\">×</span></button>";
+      }).join("") + "<button type=\"button\" class=\"chat-tab-new\" id=\"chat-tab-new\" title=\"Новый чат\">+</button>";
+    }
+    function paintThread() {
+      log.querySelectorAll(".chat-msg").forEach(function (n) { n.remove(); });
+      if (empty) empty.hidden = messages.length > 0;
+      messages.forEach(function (m) {
+        var text = m.content || (m.hadImage ? "изображение" : "");
+        var b = bubble(m.role === "user" ? "user" : "assistant", text, true);
+        if (m.think && b.think) {
+          b.think.hidden = false;
+          b.think.textContent = m.think;
+        }
+        if (m.image) {
+          b.body.textContent = "";
+          var img = document.createElement("img");
+          img.src = m.image;
+          img.alt = text;
+          b.body.appendChild(img);
+        }
+      });
+      stickBottom(true);
+      renderHist();
+      syncModeToModel();
+    }
+    function switchChat(id) {
+      if (id === activeId) return;
+      snapshotChat();
+      var next = null;
+      for (var i = 0; i < chats.length; i++) if (chats[i].id === id) next = chats[i];
+      if (!next) return;
+      activeId = id;
+      messages = next.messages || [];
+      if (modelEl && next.model) modelEl.value = next.model;
+      if (modeEl && next.mode) modeEl.value = next.mode;
+      filterModels();
+      setBusy(!!next.busy);
+      paintThread();
+      renderTabs();
+      persist();
+    }
+    function newChat(silent) {
+      snapshotChat();
+      var c = { id: "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: "Новый чат", messages: [], model: modelEl && modelEl.value, mode: genMode(), updated: Date.now(), busy: false };
+      chats.push(c);
+      activeId = c.id;
+      messages = [];
+      if (ac && !silent) { /* keep other tab jobs */ }
+      log.querySelectorAll(".chat-msg").forEach(function (n) { n.remove(); });
+      if (empty) empty.hidden = false;
+      status.textContent = "";
+      setBusy(false);
+      clearRefs();
+      renderHist();
+      renderTabs();
+      persist();
+    }
     function persist() {
+      snapshotChat();
       function pack(withImage) {
         return JSON.stringify({
-          model: modelEl && modelEl.value,
-          mode: genMode(),
-          messages: messages.map(function (m) {
-            var row = { role: m.role, content: typeof m.content === "string" ? m.content : "", think: m.think || "", hadImage: !!(m.image || m.hadImage) };
-            if (withImage && m.image) row.image = m.image;
-            return row;
+          active: activeId,
+          chats: chats.map(function (c) {
+            return {
+              id: c.id, title: c.title, model: c.model, mode: c.mode, updated: c.updated,
+              messages: (c.messages || []).map(function (m) {
+                var row = { role: m.role, content: typeof m.content === "string" ? m.content : "", think: m.think || "", hadImage: !!(m.image || m.hadImage) };
+                if (withImage && m.image) row.image = m.image;
+                return row;
+              })
+            };
           })
         });
       }
       try {
-        sessionStorage.setItem("ml-chat-thread", pack(true));
+        localStorage.setItem("ml-chats", pack(true));
       } catch (e) {
-        try { sessionStorage.setItem("ml-chat-thread", pack(false)); } catch (e2) {}
+        try { localStorage.setItem("ml-chats", pack(false)); } catch (e2) {}
       }
       renderHist();
+      renderTabs();
     }
     function renderHist() {
       var task = document.getElementById("chat-task");
@@ -1180,32 +1268,43 @@
     }
     function restore() {
       try {
-        var raw = sessionStorage.getItem("ml-chat-thread");
-        if (!raw) return;
-        var data = JSON.parse(raw);
-        if (!data || !data.messages || !data.messages.length) return;
-        messages = data.messages;
-        if (modeEl && data.mode) modeEl.value = data.mode;
+        var raw = localStorage.getItem("ml-chats");
+        if (!raw) {
+          var old = sessionStorage.getItem("ml-chat-thread");
+          if (old) {
+            var data = JSON.parse(old);
+            chats = [{ id: "c0", title: chatTitle(data.messages || []), messages: data.messages || [], model: data.model, mode: data.mode, updated: Date.now() }];
+            activeId = "c0";
+            messages = chats[0].messages;
+            if (modeEl && data.mode) modeEl.value = data.mode;
+            filterModels();
+            paintThread();
+            renderTabs();
+            return;
+          }
+          newChat(true);
+          return;
+        }
+        var bag = JSON.parse(raw);
+        chats = bag.chats || [];
+        activeId = bag.active || (chats[0] && chats[0].id) || "";
+        if (!chats.length) {
+          newChat(true);
+          return;
+        }
+        var cur = null;
+        for (var i = 0; i < chats.length; i++) if (chats[i].id === activeId) cur = chats[i];
+        if (!cur) cur = chats[0];
+        activeId = cur.id;
+        messages = cur.messages || [];
+        if (modelEl && cur.model) modelEl.value = cur.model;
+        if (modeEl && cur.mode) modeEl.value = cur.mode;
         filterModels();
-        messages.forEach(function (m) {
-          var text = m.content || (m.hadImage ? "изображение" : "");
-          var b = bubble(m.role === "user" ? "user" : "assistant", text, true);
-          if (m.think && b.think) {
-            b.think.hidden = false;
-            b.think.textContent = m.think;
-          }
-          if (m.image) {
-            b.body.textContent = "";
-            var img = document.createElement("img");
-            img.src = m.image;
-            img.alt = text;
-            b.body.appendChild(img);
-          }
-        });
-        stickBottom(true);
-        renderHist();
-        syncModeToModel();
-      } catch (e) {}
+        paintThread();
+        renderTabs();
+      } catch (e) {
+        newChat(true);
+      }
     }
 
     function bubble(role, text, skipScroll) {
@@ -1233,23 +1332,42 @@
     }
 
     function setBusy(on) {
+      for (var i = 0; i < chats.length; i++) if (chats[i].id === activeId) chats[i].busy = on;
       send.disabled = on;
       send.hidden = on;
       stop.hidden = !on;
       input.disabled = on;
+      renderTabs();
     }
 
     document.getElementById("chat-clear").addEventListener("click", function () {
       if (ac) ac.abort();
-      messages = [];
-      log.querySelectorAll(".chat-msg").forEach(function (n) { n.remove(); });
-      if (empty) empty.hidden = false;
-      status.textContent = "";
-      setBusy(false);
-      clearRefs();
-      try { sessionStorage.removeItem("ml-chat-thread"); } catch (e) {}
-      renderHist();
+      newChat();
     });
+    var tabsEl = document.getElementById("chat-tabs");
+    if (tabsEl) {
+      tabsEl.addEventListener("click", function (ev) {
+        var close = ev.target && ev.target.getAttribute && ev.target.getAttribute("data-close");
+        if (close) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          chats = chats.filter(function (c) { return c.id !== close; });
+          if (!chats.length) {
+            newChat();
+            return;
+          }
+          if (activeId === close) switchChat(chats[chats.length - 1].id);
+          else { renderTabs(); persist(); }
+          return;
+        }
+        if (ev.target && ev.target.id === "chat-tab-new") {
+          newChat();
+          return;
+        }
+        var btn = ev.target.closest ? ev.target.closest(".chat-tab") : null;
+        if (btn && btn.getAttribute("data-id")) switchChat(btn.getAttribute("data-id"));
+      });
+    }
     if (refBtn && refInput) {
       refBtn.addEventListener("click", function () { refInput.click(); });
       refInput.addEventListener("change", function () {

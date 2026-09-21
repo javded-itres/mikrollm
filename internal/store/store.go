@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS ollama_jobs (
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_token TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_name TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_schedule TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_caps TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`)
@@ -208,7 +209,11 @@ CREATE TABLE IF NOT EXISTS queue_jobs (
 CREATE INDEX IF NOT EXISTS queue_jobs_q_status_seq ON queue_jobs(queue_id, status, seq);
 CREATE INDEX IF NOT EXISTS queue_jobs_status ON queue_jobs(status);
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	_, _ = s.DB.Exec(`ALTER TABLE queue_jobs ADD COLUMN preview TEXT NOT NULL DEFAULT ''`)
+	return nil
 }
 
 func (s *Store) EnsureAdmin(password string, reset bool) error {
@@ -780,9 +785,10 @@ func (s *Store) SetPromptCacheMode(mode string) error {
 func (s *Store) HubSettings() (domain.HubSettings, error) {
 	var en int
 	var id, tok, name, sched string
-	err := s.DB.QueryRow(`SELECT hub_enabled, hub_node_id, hub_token, hub_name, hub_schedule FROM admin_meta WHERE id=1`).Scan(&en, &id, &tok, &name, &sched)
+	var caps string
+	err := s.DB.QueryRow(`SELECT hub_enabled, hub_node_id, hub_token, hub_name, hub_schedule, hub_caps FROM admin_meta WHERE id=1`).Scan(&en, &id, &tok, &name, &sched, &caps)
 	if err == sql.ErrNoRows {
-		return domain.HubSettings{}, nil
+		return domain.HubSettings{Caps: domain.HubCaps{}.Norm()}, nil
 	}
 	if err != nil {
 		return domain.HubSettings{}, err
@@ -791,6 +797,10 @@ func (s *Store) HubSettings() (domain.HubSettings, error) {
 	if strings.TrimSpace(sched) != "" {
 		_ = json.Unmarshal([]byte(sched), &h.Schedule)
 	}
+	if strings.TrimSpace(caps) != "" {
+		_ = json.Unmarshal([]byte(caps), &h.Caps)
+	}
+	h.Caps = h.Caps.Norm()
 	return h, nil
 }
 
@@ -800,8 +810,10 @@ func (s *Store) SetHubSettings(h domain.HubSettings) error {
 		en = 1
 	}
 	raw, _ := json.Marshal(h.Schedule)
-	res, err := s.DB.Exec(`UPDATE admin_meta SET hub_enabled=?, hub_node_id=?, hub_token=?, hub_name=?, hub_schedule=? WHERE id=1`,
-		en, h.NodeID, h.Token, strings.TrimSpace(h.Name), string(raw))
+	h.Caps = h.Caps.Norm()
+	caps, _ := json.Marshal(h.Caps)
+	res, err := s.DB.Exec(`UPDATE admin_meta SET hub_enabled=?, hub_node_id=?, hub_token=?, hub_name=?, hub_schedule=?, hub_caps=? WHERE id=1`,
+		en, h.NodeID, h.Token, strings.TrimSpace(h.Name), string(raw), string(caps))
 	if err != nil {
 		return err
 	}

@@ -72,6 +72,7 @@ func TestTemplatesParse(t *testing.T) {
 		{"templates/layout.html", "templates/keys.html"},
 		{"templates/layout.html", "templates/queues.html"},
 		{"templates/layout.html", "templates/logs.html"},
+		{"templates/docs.html"},
 	} {
 		if _, err := template.New("layout.html").Funcs(fm).ParseFS(web.FS, files...); err != nil {
 			t.Fatalf("%v: %v", files, err)

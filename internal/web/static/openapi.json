@@ -1,0 +1,534 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "MikroLLM API",
+    "version": "0.0.6",
+    "description": "OpenAI-совместимый шлюз MikroLLM.\n\nКлюч: `Authorization: Bearer sk-…` или `X-Api-Key: sk-…` (вкладка Ключи). Без ключа — 401, кроме `/health` и `/ready`.\n\n`model` — **alias шлюза** (в том числе `auto` у участника hub) или имя с бэкенда.\n\n- Чат: `POST /v1/chat/completions` (и Ollama `POST /api/chat`)\n- Картинки: `POST /v1/images/generations`\n- Видео: `POST /v1/videos`, статус и файл — `GET /v1/videos/{id}` и `/content`\n- MCP (настройка шлюза, не чат): `POST /mcp` с токеном `mcp-…`"
+  },
+  "servers": [
+    { "url": "/", "description": "Этот шлюз" }
+  ],
+  "tags": [
+    { "name": "Health", "description": "Жив ли процесс" },
+    { "name": "Models", "description": "Список alias" },
+    { "name": "Chat", "description": "Chat Completions" },
+    { "name": "Images", "description": "Генерация изображений" },
+    { "name": "Videos", "description": "Генерация видео" },
+    { "name": "Ollama", "description": "Совместимость с Ollama HTTP" },
+    { "name": "MCP", "description": "JSON-RPC для агента (модели, очереди, ключи, логи)" }
+  ],
+  "security": [{ "bearerAuth": [] }, { "apiKeyAuth": [] }],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Процесс жив",
+        "security": [],
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" }, "example": { "ok": true } } }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Есть живой бэкенд",
+        "security": [],
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "description": "Готов",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } }
+          },
+          "503": {
+            "description": "Нет здоровых бэкендов",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" }, "example": { "ok": false } } }
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "Список alias",
+        "description": "OpenAI `list`. Поля `context_length` / `max_input_tokens`, цены OpenRouter, `supported_generation` (chat/image/video). Очереди тоже попадают как model.",
+        "operationId": "listModels",
+        "responses": {
+          "200": {
+            "description": "Список",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelList" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/v1/model/info": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "LiteLLM model_info",
+        "operationId": "modelInfo",
+        "responses": {
+          "200": {
+            "description": "data[].model_info.max_input_tokens",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelInfoList" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/model/info": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "LiteLLM model_info без /v1",
+        "operationId": "modelInfoLegacy",
+        "responses": {
+          "200": {
+            "description": "То же, что GET /v1/model/info",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelInfoList" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "tags": ["Chat"],
+        "summary": "Chat Completions",
+        "description": "Как OpenAI. `model` — alias. `stream: true` — SSE (`data: …` / `data: [DONE]`).\n\nОпционально `X-Session-Id` (prompt cache на OpenRouter). Non-stream: заголовок `X-MikroLLM-Cache-Tokens`. Fallback alias: `X-MikroLLM-Fallback`.\n\nВидео-only модель сюда не посылайте — 400, нужен `POST /v1/videos`.",
+        "operationId": "chatCompletions",
+        "parameters": [
+          { "name": "X-Session-Id", "in": "header", "required": false, "schema": { "type": "string" }, "description": "Сессия prompt cache (OpenRouter)" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ChatRequest" },
+              "example": {
+                "model": "auto",
+                "messages": [{ "role": "user", "content": "привет" }],
+                "stream": false,
+                "temperature": 0.7,
+                "max_tokens": 512
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON или SSE",
+            "headers": {
+              "X-MikroLLM-Fallback": { "schema": { "type": "string" }, "description": "original -> fallback" },
+              "X-MikroLLM-Cache-Tokens": { "schema": { "type": "string" } },
+              "X-MikroLLM-Guardrail": { "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ChatResponse" } },
+              "text/event-stream": { "schema": { "type": "string" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "502": { "$ref": "#/components/responses/BadGateway" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/images/generations": {
+      "post": {
+        "tags": ["Images"],
+        "summary": "Генерация изображений",
+        "description": "OpenAI Images. OpenRouter идёт в нативный `POST /images`. Референсы — `input_references` (data URL / JPEG).",
+        "operationId": "imagesGenerations",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ImageRequest" },
+              "example": { "model": "flux", "prompt": "кот в космосе", "n": 1 }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "data[].b64_json или url",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImageResponse" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/v1/videos": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Создать видео",
+        "description": "OpenAI Videos (Sora-style). Тело как у картинок: `model` + `prompt`, опционально `input_references`.",
+        "operationId": "videosCreate",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/VideoCreateRequest" },
+              "example": { "model": "minimax-hailuo-02", "prompt": "волны на закате" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Задача, поле id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VideoJob" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/v1/videos/{id}": {
+      "get": {
+        "tags": ["Videos"],
+        "summary": "Статус видео",
+        "operationId": "videosGet",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "model", "in": "query", "required": false, "schema": { "type": "string" }, "description": "Alias, если id ещё не запомнен шлюзом" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Статус",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VideoJob" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/v1/videos/{id}/content": {
+      "get": {
+        "tags": ["Videos"],
+        "summary": "Файл видео",
+        "operationId": "videosContent",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "model", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Байт видео",
+            "content": { "video/mp4": { "schema": { "type": "string", "format": "binary" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "tags": ["Ollama"],
+        "summary": "Ollama /api/chat",
+        "description": "Прокси на локальный Ollama / Ollama Cloud. Иначе шлюз переписывает путь в OpenAI chat бэкенда.",
+        "operationId": "ollamaChat",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OllamaChatRequest" },
+              "example": { "model": "llama3.2", "messages": [{ "role": "user", "content": "hi" }], "stream": false }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ответ Ollama или OpenAI chat",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/tags": {
+      "get": {
+        "tags": ["Ollama"],
+        "summary": "Имена моделей",
+        "operationId": "ollamaTags",
+        "responses": {
+          "200": {
+            "description": "models[].name",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OllamaTags" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/mcp": {
+      "post": {
+        "tags": ["MCP"],
+        "summary": "MCP JSON-RPC",
+        "description": "Streamable HTTP. Авторизация: `Authorization: Bearer mcp-…` (или пароль админки). **Не чат** — настройка моделей, очередей, ключей, логи. GET /mcp → 405.",
+        "operationId": "mcp",
+        "security": [{ "mcpAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/JSONRPC" },
+              "example": { "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {} }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "sk",
+        "description": "Ключ из админки → Ключи, вида `sk-…`"
+      },
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Api-Key",
+        "description": "Тот же `sk-…`"
+      },
+      "mcpAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Токен MCP `mcp-…` (Статус → MCP), не ключ чата"
+      }
+    },
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "properties": { "ok": { "type": "boolean" } }
+      },
+      "APIError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "message": { "type": "string" },
+              "type": { "type": "string" }
+            }
+          }
+        }
+      },
+      "ChatMessage": {
+        "type": "object",
+        "required": ["role"],
+        "properties": {
+          "role": { "type": "string", "enum": ["system", "user", "assistant", "tool"] },
+          "content": {
+            "description": "Строка или массив частей (текст / image_url)",
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "object" } }
+            ]
+          }
+        }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "required": ["model", "messages"],
+        "properties": {
+          "model": { "type": "string", "description": "Alias шлюза, очередь или auto" },
+          "messages": { "type": "array", "items": { "$ref": "#/components/schemas/ChatMessage" } },
+          "stream": { "type": "boolean", "default": false },
+          "temperature": { "type": "number" },
+          "max_tokens": { "type": "integer" },
+          "top_p": { "type": "number" }
+        }
+      },
+      "ChatResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "object",
+                  "properties": {
+                    "role": { "type": "string" },
+                    "content": { "type": "string" },
+                    "reasoning": { "type": "string" }
+                  }
+                },
+                "finish_reason": { "type": "string" }
+              }
+            }
+          },
+          "usage": { "type": "object" }
+        }
+      },
+      "ImageRequest": {
+        "type": "object",
+        "required": ["model", "prompt"],
+        "properties": {
+          "model": { "type": "string" },
+          "prompt": { "type": "string" },
+          "n": { "type": "integer", "minimum": 1 },
+          "size": { "type": "string" },
+          "input_references": {
+            "type": "array",
+            "description": "Референс-фото (data URL JPEG, до 6)",
+            "items": { "type": "object" }
+          }
+        }
+      },
+      "ImageResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "b64_json": { "type": "string" },
+                "url": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "VideoCreateRequest": {
+        "type": "object",
+        "required": ["model", "prompt"],
+        "properties": {
+          "model": { "type": "string" },
+          "prompt": { "type": "string" },
+          "seconds": { "type": "integer" },
+          "size": { "type": "string" },
+          "input_references": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "VideoJob": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string" },
+          "model": { "type": "string" }
+        }
+      },
+      "ModelList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "example": "list" },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "object": { "type": "string" },
+                "owned_by": { "type": "string" },
+                "context_length": { "type": "integer" },
+                "max_input_tokens": { "type": "integer" },
+                "provider": { "type": "string" },
+                "supported_generation": { "type": "array", "items": { "type": "string" } },
+                "mode": { "type": "string" },
+                "input_cost_per_token": { "type": "number" },
+                "output_cost_per_token": { "type": "number" }
+              }
+            }
+          }
+        }
+      },
+      "ModelInfoList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "model_name": { "type": "string" },
+                "litellm_params": { "type": "object" },
+                "model_info": { "type": "object" }
+              }
+            }
+          }
+        }
+      },
+      "OllamaChatRequest": {
+        "type": "object",
+        "required": ["model", "messages"],
+        "properties": {
+          "model": { "type": "string" },
+          "messages": { "type": "array", "items": { "$ref": "#/components/schemas/ChatMessage" } },
+          "stream": { "type": "boolean" }
+        }
+      },
+      "OllamaTags": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "model": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "JSONRPC": {
+        "type": "object",
+        "properties": {
+          "jsonrpc": { "type": "string", "example": "2.0" },
+          "id": {},
+          "method": { "type": "string" },
+          "params": { "type": "object" }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Нет model / фильтр / неверный тип медиа",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/APIError" } } }
+      },
+      "Unauthorized": {
+        "description": "Нет или неверный ключ",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/APIError" } } }
+      },
+      "Forbidden": {
+        "description": "Модель не в allowlist ключа",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/APIError" } } }
+      },
+      "RateLimited": {
+        "description": "RPM ключа",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/APIError" } } }
+      },
+      "BadGateway": {
+        "description": "Апстрим недоступен",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/APIError" } } }
+      },
+      "Unavailable": {
+        "description": "Очередь полна / нет бэкенда",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/APIError" } } }
+      }
+    }
+  }
+}

@@ -16,7 +16,7 @@ English is the default. Russian copies live in [ru/](ru/README.md). GitHub Relea
 | [admin.md](admin.md) | Admin: servers, queues, models, RAM, keys, chat, log, billing |
 | [security.md](security.md) | Filters, system prompt, prompt injection |
 | [providers.md](providers.md) | Ollama, Ollama Cloud, OpenRouter, vLLM, LM Studio; prompt cache |
-| [api.md](api.md) | OpenAI / Ollama API, chat / images / videos, keys |
+| [api.md](api.md) | OpenAI / Ollama API, chat / images / videos, keys; live Swagger at `/docs` |
 | [mcp.md](mcp.md) | MCP: agent configures models, queues, keys, logs |
 | [architecture.md](architecture.md) | Packages, ports, dependency injection |
 | [hub.md](hub.md) | Hub client: join the cloud catalog (service is a separate repo) |

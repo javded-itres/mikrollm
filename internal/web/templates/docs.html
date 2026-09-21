@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MikroLLM API — Swagger</title>
+  <link rel="icon" href="/admin/static/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/admin/static/swagger/swagger-ui.css">
+  <style>
+    html, body { margin: 0; min-height: 100%; background: #f7f8fa; color: #3b4151; }
+    body { font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+    .docs-top {
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+      padding: .7rem 1.2rem; background: #fff;
+      border-bottom: 1px solid #e4e9f0;
+      position: sticky; top: 0; z-index: 10;
+    }
+    .docs-top .brand {
+      display: inline-flex; align-items: center; gap: .5rem;
+      font-weight: 700; color: #1b2430; text-decoration: none;
+    }
+    .docs-top .brand img { width: 1.8rem; height: 1.8rem; border-radius: 6px; }
+    .docs-top nav { display: flex; gap: .9rem; flex: 1; flex-wrap: wrap; }
+    .docs-top a { color: #3d6ea8; text-decoration: none; }
+    .docs-top a:hover { text-decoration: underline; }
+    .docs-top .hint { color: #6b778c; font-size: .88rem; }
+    .swagger-ui .topbar { display: none; }
+    .swagger-ui { background: #f7f8fa; }
+    .swagger-ui .information-container.wrapper { padding-top: 1rem; }
+  </style>
+</head>
+<body>
+  <header class="docs-top">
+    <a class="brand" href="/admin"><img src="/admin/static/logo.svg" width="28" height="28" alt="">MikroLLM API</a>
+    <nav>
+      <a href="/admin">Админка</a>
+      <a href="/admin/keys">Ключи</a>
+      <a href="/openapi.json">openapi.json</a>
+    </nav>
+    <span class="hint">Authorize → вставьте <code>sk-…</code> с вкладки Ключи</span>
+  </header>
+  <div id="swagger-ui"></div>
+  <script src="/admin/static/swagger/swagger-ui-bundle.js"></script>
+  <script src="/admin/static/swagger/init.js"></script>
+</body>
+</html>

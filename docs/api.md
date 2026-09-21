@@ -27,6 +27,8 @@ Without a key (except health/ready and admin) — `401`. Model not on the key al
 
 `/` redirects to `/admin`.
 
+Live **Swagger UI** (light): [http://127.0.0.1:4000/docs](http://127.0.0.1:4000/docs) (also `/admin/docs`). Spec: `GET /openapi.json`. Click **Authorize** and paste an `sk-` key from admin → Keys to try requests.
+
 ## Chat Completions
 
 Body like OpenAI. `model` is a **gateway alias** or an upstream name if there is no alias but health has seen it.

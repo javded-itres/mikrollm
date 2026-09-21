@@ -52,12 +52,53 @@ type HubPeer struct {
 }
 
 // HubSettings is the outbound hub-client config (MikroLLM → cloud hub).
+type HubCaps struct {
+	Chat   int `json:"chat"`
+	Images int `json:"images"`
+	Videos int `json:"videos"`
+}
+
+func (c HubCaps) Norm() HubCaps {
+	if c.Chat <= 0 {
+		c.Chat = 4
+	}
+	if c.Images <= 0 {
+		c.Images = 2
+	}
+	if c.Videos <= 0 {
+		c.Videos = 1
+	}
+	if c.Chat > 32 {
+		c.Chat = 32
+	}
+	if c.Images > 16 {
+		c.Images = 16
+	}
+	if c.Videos > 8 {
+		c.Videos = 8
+	}
+	return c
+}
+
+func (c HubCaps) For(kind string) int {
+	c = c.Norm()
+	switch kind {
+	case "images":
+		return c.Images
+	case "videos", "videos_status", "videos_content":
+		return c.Videos
+	default:
+		return c.Chat
+	}
+}
+
 type HubSettings struct {
 	Enabled  bool
 	NodeID   string
 	Token    string
 	Name     string
 	Schedule HubSchedule
+	Caps     HubCaps
 }
 
 type APIKey struct {

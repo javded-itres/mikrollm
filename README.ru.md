@@ -77,7 +77,7 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 | HTTPS | [docs/tls.md](docs/ru/tls.md) |
 | Админка: модели, RAM, ключи, чат | [docs/admin.md](docs/ru/admin.md) |
 | Ollama / Cloud / OpenRouter / vLLM / LM Studio | [docs/providers.md](docs/ru/providers.md) |
-| HTTP API | [docs/api.md](docs/ru/api.md) |
+| HTTP API | [docs/api.md](docs/ru/api.md) (Swagger `/docs`) |
 | MCP для агента | [docs/mcp.md](docs/ru/mcp.md) |
 | Устройство кода | [docs/architecture.md](docs/ru/architecture.md) |
 | Сеть hub (исходящий клиент) | [docs/ru/hub.md](docs/ru/hub.md) |

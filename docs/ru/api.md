@@ -27,6 +27,8 @@
 
 `/` редиректит на `/admin`.
 
+Живой **Swagger UI** (светлая тема): [http://127.0.0.1:4000/docs](http://127.0.0.1:4000/docs) (ещё `/admin/docs`). Спека: `GET /openapi.json`. **Authorize** — вставьте ключ `sk-` с вкладки Ключи, чтобы пробовать запросы.
+
 ## Chat Completions
 
 Тело как у OpenAI. Поле `model` — **alias шлюза** или имя модели на бэкенде, если alias нет, но health её видит.

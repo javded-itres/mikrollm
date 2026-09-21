@@ -294,6 +294,9 @@ func TestHubSettingsAndShare(t *testing.T) {
 	if err != nil || got.Enabled || got.Token != "" {
 		t.Fatalf("%+v %v", got, err)
 	}
+	if got.Caps.Chat != 4 || got.Caps.Images != 2 || got.Caps.Videos != 1 {
+		t.Fatalf("default caps %+v", got.Caps)
+	}
 	if err := st.SetHubSettings(domain.HubSettings{
 		Enabled: true, NodeID: "n1", Token: "hk", Name: "hap",
 		Schedule: domain.HubSchedule{Enabled: true, Days: []int{1, 3, 0}, Start: "00:00", End: "12:00", TZ: "UTC"},

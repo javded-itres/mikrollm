@@ -12,7 +12,7 @@
   <link rel="icon" href="/admin/static/logo.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/admin/static/apple-touch-icon.png">
   <link rel="manifest" href="/admin/manifest.webmanifest">
-  <link rel="stylesheet" href="/admin/static/app.css?v=36">
+  <link rel="stylesheet" href="/admin/static/app.css?v=37">
 </head>
 <body>
 <header>
@@ -24,6 +24,7 @@
     <a href="/admin/security" {{if eq .Nav "security"}}class="active"{{end}}>Безопасность</a>
     <a href="/admin/keys" {{if eq .Nav "keys"}}class="active"{{end}}>Ключи</a>
     <a href="/admin/chat" {{if eq .Nav "chat"}}class="active"{{end}}>Чат</a>
+    <a href="/admin/docs" {{if eq .Nav "docs"}}class="active"{{end}}>API</a>
     <a href="/admin/logs" {{if eq .Nav "logs"}}class="active"{{end}}>Лог</a>
     <a href="/admin/billing" {{if eq .Nav "billing"}}class="active"{{end}}>Биллинг</a>
   </nav>
@@ -44,7 +45,7 @@
   {{end}}
   {{template "content" .}}
 </div>
-<script src="/admin/static/app.js?v=36"></script>
+<script src="/admin/static/app.js?v=37"></script>
 <script src="/admin/static/pwa.js"></script>
 </body>
 </html>

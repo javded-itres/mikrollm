@@ -44,6 +44,9 @@ type Client struct {
 	mu     sync.Mutex
 	status string
 	err    string
+	runMu  sync.Mutex
+	runN   map[string]int
+	runCV  *sync.Cond
 	catMu  sync.Mutex
 	cat    Catalog
 	selfID string
@@ -57,15 +60,18 @@ func HubURL() string {
 }
 
 func New(st Store, auth ports.Auth, listen string) *Client {
-	return &Client{
+	c := &Client{
 		Store:  st,
 		Auth:   auth,
 		Listen: listen,
 		HubURL: HubURL(),
-		HTTP:   &http.Client{Timeout: 2 * time.Minute},
+		HTTP:   &http.Client{Timeout: 0, Transport: &http.Transport{ResponseHeaderTimeout: 30 * time.Second, IdleConnTimeout: 90 * time.Second}},
 		wake:   make(chan struct{}, 1),
 		status: "off",
+		runN:   map[string]int{},
 	}
+	c.runCV = sync.NewCond(&c.runMu)
+	return c
 }
 
 func (c *Client) URL() string {
@@ -317,7 +323,8 @@ func (c *Client) announce(cfg Settings) error {
 	if name == "" {
 		name = "mikrollm"
 	}
-	ann := AnnounceReq{Name: name, Aliases: aliases}
+	caps := cfg.Caps.Norm()
+	ann := AnnounceReq{Name: name, Aliases: aliases, Caps: &Caps{Chat: caps.Chat, Images: caps.Images, Videos: caps.Videos}}
 	if cfg.Schedule.Enabled {
 		ann.Schedule = &ShareSchedule{
 			Enabled: true, Days: cfg.Schedule.Days,
@@ -401,6 +408,8 @@ func (c *Client) runJob(cfg Settings, job Job) {
 	if kind == "" {
 		kind = "chat"
 	}
+	c.acquire(kind)
+	defer c.release(kind)
 	method, path, payload := localRelay(job)
 	var rdr io.Reader
 	if payload != nil {
@@ -472,6 +481,35 @@ func localRelay(job Job) (method, path string, body []byte) {
 	}
 	body, _ = json.Marshal(raw)
 	return method, path, body
+}
+
+func (c *Client) acquire(kind string) {
+	if c.runCV == nil {
+		return
+	}
+	capn := 4
+	if cfg, err := c.Store.HubSettings(); err == nil {
+		capn = cfg.Caps.For(kind)
+	}
+	c.runMu.Lock()
+	for c.runN[kind] >= capn {
+		c.runCV.Wait()
+	}
+	c.runN[kind]++
+	c.runMu.Unlock()
+}
+
+func (c *Client) release(kind string) {
+	if c.runCV == nil {
+		return
+	}
+	c.runMu.Lock()
+	c.runN[kind]--
+	if c.runN[kind] < 0 {
+		c.runN[kind] = 0
+	}
+	c.runCV.Broadcast()
+	c.runMu.Unlock()
 }
 
 func (c *Client) aliasShared(alias string) bool {

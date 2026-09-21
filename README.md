@@ -77,7 +77,7 @@ An empty data dir **seeds** two backends `mac-82` / `mac-80` at `192.168.88.80/8
 | HTTPS | [docs/tls.md](docs/tls.md) |
 | Admin: models, RAM, keys, chat | [docs/admin.md](docs/admin.md) |
 | Ollama / Cloud / OpenRouter / vLLM / LM Studio | [docs/providers.md](docs/providers.md) |
-| HTTP API | [docs/api.md](docs/api.md) |
+| HTTP API | [docs/api.md](docs/api.md) (Swagger `/docs`) |
 | MCP for an agent | [docs/mcp.md](docs/mcp.md) |
 | Code layout | [docs/architecture.md](docs/architecture.md) |
 | Hub network (outbound client) | [docs/hub.md](docs/hub.md) |

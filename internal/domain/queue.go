@@ -44,6 +44,7 @@ type QueueJob struct {
 	Body            []byte
 	Bytes           int
 	Error           string
+	Preview         string
 	CreatedAt       time.Time
 	StartedAt       *time.Time
 	FinishedAt      *time.Time
@@ -78,6 +79,8 @@ type QueueJobView struct {
 	KeyPrefix string `json:"key_prefix"`
 	Error     string `json:"error,omitempty"`
 	AgeMS     int64  `json:"age_ms"`
+	Preview   string `json:"preview,omitempty"`
+	Path      string `json:"path,omitempty"`
 }
 
 type QueueView struct {

@@ -6,6 +6,13 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+## 0.0.7 — 2026-09-21
+
+- Queue wait timeout no longer cancels a job that already started (fixes `context deadline exceeded` on long chat/video).
+- Hub node concurrency: chat / images / videos slots (default 4 / 2 / 1) on Status; extra jobs wait in the network queue instead of `peer busy`.
+- Admin chat tabs; live queue list shows the prompt currently generating.
+- **Swagger UI** (light theme) at `/docs` and `/admin/docs`. Spec: `GET /openapi.json`. Authorize with an `sk-` key to try chat / images / videos.
+
 ## 0.0.6 — 2026-09-21
 
 - Hub member mode grows a reserved alias **`auto`**: it follows the hub operator’s default node+model from `GET /v1/catalog` `defaults`. [docs/hub.md](docs/hub.md)

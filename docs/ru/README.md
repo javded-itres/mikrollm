@@ -16,7 +16,7 @@
 | [admin.md](admin.md) | Админка: серверы, очереди, модели, RAM, ключи, чат, лог, биллинг |
 | [security.md](security.md) | Фильтры, системный промпт, prompt injection |
 | [providers.md](providers.md) | Ollama, Ollama Cloud, OpenRouter, vLLM, LM Studio; prompt cache |
-| [api.md](api.md) | OpenAI / Ollama API, chat / images / videos, ключи |
+| [api.md](api.md) | OpenAI / Ollama API, chat / images / videos, ключи; Swagger на `/docs` |
 | [mcp.md](mcp.md) | MCP: агент настраивает модели, очереди, ключи, логи |
 | [architecture.md](architecture.md) | Пакеты, порты, внедрение зависимостей |
 | [hub.md](hub.md) | Клиент hub: вход в облачный каталог (сервис — отдельный репозиторий) |

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strconv"
@@ -180,7 +181,11 @@ func (e *Engine) handle(ctx context.Context, w http.ResponseWriter, k domain.API
 		wait = time.Duration(q.MaxWaitMS) * time.Millisecond
 	}
 	wctx, cancel := context.WithTimeout(ctx, wait)
-	wt := &waiter{job: j, body: body, key: k, w: w, ctx: wctx, done: make(chan struct{}), cancel: cancel}
+	runCtx := ctx
+	if runCtx == nil {
+		runCtx = context.Background()
+	}
+	wt := &waiter{job: j, body: body, key: k, w: w, ctx: runCtx, done: make(chan struct{}), cancel: cancel}
 	e.mu.Lock()
 	e.waiters[j.ID] = wt
 	e.mu.Unlock()
@@ -453,7 +458,7 @@ func (e *Engine) Snapshot() []domain.QueueView {
 				view.Jobs = append(view.Jobs, domain.QueueJobView{
 					Seq: j.Seq, Status: j.Status, Alias: j.Alias, Model: j.AssignedModel,
 					Backend: j.AssignedBackend, Provider: j.Provider, KeyPrefix: j.KeyPrefix,
-					Error: j.Error, AgeMS: age,
+					Error: j.Error, AgeMS: age, Preview: j.Preview, Path: j.Path,
 				})
 			}
 		}
@@ -485,7 +490,48 @@ func (e *Engine) Loop(ctx context.Context) {
 func (e *Engine) newJob(q domain.Queue, alias string, k domain.APIKey, path string, body []byte) *domain.QueueJob {
 	return &domain.QueueJob{
 		ID: newID(), QueueID: q.ID, Alias: alias, KeyPrefix: k.Prefix, Path: path, Body: body, Bytes: len(body),
+		Preview: jobPreview(path, body),
 	}
+}
+
+func jobPreview(path string, body []byte) string {
+	kind := "чат"
+	switch {
+	case strings.Contains(path, "/images"):
+		kind = "изображение"
+	case strings.Contains(path, "/videos"):
+		kind = "видео"
+	}
+	text := ""
+	var raw map[string]any
+	if json.Unmarshal(body, &raw) == nil {
+		if p, ok := raw["prompt"].(string); ok {
+			text = strings.TrimSpace(p)
+		}
+		if text == "" {
+			if msgs, ok := raw["messages"].([]any); ok {
+				for i := len(msgs) - 1; i >= 0; i-- {
+					m, ok := msgs[i].(map[string]any)
+					if !ok {
+						continue
+					}
+					if s, ok := m["content"].(string); ok && strings.TrimSpace(s) != "" {
+						text = strings.TrimSpace(s)
+						break
+					}
+				}
+			}
+		}
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return kind
+	}
+	runes := []rune(text)
+	if len(runes) > 80 {
+		text = string(runes[:80]) + "…"
+	}
+	return kind + " · " + text
 }
 
 type headTracker struct {

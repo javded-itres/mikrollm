@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -89,6 +90,28 @@ func TestHealthWired(t *testing.T) {
 	}
 	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("headers %+v", rec.Header())
+	}
+}
+
+func TestOpenAPIDocs(t *testing.T) {
+	a := testApp(t)
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
+	if rec.Code != 200 || !json.Valid(rec.Body.Bytes()) {
+		t.Fatalf("openapi %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "/v1/chat/completions") || !strings.Contains(rec.Body.String(), "/v1/images/generations") {
+		t.Fatal("spec missing chat/images")
+	}
+	rec = httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/docs", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "swagger-ui-bundle.js") || !strings.Contains(rec.Body.String(), "swagger/init.js") {
+		t.Fatalf("docs %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/static/swagger/swagger-ui.css", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), ".swagger-ui") {
+		t.Fatalf("swagger css %d", rec.Code)
 	}
 }
 

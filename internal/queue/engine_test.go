@@ -107,6 +107,26 @@ func TestQueuePrefersFirstStepThenOverflowsToSecond(t *testing.T) {
 	}
 }
 
+func TestQueueRunningSurvivesWaitDeadline(t *testing.T) {
+	block := make(chan struct{})
+	r := &fakeRouter{block: block}
+	_, e, _ := setupEng(t, r)
+	rec := httptest.NewRecorder()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		e.Handle(context.Background(), rec, domain.APIKey{Prefix: "sk-a", AllowedModels: []string{"*"}}, "/v1/chat/completions", []byte(`{"messages":[{"role":"user","content":"hello world"}]}`), "chat")
+	}()
+	time.Sleep(80 * time.Millisecond)
+	time.Sleep(2200 * time.Millisecond)
+	close(block)
+	wg.Wait()
+	if rec.Code != 200 {
+		t.Fatalf("code %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestQueueWaitsWhenAllBusyThenReleasesSameConn(t *testing.T) {
 	block := make(chan struct{})
 	r := &fakeRouter{block: block}
