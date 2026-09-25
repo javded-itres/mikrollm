@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -75,6 +76,21 @@ func (m *memStore) DeleteHubAuto() error {
 	}
 	m.models = out
 	return nil
+}
+
+func TestIsAuthErrOnlyDropsUnknownToken(t *testing.T) {
+	if !isAuthErr(fmt.Errorf("announce 401 Unauthorized: %s", `{"error":"bad token"}`)) {
+		t.Fatal("bad token must drop the registration")
+	}
+	if isAuthErr(fmt.Errorf("pull 401 Unauthorized: %s", `{"error":"bearer required"}`)) {
+		t.Fatal("other 401 must keep the node id")
+	}
+	if isAuthErr(fmt.Errorf("pull 503 Service Unavailable: %s", `{"error":"hub db unavailable"}`)) {
+		t.Fatal("db outage must keep the node id")
+	}
+	if isAuthErr(nil) {
+		t.Fatal("nil")
+	}
 }
 
 func TestClientRegistersAndAnnounces(t *testing.T) {

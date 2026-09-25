@@ -6,6 +6,10 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+## 0.0.10 — 2026-09-25
+
+- A hub reply drops the saved node id only when the body says `bad token`. A database outage is `503` and the gateway keeps its registration instead of calling `POST /v1/register` again.
+
 ## 0.0.9 — 2026-09-25
 
 - Hub alias **`auto`** can follow a pool of chat models. The hub picks fast / balanced / strong from the prompt; `X-MikroLLM-Routed-Model` names the node and alias that answered. Images and video stay on explicit aliases. [docs/hub.md](docs/hub.md)

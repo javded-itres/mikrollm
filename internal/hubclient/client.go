@@ -354,21 +354,19 @@ func (c *Client) announce(cfg Settings) error {
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-	if resp.StatusCode == http.StatusUnauthorized {
-		return fmt.Errorf("announce 401")
-	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("announce %s: %s", resp.Status, raw)
 	}
 	return nil
 }
 
+// isAuthErr is only the hub's unknown-token reply. A 401 from a proxy, or a
+// 503 while the hub database is busy, must keep the saved node id.
 func isAuthErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	s := err.Error()
-	return strings.Contains(s, "401") || strings.Contains(s, "bad token")
+	return strings.Contains(err.Error(), `"bad token"`)
 }
 
 func (c *Client) pullOnce(ctx context.Context, cfg Settings) error {
@@ -385,9 +383,6 @@ func (c *Client) pullOnce(ctx context.Context, cfg Settings) error {
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
 		return nil
-	}
-	if resp.StatusCode == http.StatusUnauthorized {
-		return fmt.Errorf("pull 401")
 	}
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
