@@ -140,7 +140,7 @@
     </div>
     {{if .HubNodeID}}<p class="muted small span2">id узла: <code>{{.HubNodeID}}</code></p>{{end}}
     {{if .HubEnabled}}
-    <p class="muted small span2">Пока оператор хаба задал модель по умолчанию, в шлюзе появляется alias <code>auto</code> (чат и API).{{if .HubAutoModel}} Сейчас: <code>auto</code> → {{.HubAutoNode}} / {{.HubAutoModel}}.{{else}} Сейчас оператор ещё не указал узел и модель.{{end}}</p>
+    <p class="muted small span2">Пока оператор хаба задал модели для auto, в шлюзе появляется alias <code>auto</code> — только чат.{{if .HubAutoRouter}} Хаб выбирает модель по тексту запроса.{{else if .HubAutoModel}} Сейчас: <code>auto</code> → {{.HubAutoNode}} / {{.HubAutoModel}}.{{else}} Сейчас оператор ещё не указал модели.{{end}}</p>
     {{end}}
     <div class="span2"><button type="submit">Сохранить</button></div>
   </form>

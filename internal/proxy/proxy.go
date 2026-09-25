@@ -776,6 +776,10 @@ func (p *Proxy) forwardHub(ctx context.Context, w http.ResponseWriter, k domain.
 		return http.StatusBadGateway, err
 	}
 	defer resp.Body.Close()
+	if routed := strings.TrimSpace(resp.Header.Get("X-MikroLLM-Routed-Model")); routed != "" {
+		w.Header().Set("X-MikroLLM-Routed-Model", routed)
+		b.Name = routed
+	}
 	out, _ := io.ReadAll(io.LimitReader(resp.Body, 12<<20))
 	code := resp.StatusCode
 	if code == 0 {
@@ -866,6 +870,10 @@ func (p *Proxy) pick(alias string) (domain.Backend, string, error) {
 	policy := "least_conn"
 	if err == nil && m.Enabled {
 		upstream = m.UpstreamName
+		if m.HubNodeID == domain.HubAutoRouter {
+			b, up := hubBackend("auto", "auto", domain.HubAutoAlias)
+			return b, up, nil
+		}
 		if m.HubNodeID != "" {
 			b, up := hubBackend(m.HubNodeID, m.HubNodeName, m.UpstreamName)
 			return b, up, nil

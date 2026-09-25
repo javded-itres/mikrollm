@@ -293,7 +293,9 @@ func (u *UI) dash(w http.ResponseWriter, r *http.Request) {
 		hubCfg.Name, _ = os.Hostname()
 	}
 	hubAutoNode, hubAutoModel := "", ""
+	hubAutoRouter := false
 	if autoM, err := u.st.GetModelByAlias(domain.HubAutoAlias); err == nil && domain.IsHubAuto(autoM) {
+		hubAutoRouter = domain.IsHubAutoRouter(autoM)
 		hubAutoNode, hubAutoModel = autoM.HubNodeName, autoM.UpstreamName
 		if hubAutoNode == "" {
 			hubAutoNode = autoM.HubNodeID
@@ -307,7 +309,7 @@ func (u *UI) dash(w http.ResponseWriter, r *http.Request) {
 		"MCPPrefix": prefix, "NewMCPToken": newMCP,
 		"HubURL": hubURL, "HubEnabled": hubCfg.Enabled, "HubName": hubCfg.Name,
 		"HubNodeID": hubCfg.NodeID, "HubState": hubState, "HubLabel": hubLabel, "HubError": hubErr,
-		"HubAutoNode": hubAutoNode, "HubAutoModel": hubAutoModel,
+		"HubAutoNode": hubAutoNode, "HubAutoModel": hubAutoModel, "HubAutoRouter": hubAutoRouter,
 		"HubSchedule": hubCfg.Schedule, "HubSharingNow": hubCfg.Schedule.SharingAt(time.Now()),
 		"HubShareDays": shareDaySet(hubCfg.Schedule.Days),
 		"HubTZ":        hubTZ(hubCfg.Schedule.TZ),

@@ -205,6 +205,16 @@ func (c *Client) applyAuto() {
 	def := c.cat.Defaults
 	nodes := c.cat.Nodes
 	c.catMu.Unlock()
+	if def != nil && len(def.Pool) > 0 {
+		ctxN := 0
+		for _, p := range def.Pool {
+			if p.Context > ctxN {
+				ctxN = p.Context
+			}
+		}
+		_ = c.Store.UpsertHubAuto(domain.HubAutoRouter, "auto", domain.HubAutoAlias, ctxN, []string{domain.MediaChat})
+		return
+	}
 	if def == nil || strings.TrimSpace(def.NodeID) == "" || strings.TrimSpace(def.Alias) == "" {
 		_ = c.Store.DeleteHubAuto()
 		return

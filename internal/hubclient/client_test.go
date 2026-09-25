@@ -176,6 +176,36 @@ func TestClientSyncsAuto(t *testing.T) {
 	}
 }
 
+func TestClientSyncsAutoPool(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/catalog" {
+			_ = json.NewEncoder(w).Encode(Catalog{
+				Defaults: &Defaults{
+					NodeID: "nfast", Alias: "small",
+					Pool: []PoolEntry{
+						{NodeID: "nfast", Alias: "small", Tier: "fast", Context: 4096, Media: []string{"chat"}},
+						{NodeID: "nbig", Alias: "coder", Tier: "strong", Context: 32768, Media: []string{"chat"}},
+					},
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(hs.Close)
+	st := &memStore{cfg: Settings{Enabled: true, Name: "hap-test", NodeID: "nself", Token: "hk"}}
+	c := New(st, nil, ":4000")
+	c.HubURL = hs.URL
+	c.RefreshCatalog()
+	ms, _ := st.ListModels()
+	if len(ms) != 1 || ms[0].HubNodeID != domain.HubAutoRouter || ms[0].UpstreamName != "auto" || ms[0].MaxContext != 32768 {
+		t.Fatalf("pool auto %+v", ms)
+	}
+	if len(ms[0].Media) != 1 || ms[0].Media[0] != domain.MediaChat {
+		t.Fatalf("media %+v", ms[0].Media)
+	}
+}
+
 func TestLocalRelayKinds(t *testing.T) {
 	m, p, body := localRelay(Job{Alias: "toy-image", Kind: "images", Body: json.RawMessage(`{"prompt":"x"}`)})
 	if m != http.MethodPost || p != "/v1/images/generations" || !bytes.Contains(body, []byte(`"toy-image"`)) {

@@ -50,7 +50,7 @@ The client:
 
 Status LED: **online** / **off** / **error** (message next to it).
 
-While the box is on, the gateway keeps a reserved alias **`auto`**. The hub operator (UI **Operator → Settings**) picks the default **node + alias**; MikroLLM copies that into `auto` on each catalog refresh (~15 s). Chat and `/v1` can call `model: "auto"`. Leave the network (or the operator clears the default) and `auto` is removed.
+While the box is on, the gateway keeps a reserved alias **`auto`**, and it is chat-only. The hub operator (UI **Operator → Settings**) ticks several chat aliases and sets each to a tier: **fast**, **balanced**, or **strong**. On every request the hub picks a tier from the text (short question, normal dialogue, code / tools / long text) and queues the first live model of that tier. The classifier is a fixed set of rules: it is not trained, and the prompt text is not stored. The response header `X-MikroLLM-Routed-Model` is `node/alias`. Images and video stay on their own aliases. An older gateway that does not understand the pool still calls the single pair in the catalog (`defaults.node_id` + `defaults.alias`). Leave the network (or the operator clears the list) and `auto` is removed.
 
 Uncheck the box to leave. The **node id is kept**; enable again to reuse the same registration.
 

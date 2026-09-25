@@ -15,8 +15,16 @@ type Backend struct {
 // HubAutoAlias is the reserved gateway name filled from hub operator settings.
 const HubAutoAlias = "auto"
 
+// HubAutoRouter is the HubNodeID stored when the hub routes auto per request.
+// The relay path segment is still "auto"; this sentinel is not a node id.
+const HubAutoRouter = "*"
+
 func IsHubAuto(m Model) bool {
 	return m.Alias == HubAutoAlias && m.HubNodeID != ""
+}
+
+func IsHubAutoRouter(m Model) bool {
+	return m.Alias == HubAutoAlias && m.HubNodeID == HubAutoRouter
 }
 
 type Model struct {

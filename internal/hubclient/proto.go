@@ -77,10 +77,20 @@ type NodePublic struct {
 	Caps       *Caps          `json:"caps,omitempty"`
 }
 
+type PoolEntry struct {
+	NodeID   string   `json:"node_id"`
+	NodeName string   `json:"node_name,omitempty"`
+	Alias    string   `json:"alias"`
+	Tier     string   `json:"tier,omitempty"`
+	Context  int      `json:"context,omitempty"`
+	Media    []string `json:"media,omitempty"`
+}
+
 type Defaults struct {
-	NodeID   string `json:"node_id"`
-	NodeName string `json:"node_name,omitempty"`
-	Alias    string `json:"alias"`
+	NodeID   string      `json:"node_id"`
+	NodeName string      `json:"node_name,omitempty"`
+	Alias    string      `json:"alias"`
+	Pool     []PoolEntry `json:"pool,omitempty"`
 }
 
 type Catalog struct {

@@ -87,6 +87,37 @@ func TestForwardHubAlias(t *testing.T) {
 	}
 }
 
+func TestForwardHubAutoRouter(t *testing.T) {
+	st, _, _, px, _ := setup(t)
+	var gotPath, gotModel string
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotModel, _ = body["model"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-MikroLLM-Routed-Model", "hap/small")
+		_, _ = w.Write([]byte(`{"model":"small","choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	t.Cleanup(hub.Close)
+	px.SetHubDial(fakeHubDial{url: hub.URL})
+	if _, err := st.SaveModel(store.Model{
+		Alias: "auto", UpstreamName: "auto", Enabled: true,
+		HubNodeID: domain.HubAutoRouter, HubNodeName: "auto", Media: []string{"chat"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"auto","messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	px.ServeChat(rec, req)
+	if rec.Code != 200 || gotPath != "/v1/relay/auto/chat" || gotModel != "auto" {
+		t.Fatalf("%d path %s model %s body %s", rec.Code, gotPath, gotModel, rec.Body.String())
+	}
+	if rec.Header().Get("X-MikroLLM-Routed-Model") != "hap/small" {
+		t.Fatalf("header %s", rec.Header().Get("X-MikroLLM-Routed-Model"))
+	}
+}
+
 func TestForwardHubToolCalls(t *testing.T) {
 	setupHub := func(t *testing.T, px *Proxy) {
 		t.Helper()
