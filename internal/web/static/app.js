@@ -473,6 +473,18 @@
       hint: "ComfyUI через OpenComfy (картинки и видео). URL без /v1. Ключ sk- из keys.yaml OpenComfy.",
       token: true,
       fill: false
+    },
+    codex: {
+      url: "https://chatgpt.com/backend-api/codex",
+      hint: "Подписка ChatGPT. На компьютере: codex login, затем вставьте сюда файл ~/.codex/auth.json. Токен остаётся на этом узле. Alias можно включить в hub — соседи токен не увидят.",
+      token: true,
+      fill: true
+    },
+    grok: {
+      url: "https://cli-chat-proxy.grok.com/v1",
+      hint: "Подписка SuperGrok. На компьютере: grok login, затем вставьте сюда файл ~/.grok/auth.json. Токен остаётся на этом узле. Alias можно включить в hub — соседи токен не увидят.",
+      token: true,
+      fill: true
     }
   };
   var knownURLs = {
@@ -481,7 +493,9 @@
     "http://192.168.88.82:1234": 1,
     "https://openrouter.ai/api/v1": 1,
     "https://ollama.com": 1,
-    "http://192.168.88.252:8788": 1
+    "http://192.168.88.252:8788": 1,
+    "https://chatgpt.com/backend-api/codex": 1,
+    "https://cli-chat-proxy.grok.com/v1": 1
   };
   function syncKind() {
     if (!kindSel) return;

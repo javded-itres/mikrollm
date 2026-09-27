@@ -6,6 +6,12 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+## 0.0.11 — 2026-09-28
+
+- Codex backend: paste `~/.codex/auth.json` from `codex login` and share the alias on the hub. The ChatGPT token stays on the node that logged in. [docs/providers.md](docs/providers.md#codex)
+- Grok backend: paste `~/.grok/auth.json` from `grok login` and share the alias the same way. The catalog is the CLI proxy model list. Requests send `x-grok-client-version`. [docs/providers.md](docs/providers.md#grok)
+- Leaving the hub network removes other nodes' models from the local list and from chat. The node id is kept.
+
 ## 0.0.10 — 2026-09-25
 
 - A hub reply drops the saved node id only when the body says `bad token`. A database outage is `503` and the gateway keeps its registration instead of calling `POST /v1/register` again.

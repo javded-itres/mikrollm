@@ -646,6 +646,91 @@ func TestOpenRouterChatPathAndHeaders(t *testing.T) {
 	}
 }
 
+func TestCodexChatUsesSubscription(t *testing.T) {
+	st, h, _, px, _ := setup(t)
+	var gotPath, gotAccount string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAccount = r.Header.Get("ChatGPT-Account-ID")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output":[{"type":"message","content":[{"type":"output_text","text":"from-codex"}]}],"usage":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	t.Cleanup(up.Close)
+	raw := `{"access_token":"aaa","refresh_token":"rrr","account_id":"acc"}`
+	bid, err := st.UpsertBackend("codex", up.URL, true, 1, "codex", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.SaveModel(store.Model{Alias: "gpt-5.4", UpstreamName: "gpt-5.4", Enabled: true, BackendIDs: []int64{bid}, HubShare: true}); err != nil {
+		t.Fatal(err)
+	}
+	plain, prefix, hash, err := auth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.InsertKey(store.APIKey{Name: "t", Prefix: prefix, KeyHash: hash, AllowedModels: []string{"*"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	h.CheckOnce()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Authorization", "Bearer "+plain)
+	rec := httptest.NewRecorder()
+	px.ChatCompletions(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "from-codex") {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/responses" || gotAccount != "acc" {
+		t.Fatalf("path %s account %s", gotPath, gotAccount)
+	}
+	stored, err := st.GetBackend(bid)
+	if err != nil || strings.Contains(stored.Token, "auth.json") {
+		t.Fatalf("stored token shape")
+	}
+}
+
+func TestGrokChatUsesSubscription(t *testing.T) {
+	st, h, _, px, _ := setup(t)
+	var gotAuth, gotKind, gotModel string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			_, _ = w.Write([]byte(`{"data":[{"id":"grok-build","name":"Grok Build"}]}`))
+			return
+		}
+		gotAuth = r.Header.Get("Authorization")
+		gotKind = r.Header.Get("X-XAI-Token-Auth")
+		gotModel = r.Header.Get("x-grok-model-override")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"from-grok"}}]}`))
+	}))
+	t.Cleanup(up.Close)
+	raw := `{"https://accounts.x.ai/sign-in":{"key":"sess-1"}}`
+	bid, err := st.UpsertBackend("grok", up.URL+"/v1", true, 1, "grok", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.SaveModel(store.Model{Alias: "grok-build", UpstreamName: "grok-build", Enabled: true, BackendIDs: []int64{bid}, HubShare: true}); err != nil {
+		t.Fatal(err)
+	}
+	plain, prefix, hash, err := auth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.InsertKey(store.APIKey{Name: "t", Prefix: prefix, KeyHash: hash, AllowedModels: []string{"*"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	h.CheckOnce()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"grok-build","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Authorization", "Bearer "+plain)
+	rec := httptest.NewRecorder()
+	px.ChatCompletions(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "from-grok") {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if gotAuth != "Bearer sess-1" || gotKind != "xai-grok-cli" || gotModel != "grok-build" {
+		t.Fatalf("auth %s kind %s model %s", gotAuth, gotKind, gotModel)
+	}
+}
+
 func TestOllamaCloudKeepsAPIChat(t *testing.T) {
 	st, h, _, px, _ := setup(t)
 	var gotPath string

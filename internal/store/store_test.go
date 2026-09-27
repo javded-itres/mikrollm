@@ -373,6 +373,27 @@ func TestUpsertHubAuto(t *testing.T) {
 	}
 }
 
+func TestDeleteHubPeersKeepsLocal(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.SaveModel(Model{Alias: "local", UpstreamName: "local", Enabled: true, HubShare: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ConnectHubModel("coder", "n1", "ams-1", 8192, []string{"chat"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteHubPeers(); err != nil {
+		t.Fatal(err)
+	}
+	ms, err := st.ListModels()
+	if err != nil || len(ms) != 1 || ms[0].Alias != "local" || !ms[0].HubShare {
+		t.Fatalf("%+v %v", ms, err)
+	}
+}
+
 func TestMaxAliasCtx(t *testing.T) {
 	dir := t.TempDir()
 	st, err := Open(filepath.Join(dir, "t.db"))

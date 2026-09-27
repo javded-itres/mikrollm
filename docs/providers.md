@@ -138,6 +138,30 @@ You can still load a model by hand in LM Studio (Chat / Developer → load). The
 
 Before v1 REST, LM Studio only serves `/v1/models` (already loaded). MikroLLM then shows them as “in RAM” and may hide download/load — upgrade LM Studio.
 
+## Grok
+
+SuperGrok, through the same login as the Grok CLI. This spends the subscription pool, not an xAI API key from console.x.ai.
+
+1. On a machine with a browser run `grok login`.
+2. Admin → **Status** → kind **Grok**. Paste the whole `~/.grok/auth.json`. The URL is filled (`https://cli-chat-proxy.grok.com/v1`).
+3. **Refresh status**. The catalog is the model list from the CLI proxy (`GET /models`), not a single hardcoded name.
+4. **Models → To gateway**, then turn on **В hub** if other nodes should call it.
+
+The session token stays on this node. Neighbors only see the alias. MikroLLM refreshes it from the stored `refresh_token` until that also expires; then run `grok login` again. One subscription quota is shared by everyone using that alias.
+
+## Codex
+
+ChatGPT Plus, Pro, Business or Enterprise, through the same login as Codex CLI. This spends the subscription window, not an OpenAI Platform API key.
+
+1. On a machine with a browser run `codex login` and sign in with ChatGPT.
+2. Admin → **Status** → kind **Codex**. Paste the whole `~/.codex/auth.json`. The URL is filled (`https://chatgpt.com/backend-api/codex`).
+3. **Refresh status**. The catalog shows the default model (`gpt-5.4` unless auth.json sets `model`).
+4. **Models → To gateway**, then turn on **В hub** if other nodes should call it.
+
+The refresh token stays on this node. Neighbors only see the alias and send ordinary `/v1/chat/completions`. One subscription quota is shared by everyone using that alias. A 429 means the ChatGPT window is spent.
+
+Codex describes this sign-in for its own app, CLI and IDE. The HTTP shape can change with a CLI release.
+
 ## OpenRouter
 
 Direct cloud: MikroLLM talks to `https://openrouter.ai/api/v1`, no local LLM server.

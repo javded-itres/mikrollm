@@ -29,6 +29,7 @@ type Store interface {
 	ListModels() ([]domain.Model, error)
 	UpsertHubAuto(nodeID, nodeName, upstream string, maxContext int, media []string) error
 	DeleteHubAuto() error
+	DeleteHubPeers() error
 }
 
 type Client struct {
@@ -164,6 +165,16 @@ func (c *Client) pullLoop(ctx context.Context) {
 }
 
 func (c *Client) RefreshCatalog() {
+	if c.Store != nil {
+		if cfg, err := c.Store.HubSettings(); err != nil || !cfg.Enabled {
+			c.catMu.Lock()
+			c.cat = Catalog{}
+			c.selfID = ""
+			c.catMu.Unlock()
+			_ = c.Store.DeleteHubPeers()
+			return
+		}
+	}
 	req, err := http.NewRequest(http.MethodGet, c.URL()+"/v1/catalog", nil)
 	if err != nil {
 		return
@@ -238,6 +249,11 @@ func (c *Client) applyAuto() {
 }
 
 func (c *Client) Peers() (selfID string, peers []domain.HubPeer) {
+	if c.Store != nil {
+		if cfg, err := c.Store.HubSettings(); err != nil || !cfg.Enabled {
+			return "", nil
+		}
+	}
 	c.catMu.Lock()
 	cat := c.cat
 	selfID = c.selfID

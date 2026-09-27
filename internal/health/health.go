@@ -12,7 +12,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javded-itres/mikrollm/internal/codex"
 	"github.com/javded-itres/mikrollm/internal/domain"
+	"github.com/javded-itres/mikrollm/internal/grok"
 	"github.com/javded-itres/mikrollm/internal/ports"
 )
 
@@ -159,9 +161,66 @@ func (c *Checker) probe(b domain.Backend) Status {
 		return c.probeOllamaCloud(b, start)
 	case domain.KindOpenComfy:
 		return c.probeOpenComfy(b, start)
+	case domain.KindCodex:
+		return probeCodex(b, start)
+	case domain.KindGrok:
+		return c.probeGrok(b, start)
 	default:
 		return c.probeOllama(b, start)
 	}
+}
+
+func (c *Checker) probeGrok(b domain.Backend, start time.Time) Status {
+	st := Status{Checked: start}
+	sess, err := grok.Parse(b.Token)
+	if err != nil {
+		st.Error = err.Error()
+		return st
+	}
+	base := b.BaseURL
+	if base == "" {
+		base = grok.DefaultBase
+	}
+	list, err := grok.List(context.Background(), c.doer, base, sess)
+	st.Latency = time.Since(start)
+	if err != nil {
+		st.Error = err.Error()
+		return st
+	}
+	st.Healthy = true
+	st.Titles = map[string]string{}
+	st.Contexts = map[string]int{}
+	st.Providers = map[string]string{}
+	st.Media = map[string][]string{}
+	for _, m := range list {
+		st.Models = append(st.Models, m.ID)
+		if m.Title != "" {
+			st.Titles[m.ID] = m.Title
+		}
+		if m.Context > 0 {
+			st.Contexts[m.ID] = m.Context
+		}
+		st.Providers[m.ID] = "xAI"
+		st.Media[m.ID] = []string{"chat"}
+	}
+	return st
+}
+
+func probeCodex(b domain.Backend, start time.Time) Status {
+	st := Status{Checked: start}
+	sess, err := codex.Parse(b.Token)
+	if err != nil {
+		st.Error = err.Error()
+		return st
+	}
+	st.Healthy = true
+	st.Latency = time.Since(start)
+	model := sess.Model
+	if model == "" {
+		model = codex.DefaultModel
+	}
+	st.Models = []string{model}
+	return st
 }
 
 func (c *Checker) doGET(b domain.Backend, path string) (*http.Response, error) {

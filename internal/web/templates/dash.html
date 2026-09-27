@@ -266,6 +266,8 @@
         <option value="vllm">vLLM (:8000)</option>
         <option value="lmstudio">LM Studio (:1234)</option>
         <option value="opencomfy">OpenComfy (:8788)</option>
+        <option value="codex">Codex (подписка ChatGPT)</option>
+        <option value="grok">Grok (подписка SuperGrok)</option>
       </select>
     </div>
     <div>
@@ -274,7 +276,7 @@
     </div>
     <div>
       <label id="backend-token-label">Токен (необязательно)</label>
-      <input name="token" id="backend-token" placeholder="Bearer / API-ключ" autocomplete="off">
+      <textarea name="token" id="backend-token" rows="3" placeholder="Bearer / API-ключ или auth.json" autocomplete="off"></textarea>
     </div>
     <p class="muted small span2" id="backend-kind-hint">Локальный Ollama: pull, load/unload и удаление файла — из админки.</p>
     <div class="span2"><button type="submit">Добавить</button></div>

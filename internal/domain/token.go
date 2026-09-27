@@ -23,8 +23,10 @@ func SanitizeToken(s string) string {
 }
 
 func ApplyUpstreamHeaders(h http.Header, b Backend) {
-	if tok := SanitizeToken(b.Token); tok != "" {
-		h.Set("Authorization", "Bearer "+tok)
+	if b.KindNorm() != KindCodex && b.KindNorm() != KindGrok {
+		if tok := SanitizeToken(b.Token); tok != "" {
+			h.Set("Authorization", "Bearer "+tok)
+		}
 	}
 	if h.Get("User-Agent") == "" {
 		h.Set("User-Agent", UpstreamUserAgent)

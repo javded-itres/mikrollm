@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"github.com/javded-itres/mikrollm/internal/auth"
+	"github.com/javded-itres/mikrollm/internal/codex"
 	"github.com/javded-itres/mikrollm/internal/domain"
+	"github.com/javded-itres/mikrollm/internal/grok"
 	"github.com/javded-itres/mikrollm/internal/guard"
 	"github.com/javded-itres/mikrollm/internal/hubclient"
 	"github.com/javded-itres/mikrollm/internal/params"
@@ -542,6 +544,14 @@ func (p *Proxy) Forward(ctx context.Context, w http.ResponseWriter, k domain.API
 			Provider:  meta.Provider,
 			Mode:      mode,
 		})
+		if b.KindNorm() == domain.KindCodex {
+			status, err := p.forwardCodex(ctx, w, k, b, model, payload, start)
+			return b.Name, "OpenAI", status, err
+		}
+		if b.KindNorm() == domain.KindGrok {
+			status, err := p.forwardGrok(ctx, w, k, b, model, payload, start)
+			return b.Name, "xAI", status, err
+		}
 		method := http.MethodPost
 		if strings.HasPrefix(path, "/v1/videos/") {
 			method = http.MethodGet
@@ -621,6 +631,76 @@ func (p *Proxy) Forward(ctx context.Context, w http.ResponseWriter, k domain.API
 	}
 	writeJSON(w, lastStatus, map[string]any{"error": map[string]any{"message": lastMsg}})
 	return "", "", lastStatus, errors.New(lastMsg)
+}
+
+func (p *Proxy) forwardCodex(ctx context.Context, w http.ResponseWriter, k domain.APIKey, b domain.Backend, model string, payload []byte, start time.Time) (int, error) {
+	defer p.health.Dec(b.ID)
+	if len(payload) == 0 {
+		payload = []byte(`{"messages":[]}`)
+	}
+	sess, err := codex.Parse(b.Token)
+	if err != nil {
+		p.st.Log(k.Prefix, model, b.Name, 400, time.Since(start), 0, domain.TokenUsage{})
+		writeJSON(w, 400, map[string]any{"error": map[string]any{"message": err.Error()}})
+		return 400, err
+	}
+	base := b.BaseURL
+	if base == "" {
+		base = codex.DefaultBase
+	}
+	status, body, err := codex.Complete(ctx, p.client, base, sess, payload, func(next codex.Session) {
+		_, _ = p.st.UpsertBackend(b.Name, b.BaseURL, b.Enabled, b.Weight, b.Kind, next.Compact())
+	})
+	if err != nil {
+		p.st.Log(k.Prefix, model, b.Name, 502, time.Since(start), 0, domain.TokenUsage{})
+		writeJSON(w, 502, map[string]any{"error": map[string]any{"message": err.Error()}})
+		return 502, err
+	}
+	if status == 0 {
+		status = 200
+	}
+	p.st.Log(k.Prefix, model, b.Name, status, time.Since(start), int64(len(body)), domain.TokenUsage{})
+	if bytes.HasPrefix(bytes.TrimSpace(body), []byte("data:")) {
+		w.Header().Set("Content-Type", "text/event-stream")
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(body)
+	return status, nil
+}
+
+func (p *Proxy) forwardGrok(ctx context.Context, w http.ResponseWriter, k domain.APIKey, b domain.Backend, model string, payload []byte, start time.Time) (int, error) {
+	defer p.health.Dec(b.ID)
+	sess, err := grok.Parse(b.Token)
+	if err != nil {
+		p.st.Log(k.Prefix, model, b.Name, 400, time.Since(start), 0, domain.TokenUsage{})
+		writeJSON(w, 400, map[string]any{"error": map[string]any{"message": err.Error()}})
+		return 400, err
+	}
+	base := b.BaseURL
+	if base == "" {
+		base = grok.DefaultBase
+	}
+	status, body, ct, err := grok.Complete(ctx, p.client, base, sess, payload, func(next grok.Session) {
+		_, _ = p.st.UpsertBackend(b.Name, b.BaseURL, b.Enabled, b.Weight, b.Kind, next.Compact())
+	})
+	if err != nil {
+		p.st.Log(k.Prefix, model, b.Name, 502, time.Since(start), 0, domain.TokenUsage{})
+		writeJSON(w, 502, map[string]any{"error": map[string]any{"message": err.Error()}})
+		return 502, err
+	}
+	if status == 0 {
+		status = 200
+	}
+	p.st.Log(k.Prefix, model, b.Name, status, time.Since(start), int64(len(body)), domain.TokenUsage{})
+	if ct == "" {
+		ct = "application/json"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.WriteHeader(status)
+	_, _ = w.Write(body)
+	return status, nil
 }
 
 func (p *Proxy) providerOf(b domain.Backend, model, upstream string) string {

@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+## 0.0.11 — 2026-09-28
+
+- Бэкенд Codex: вставьте `~/.codex/auth.json` после `codex login` и отдайте alias в hub. Токен ChatGPT остаётся на узле, где вошли. [docs/providers.md](docs/providers.md#codex)
+- Бэкенд Grok: вставьте `~/.grok/auth.json` после `grok login` и отдайте alias так же. Каталог — список моделей CLI-прокси. Запросы несут `x-grok-client-version`. [docs/providers.md](docs/providers.md#grok)
+- Выход из сети hub убирает модели других узлов из локального списка и из чата. Id узла сохраняется.
+
 ## 0.0.10 — 2026-09-25
 
 - Шлюз забывает id узла хаба только если ответ содержит `bad token`. Сбой базы хаба — это `503`, регистрация сохраняется и повторный `POST /v1/register` не уходит.

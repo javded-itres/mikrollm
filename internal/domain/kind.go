@@ -9,6 +9,8 @@ const (
 	KindOpenRouter  = "openrouter"
 	KindOllamaCloud = "ollama-cloud"
 	KindOpenComfy   = "opencomfy"
+	KindCodex       = "codex"
+	KindGrok        = "grok"
 	KindHub         = "hub"
 
 	// VLLMLoadHelp is shown when the user tries to pull/load/unload via API.
@@ -31,6 +33,10 @@ func NormalizeKind(s string) string {
 		return KindOllamaCloud
 	case KindOpenComfy, "open-comfy", "open comfy", "comfyui", "comfy":
 		return KindOpenComfy
+	case KindCodex, "chatgpt", "chatgpt-codex":
+		return KindCodex
+	case KindGrok, "supergrok", "grok-cli":
+		return KindGrok
 	case KindHub, "mikrollm-hub", "mikrollm_hub":
 		return KindHub
 	default:
@@ -40,7 +46,7 @@ func NormalizeKind(s string) string {
 
 func RequiresToken(kind string) bool {
 	k := NormalizeKind(kind)
-	return k == KindOpenRouter || k == KindOllamaCloud || k == KindOpenComfy
+	return k == KindOpenRouter || k == KindOllamaCloud || k == KindOpenComfy || k == KindCodex || k == KindGrok
 }
 
 func CanonicalBaseURL(kind, raw string) string {
@@ -57,6 +63,14 @@ func CanonicalBaseURL(kind, raw string) string {
 	case KindOpenComfy:
 		u = strings.TrimSuffix(u, "/v1")
 		u = strings.TrimRight(u, "/")
+	case KindCodex:
+		if u == "" {
+			return "https://chatgpt.com/backend-api/codex"
+		}
+	case KindGrok:
+		if u == "" {
+			return "https://cli-chat-proxy.grok.com/v1"
+		}
 	}
 	return u
 }
@@ -77,6 +91,10 @@ func (b Backend) KindClass() string {
 		return "kind-hub"
 	case KindOpenComfy:
 		return "kind-comfy"
+	case KindCodex:
+		return "kind-codex"
+	case KindGrok:
+		return "kind-grok"
 	default:
 		return "kind-ollama"
 	}
@@ -99,6 +117,10 @@ func (b Backend) Label() string {
 		return "Hub"
 	case KindOpenComfy:
 		return "OpenComfy"
+	case KindCodex:
+		return "Codex"
+	case KindGrok:
+		return "Grok"
 	default:
 		return "Ollama"
 	}
@@ -106,7 +128,7 @@ func (b Backend) Label() string {
 
 func (b Backend) Cloud() bool {
 	k := b.KindNorm()
-	return k == KindOpenRouter || k == KindOllamaCloud
+	return k == KindOpenRouter || k == KindOllamaCloud || k == KindCodex || k == KindGrok
 }
 
 func (b Backend) NativeOllama() bool {
@@ -165,6 +187,10 @@ func (b Backend) LoadHint() string {
 		return "Ollama Cloud — только облачные модели на ollama.com, без локального Ollama. Подробнее: docs/providers.md#ollama-cloud"
 	case KindOpenComfy:
 		return "OpenComfy — шлюз к ComfyUI (картинки и видео). Веса и workflow на GPU-сервере, не через MikroLLM. Подробнее: docs/providers.md#opencomfy"
+	case KindCodex:
+		return "ChatGPT-подписка через Codex. Сначала codex login, затем вставьте ~/.codex/auth.json. Alias можно отдать в hub. Подробнее: docs/providers.md#codex"
+	case KindGrok:
+		return "Подписка SuperGrok через grok login. Вставьте ~/.grok/auth.json. Alias можно отдать в hub. Подробнее: docs/providers.md#grok"
 	default:
 		return ""
 	}
@@ -180,6 +206,10 @@ func (b Backend) UIHint() string {
 		return "Облачные модели ollama.com, локальный Ollama не нужен. Ключ: ollama.com/settings/keys"
 	case KindOpenComfy:
 		return "ComfyUI через OpenComfy. URL без /v1 (например http://192.168.88.252:8788). Ключ sk- из keys.yaml OpenComfy."
+	case KindCodex:
+		return "Вставьте содержимое ~/.codex/auth.json после codex login. Токен остаётся на этом узле. Соседи видят только alias."
+	case KindGrok:
+		return "Вставьте содержимое ~/.grok/auth.json после grok login. Токен остаётся на этом узле. Соседи видят только alias."
 	default:
 		return ""
 	}
@@ -198,6 +228,10 @@ func (b Backend) DocsURL() string {
 		return base + "#lm-studio"
 	case KindOpenComfy:
 		return base + "#opencomfy"
+	case KindCodex:
+		return base + "#codex"
+	case KindGrok:
+		return base + "#grok"
 	default:
 		return base
 	}
@@ -209,7 +243,7 @@ func (b Backend) DefaultPort() string {
 		return "8000"
 	case KindLMStudio:
 		return "1234"
-	case KindOpenRouter, KindOllamaCloud:
+	case KindOpenRouter, KindOllamaCloud, KindCodex, KindGrok:
 		return "443"
 	case KindOpenComfy:
 		return "8788"

@@ -64,6 +64,20 @@ func (m *memStore) UpsertHubAuto(nodeID, nodeName, upstream string, maxContext i
 	return nil
 }
 
+func (m *memStore) DeleteHubPeers() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := m.models[:0]
+	for _, x := range m.models {
+		if x.HubNodeID != "" {
+			continue
+		}
+		out = append(out, x)
+	}
+	m.models = out
+	return nil
+}
+
 func (m *memStore) DeleteHubAuto() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -184,11 +198,19 @@ func TestClientSyncsAuto(t *testing.T) {
 	if len(ms) != 1 || ms[0].Alias != "auto" || ms[0].HubNodeID != "npeer" || ms[0].UpstreamName != "coder" {
 		t.Fatalf("auto %+v", ms)
 	}
+	st.models = append(st.models, domain.Model{Alias: "local-qwen", UpstreamName: "qwen", Enabled: true})
+	st.models = append(st.models, domain.Model{Alias: "openrouter/free", UpstreamName: "openrouter/free", Enabled: true, HubNodeID: "npeer", HubNodeName: "ams-1"})
+	if _, peers := c.Peers(); len(peers) != 1 || peers[0].Name != "ams-1" {
+		t.Fatalf("peers %+v", peers)
+	}
 	st.cfg.Enabled = false
 	c.RefreshCatalog()
 	ms, _ = st.ListModels()
-	if len(ms) != 0 {
-		t.Fatalf("auto lingered %+v", ms)
+	if len(ms) != 1 || ms[0].Alias != "local-qwen" {
+		t.Fatalf("hub models lingered %+v", ms)
+	}
+	if _, peers := c.Peers(); len(peers) != 0 {
+		t.Fatalf("peers lingered %+v", peers)
 	}
 }
 

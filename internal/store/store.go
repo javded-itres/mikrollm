@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javded-itres/mikrollm/internal/codex"
 	"github.com/javded-itres/mikrollm/internal/domain"
+	"github.com/javded-itres/mikrollm/internal/grok"
 	"github.com/javded-itres/mikrollm/internal/params"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
@@ -370,7 +372,22 @@ func (s *Store) UpsertBackend(name, baseURL string, enabled bool, weight int, ki
 		en = 1
 	}
 	kind = domain.NormalizeKind(kind)
-	token = domain.SanitizeToken(token)
+	switch kind {
+	case domain.KindCodex:
+		sess, err := codex.Parse(token)
+		if err != nil {
+			return 0, err
+		}
+		token = sess.Compact()
+	case domain.KindGrok:
+		sess, err := grok.Parse(token)
+		if err != nil {
+			return 0, err
+		}
+		token = sess.Compact()
+	default:
+		token = domain.SanitizeToken(token)
+	}
 	res, err := s.DB.Exec(`
 INSERT INTO backends (name, base_url, enabled, weight, kind, token) VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(base_url) DO UPDATE SET name=excluded.name, enabled=excluded.enabled, weight=excluded.weight, kind=excluded.kind, token=excluded.token
@@ -708,6 +725,33 @@ func (s *Store) DeleteHubAuto() error {
 		return nil
 	}
 	return s.DeleteModel(m.ID)
+}
+
+// DeleteHubPeers removes aliases that point at other hub nodes, including auto.
+// Local models stay, even if they are shared outward.
+func (s *Store) DeleteHubPeers() error {
+	rows, err := s.DB.Query(`SELECT alias FROM models WHERE hub_node_id != ''`)
+	if err != nil {
+		return err
+	}
+	var aliases []string
+	for rows.Next() {
+		var alias string
+		if err := rows.Scan(&alias); err != nil {
+			rows.Close()
+			return err
+		}
+		aliases = append(aliases, alias)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, alias := range aliases {
+		_, _ = s.DB.Exec(`UPDATE models SET fallback='' WHERE fallback=?`, alias)
+	}
+	_, err = s.DB.Exec(`DELETE FROM models WHERE hub_node_id != ''`)
+	return err
 }
 
 func (s *Store) ListKeys() ([]APIKey, error) {
