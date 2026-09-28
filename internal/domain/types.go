@@ -98,7 +98,7 @@ func (c HubCaps) For(kind string) int {
 		return c.Images
 	case "videos":
 		return c.Videos
-	case "videos_status", "videos_content":
+	case "videos_status", "videos_content", "images_status":
 		n := c.Chat
 		if n < 8 {
 			n = 8

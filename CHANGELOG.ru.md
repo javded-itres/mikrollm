@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 0.0.12 — 2026-09-28
+
+- Картинка в очереди опрашивается так же, как видео: `GET /v1/images/{id}` не тратит RPM, а через hub идёт в слот чата.
+
 ## 0.0.11 — 2026-09-28
 
 - Бэкенд Codex: вставьте `~/.codex/auth.json` после `codex login` и отдайте alias в hub. Токен ChatGPT остаётся на узле, где вошли. [docs/providers.md](docs/providers.md#codex)

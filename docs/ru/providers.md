@@ -222,6 +222,8 @@ curl https://ollama.com/api/chat \
 
 Локальный шлюз **картинок и видео** перед [ComfyUI](https://github.com/comfyanonymous/ComfyUI). Те же формы, что у LiteLLM/OpenAI: `POST /v1/images/generations`, `POST /v1/videos`, опрос `GET /v1/videos/{id}`. Это не чат-LLM.
 
+Если ComfyUI уже генерирует, создание картинки отвечает **200** `{id, status: queued, queue_ahead}` без пикселей. `queue_ahead` — сколько генераций впереди. Опрос `GET /v1/images/{id}` (MikroLLM помнит модель с создания) до `completed`, дальше в `data` лежат `b64_json` или `url`. Свободный GPU по-прежнему отдаёт картинку сразу. У видео `queue_ahead` есть всегда.
+
 1. OpenComfy рядом с ComfyUI (`opencomfy -config …`, порт `:8788`).
 2. Админка → **Добавить сервер** → тип **OpenComfy**. URL `http://<gpu>:8788` (**без** `/v1`). Ключ из `keys.yaml` OpenComfy (`sk-…`).
 3. **Обновить каталоги**. Модели с тегами image/video из `/v1/models`, `/v1/images/models`, `/v1/videos/models`.

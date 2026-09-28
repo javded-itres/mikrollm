@@ -101,6 +101,7 @@ func New(cfg Config) (*App, error) {
 	mux.HandleFunc("GET /ready", px.Ready)
 	mux.HandleFunc("POST /v1/chat/completions", px.ChatCompletions)
 	mux.HandleFunc("POST /v1/images/generations", px.ImagesGenerations)
+	mux.HandleFunc("GET /v1/images/{id}", px.ImagesGet)
 	mux.HandleFunc("POST /v1/videos", px.VideosCreate)
 	mux.HandleFunc("GET /v1/videos/{id}", px.VideosGet)
 	mux.HandleFunc("GET /v1/videos/{id}/content", px.VideosContent)

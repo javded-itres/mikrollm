@@ -6,6 +6,10 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+## 0.0.12 — 2026-09-28
+
+- Image jobs that stay queued can be polled like videos: `GET /v1/images/{id}` does not spend RPM, and a hub relay uses the chat concurrency slot.
+
 ## 0.0.11 — 2026-09-28
 
 - Codex backend: paste `~/.codex/auth.json` from `codex login` and share the alias on the hub. The ChatGPT token stays on the node that logged in. [docs/providers.md](docs/providers.md#codex)

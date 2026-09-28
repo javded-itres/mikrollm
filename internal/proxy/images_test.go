@@ -161,6 +161,39 @@ func TestImagesHubRelay(t *testing.T) {
 	}
 }
 
+func TestImagesHubQueuePoll(t *testing.T) {
+	st, _, _, px, _ := setup(t)
+	var gotPath string
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/images/img_1") {
+			_, _ = w.Write([]byte(`{"id":"img_1","status":"queued","queue_ahead":3}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"img_1","status":"queued","queue_ahead":3}`))
+	}))
+	t.Cleanup(hub.Close)
+	px.SetHubDial(fakeHubDial{url: hub.URL})
+	if _, err := st.SaveModel(store.Model{
+		Alias: "toy-image", UpstreamName: "toy-image", Enabled: true,
+		HubNodeID: "npeer", HubNodeName: "ams-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /admin/images/{id}", px.ServeImageStatus)
+	req := httptest.NewRequest(http.MethodGet, "/admin/images/img_1?model=toy-image", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queue_ahead":3`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/relay/npeer/images/img_1" {
+		t.Fatalf("path %s", gotPath)
+	}
+}
+
 func TestVideosHubRelay(t *testing.T) {
 	st, _, _, px, _ := setup(t)
 	var gotPath string
@@ -226,6 +259,9 @@ func TestRewriteImagePath(t *testing.T) {
 	}
 	if rewriteUpstreamPath(oc, "/v1/videos/abc") != "/v1/videos/abc" {
 		t.Fatal("opencomfy videos")
+	}
+	if rewriteUpstreamPath(oc, "/v1/images/img_1") != "/v1/images/img_1" {
+		t.Fatal("opencomfy image poll")
 	}
 	if rewriteUpstreamPath(oc, "/v1/videos/abc/content") != "/v1/videos/abc/content" {
 		t.Fatal("opencomfy video content")
@@ -531,6 +567,65 @@ func TestImagesInlineDataURL(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), `"url"`) {
 		t.Fatalf("url left: %s", rec.Body.String())
+	}
+}
+
+func TestOpenComfyImageQueuePoll(t *testing.T) {
+	st, h, _, px, _ := setup(t)
+	var polls int
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/health":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/v1/models" || r.URL.Path == "/v1/images/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"toy-image"}]}`))
+		case r.URL.Path == "/v1/videos/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/images/generations":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"img_1","object":"image","status":"queued","queue_ahead":2}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/images/img_1":
+			polls++
+			if r.Method != http.MethodGet {
+				t.Fatalf("method %s", r.Method)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"img_1","object":"image","status":"completed","queue_ahead":0,"data":[{"b64_json":"QUJD"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(up.Close)
+	bid, err := st.UpsertBackend("comfy", up.URL, true, 1, "opencomfy", "sk-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SaveModel(store.Model{
+		Alias: "toy-image", UpstreamName: "toy-image", Enabled: true, BackendIDs: []int64{bid},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.CheckOnce()
+	time.Sleep(10 * time.Millisecond)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"toy-image","prompt":"a cube"}`))
+	rec := httptest.NewRecorder()
+	px.ServeImages(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queue_ahead":2`) || !strings.Contains(rec.Body.String(), `"status":"queued"`) {
+		t.Fatalf("create %d %s", rec.Code, rec.Body.String())
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /admin/images/{id}", px.ServeImageStatus)
+	greq := httptest.NewRequest(http.MethodGet, "/admin/images/img_1", nil)
+	grec := httptest.NewRecorder()
+	mux.ServeHTTP(grec, greq)
+	if grec.Code != 200 || !strings.Contains(grec.Body.String(), `"b64_json":"QUJD"`) {
+		t.Fatalf("poll %d %s", grec.Code, grec.Body.String())
+	}
+	if polls != 1 {
+		t.Fatalf("polls %d", polls)
 	}
 }
 

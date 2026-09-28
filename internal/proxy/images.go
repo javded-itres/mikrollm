@@ -34,6 +34,7 @@ func writeCaptured(w http.ResponseWriter, rec *memWriter, body []byte) {
 }
 
 var videoModels sync.Map // video id -> gateway model alias
+var imageModels sync.Map // queued image id -> gateway model alias
 
 func (p *Proxy) ImagesGenerations(w http.ResponseWriter, r *http.Request) {
 	p.serveImages(w, r, true)
@@ -57,6 +58,14 @@ func (p *Proxy) VideosGet(w http.ResponseWriter, r *http.Request) {
 
 func (p *Proxy) VideosContent(w http.ResponseWriter, r *http.Request) {
 	p.serveVideosGet(w, r, true, r.PathValue("id"), true)
+}
+
+func (p *Proxy) ImagesGet(w http.ResponseWriter, r *http.Request) {
+	p.serveImagesGet(w, r, true, r.PathValue("id"))
+}
+
+func (p *Proxy) ServeImageStatus(w http.ResponseWriter, r *http.Request) {
+	p.serveImagesGet(w, r, false, r.PathValue("id"))
 }
 
 func (p *Proxy) ServeVideoStatus(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +122,9 @@ func (p *Proxy) serveImages(w http.ResponseWriter, r *http.Request, needKey bool
 			raw = inlined
 		}
 	}
+	if id, ok := queuedMediaID(raw); ok {
+		imageModels.Store(id, model)
+	}
 	writeCaptured(w, rec, raw)
 }
 
@@ -144,6 +156,35 @@ func (p *Proxy) serveVideosCreate(w http.ResponseWriter, r *http.Request, needKe
 	}
 	w.WriteHeader(code)
 	_, _ = w.Write(rec.buf.Bytes())
+}
+
+func (p *Proxy) serveImagesGet(w http.ResponseWriter, r *http.Request, needKey bool, id string) {
+	k, ok := p.mediaKey(w, r, needKey)
+	if !ok {
+		return
+	}
+	model := strings.TrimSpace(r.URL.Query().Get("model"))
+	if model == "" {
+		if v, ok := imageModels.Load(id); ok {
+			model, _ = v.(string)
+		}
+	}
+	if model == "" || id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"message": "model query or known image id required"}})
+		return
+	}
+	body, _ := json.Marshal(map[string]string{"model": model})
+	rec := &memWriter{h: http.Header{}}
+	_, _, _, _ = p.Forward(r.Context(), rec, k, "/v1/images/"+id, body, model)
+	raw := rec.buf.Bytes()
+	if rec.code < 400 {
+		if b, _, err := p.pick(model); err == nil && strings.TrimSpace(b.BaseURL) != "" {
+			if inlined, ok := p.inlineRemoteImages(r.Context(), b, raw); ok {
+				raw = inlined
+			}
+		}
+	}
+	writeCaptured(w, rec, raw)
 }
 
 func (p *Proxy) serveVideosGet(w http.ResponseWriter, r *http.Request, needKey bool, id string, content bool) {
@@ -760,6 +801,23 @@ func imagesFromContent(content any) []imgPart {
 		}
 	}
 	return out
+}
+
+func queuedMediaID(raw []byte) (string, bool) {
+	var v struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Data   []any  `json:"data"`
+	}
+	if json.Unmarshal(raw, &v) != nil || strings.TrimSpace(v.ID) == "" || len(v.Data) > 0 {
+		return "", false
+	}
+	switch strings.ToLower(v.Status) {
+	case "queued", "in_progress":
+		return v.ID, true
+	default:
+		return "", false
+	}
 }
 
 func videoIDFrom(raw []byte) string {

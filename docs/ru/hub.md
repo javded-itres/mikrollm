@@ -237,6 +237,7 @@ hub.example.com {
 | GET | `/v1/catalog` | Публично. Онлайн = видели за 45 с, не в бане |
 | POST | `/v1/relay/{node}/chat` | Chat JSON (`model` в теле), ждать ≤ 120 с |
 | POST | `/v1/relay/{node}/images` | Images JSON |
+| POST | `/v1/relay/{node}/images/{id}` | статус картинки, пока `queued` есть `queue_ahead` |
 | POST | `/v1/relay/{node}/videos` | Создание видео |
 | POST | `/v1/relay/{node}/videos/{id}` | Статус видео |
 | POST | `/v1/relay/{node}/videos/{id}/content` | Байты видео |

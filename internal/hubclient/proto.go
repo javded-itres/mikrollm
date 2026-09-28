@@ -53,7 +53,7 @@ type AnnounceReq struct {
 type Job struct {
 	ID    string          `json:"job_id"`
 	Alias string          `json:"alias"`
-	Kind  string          `json:"kind,omitempty"` // chat (default), images, videos, videos_status, videos_content
+	Kind  string          `json:"kind,omitempty"` // chat, images, images_status, videos, videos_status, videos_content
 	Ref   string          `json:"ref,omitempty"`  // upstream video id
 	Body  json.RawMessage `json:"body"`
 }

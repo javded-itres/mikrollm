@@ -1648,7 +1648,7 @@
           }
           var st = videoJobStatus(j);
           var sec = Math.round((Date.now() - t0) / 1000);
-          setPendingText(chatId, "видео " + vid + " · " + (st || "ожидание") + " · " + sec + " с");
+          setPendingText(chatId, queueWaitText("видео " + vid, j, st, sec));
           if (st === "completed" || st === "complete" || st === "succeeded" || st === "success") {
             var src = "/admin/videos/" + encodeURIComponent(vid) + "/content?model=" + encodeURIComponent(model);
             finishAssistant(chatId, { content: "Видео сгенерировано.", video: src });
@@ -1667,6 +1667,67 @@
           if (e && e.fatal) throw e;
           delay = Math.min(10000, delay + 400);
           setPendingText(chatId, "видео " + vid + " · повтор запроса статуса…");
+          return new Promise(function (res) { setTimeout(res, delay); }).then(tick);
+        });
+      }
+      return tick();
+    }
+    function queueWaitText(label, j, st, sec) {
+      var ahead = j && j.queue_ahead;
+      var line = label + " · " + (st || "ожидание");
+      if (ahead != null && ahead !== "" && Number(ahead) > 0) line += " · перед ней " + ahead;
+      return line + " · " + sec + " с";
+    }
+    function pollImage(id, model, chatId, acLocal) {
+      var delay = 2000;
+      var t0 = Date.now();
+      var maxWait = 20 * 60 * 1000;
+      function tick() {
+        if (acLocal && acLocal.signal.aborted) {
+          var e = new Error("остановлено");
+          e.name = "AbortError";
+          return Promise.reject(e);
+        }
+        if (Date.now() - t0 > maxWait) {
+          return Promise.reject(new Error("картинка всё ещё не готова (ждали 20 мин)"));
+        }
+        return fetch("/admin/images/" + encodeURIComponent(id) + "?model=" + encodeURIComponent(model), {
+          credentials: "same-origin",
+          signal: acLocal ? acLocal.signal : undefined,
+          headers: { "X-CSRF-Token": csrfToken() }
+        }).then(function (r) {
+          return r.json().then(function (j) { return { ok: r.ok, j: j }; }).catch(function () {
+            return { ok: false, j: {} };
+          });
+        }).then(function (x) {
+          var j = x.j || {};
+          var em = (j.error && (j.error.message || j.error)) || j.message || "";
+          if (!x.ok && /rate limit/i.test(String(em))) {
+            delay = Math.min(15000, Math.max(delay, 8000));
+            setPendingText(chatId, "проверка статуса, ждём лимит…");
+            return new Promise(function (res) { setTimeout(res, delay); }).then(tick);
+          }
+          var st = videoJobStatus(j);
+          var sec = Math.round((Date.now() - t0) / 1000);
+          setPendingText(chatId, queueWaitText("картинка", j, st, sec));
+          if (st === "completed" || st === "complete" || st === "succeeded" || st === "success" || (j.data && j.data[0])) {
+            var d = (j.data && j.data[0]) || {};
+            var src = d.b64_json ? ("data:image/png;base64," + d.b64_json) : (d.url || "");
+            if (!src) throw Object.assign(new Error("картинка готова, но без файла"), { fatal: true });
+            finishAssistant(chatId, { content: "Изображение сгенерировано.", image: src });
+            return;
+          }
+          if (st === "failed" || st === "error" || st === "cancelled" || st === "canceled" || (j.error && !/rate limit/i.test(String(em)))) {
+            var msg = (j.error && (j.error.message || j.error)) || j.message || "генерация не удалась";
+            throw Object.assign(new Error(typeof msg === "string" ? msg : JSON.stringify(msg)), { fatal: true });
+          }
+          delay = Math.min(8000, delay + 300);
+          return new Promise(function (res) { setTimeout(res, delay); }).then(tick);
+        }).catch(function (e) {
+          if (e && e.name === "AbortError") throw e;
+          if (e && e.fatal) throw e;
+          delay = Math.min(8000, delay + 300);
+          setPendingText(chatId, "картинка · повтор запроса статуса…");
           return new Promise(function (res) { setTimeout(res, delay); }).then(tick);
         });
       }
@@ -1708,6 +1769,11 @@
       }).then(function (x) {
         if (!x.ok) throw new Error((x.j && x.j.error && x.j.error.message) || JSON.stringify(x.j) || "error");
         if (mode === "image") {
+          var stImg = videoJobStatus(x.j);
+          if (x.j.id && (stImg === "queued" || stImg === "in_progress") && !(x.j.data && x.j.data[0])) {
+            setPendingText(chatId, queueWaitText("картинка", x.j, stImg, 0));
+            return pollImage(x.j.id, model, chatId, acLocal);
+          }
           var d = (x.j.data && x.j.data[0]) || {};
           var src = d.b64_json ? ("data:image/png;base64," + d.b64_json) : (d.url || "");
           if (src) finishAssistant(chatId, { content: "Изображение сгенерировано.", image: src });
@@ -1715,7 +1781,7 @@
           return;
         }
         if (!x.j.id) throw new Error("провайдер не вернул id задачи");
-        setPendingText(chatId, "видео " + x.j.id + " · " + (x.j.status || "ожидание"));
+        setPendingText(chatId, queueWaitText("видео " + x.j.id, x.j, x.j.status, 0));
         return pollVideo(x.j.id, model, chatId, text, acLocal);
       }).catch(function (e) {
         if (e && e.name === "AbortError") {

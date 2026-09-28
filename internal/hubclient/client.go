@@ -489,6 +489,10 @@ func localRelay(job Job) (method, path string, body []byte) {
 		path = "/v1/images/generations"
 	case "videos":
 		path = "/v1/videos"
+	case "images_status":
+		method = http.MethodGet
+		path = "/v1/images/" + job.Ref + "?model=" + neturl.QueryEscape(job.Alias)
+		return method, path, nil
 	case "videos_status":
 		method = http.MethodGet
 		path = "/v1/videos/" + job.Ref + "?model=" + neturl.QueryEscape(job.Alias)

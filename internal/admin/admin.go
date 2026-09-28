@@ -135,6 +135,7 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/chat", u.protect(u.chatPage))
 	mux.HandleFunc("POST /admin/chat", u.protect(u.chatPost))
 	mux.HandleFunc("POST /admin/images", u.protect(u.imagesPost))
+	mux.HandleFunc("GET /admin/images/{id}", u.protect(u.imageStatus))
 	mux.HandleFunc("POST /admin/videos", u.protect(u.videosPost))
 	mux.HandleFunc("GET /admin/videos/{id}", u.protect(u.videoStatus))
 	mux.HandleFunc("GET /admin/videos/{id}/content", u.protect(u.videoContent))

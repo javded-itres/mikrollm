@@ -165,6 +165,7 @@ type Host interface {
 type ChatGateway interface {
 	ServeChat(w http.ResponseWriter, r *http.Request)
 	ServeImages(w http.ResponseWriter, r *http.Request)
+	ServeImageStatus(w http.ResponseWriter, r *http.Request)
 	ServeVideos(w http.ResponseWriter, r *http.Request)
 	ServeVideoStatus(w http.ResponseWriter, r *http.Request)
 	ServeVideoContent(w http.ResponseWriter, r *http.Request)

@@ -246,6 +246,8 @@ curl https://ollama.com/api/chat \
 
 Local **image and video** gateway in front of [ComfyUI](https://github.com/comfyanonymous/ComfyUI). Same OpenAI shapes as LiteLLM: `POST /v1/images/generations`, `POST /v1/videos`, poll `GET /v1/videos/{id}`. Not a chat LLM.
 
+If ComfyUI is already generating, image create returns **200** `{id, status: queued, queue_ahead}` instead of pixels. `queue_ahead` is how many generations run first. Poll `GET /v1/images/{id}` (MikroLLM remembers the model from create) until `completed`, then `data` is `b64_json` or `url`. A free GPU still returns the image in the create response. Videos always include `queue_ahead`.
+
 1. Run OpenComfy next to ComfyUI (`opencomfy -config …`, listen `:8788`).
 2. Admin → **Add server** → kind **OpenComfy**. URL `http://<gpu>:8788` (**no** `/v1`). API key from OpenComfy `keys.yaml` (`sk-…`).
 3. **Refresh catalogs**. Image/video models appear with media tags (from `/v1/models`, `/v1/images/models`, `/v1/videos/models`).

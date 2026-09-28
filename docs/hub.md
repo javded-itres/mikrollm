@@ -237,13 +237,14 @@ All node calls except register use `Authorization: Bearer <node token>`.
 | GET | `/v1/catalog` | Public. Online = seen in 45 s, not banned |
 | POST | `/v1/relay/{node}/chat` | Chat JSON (`model` in body), wait ≤ 120 s |
 | POST | `/v1/relay/{node}/images` | Images JSON |
+| POST | `/v1/relay/{node}/images/{id}` | Image job status (`queue_ahead` while queued) |
 | POST | `/v1/relay/{node}/videos` | Videos create |
 | POST | `/v1/relay/{node}/videos/{id}` | Video status |
 | POST | `/v1/relay/{node}/videos/{id}/content` | Video bytes |
 
 The owner injects `X-MikroLLM-Hub-Relay` on the in-process `/v1/chat/completions`, `/v1/images/generations`, or `/v1/videos` call so no `sk-` is required. Only aliases with **in hub** are executed.
 
-`kind` on a job: `chat` (default), `images`, `videos`, `videos_status`, `videos_content`.
+`kind` on a job: `chat` (default), `images`, `images_status`, `videos`, `videos_status`, `videos_content`.
 
 ---
 

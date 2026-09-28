@@ -30,6 +30,14 @@ func (u *UI) imagesPost(w http.ResponseWriter, r *http.Request) {
 	u.chat.ServeImages(w, r)
 }
 
+func (u *UI) imageStatus(w http.ResponseWriter, r *http.Request) {
+	if u.chat == nil {
+		writeJSONErr(w, http.StatusServiceUnavailable, "chat gateway unavailable")
+		return
+	}
+	u.chat.ServeImageStatus(w, r)
+}
+
 func (u *UI) videosPost(w http.ResponseWriter, r *http.Request) {
 	if u.chat == nil {
 		writeJSONErr(w, http.StatusServiceUnavailable, "chat gateway unavailable")

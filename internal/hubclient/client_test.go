@@ -249,6 +249,10 @@ func TestLocalRelayKinds(t *testing.T) {
 	if m != http.MethodPost || p != "/v1/images/generations" || !bytes.Contains(body, []byte(`"toy-image"`)) {
 		t.Fatalf("%s %s %s", m, p, body)
 	}
+	m, p, body = localRelay(Job{Alias: "toy-image", Kind: "images_status", Ref: "img_1"})
+	if m != http.MethodGet || p != "/v1/images/img_1?model=toy-image" || body != nil {
+		t.Fatalf("image status %s %s %v", m, p, body)
+	}
 	m, p, body = localRelay(Job{Alias: "hailuo", Kind: "videos_content", Ref: "vid1"})
 	if m != http.MethodGet || p != "/v1/videos/vid1/content?model=hailuo" || body != nil {
 		t.Fatalf("%s %s %v", m, p, body)

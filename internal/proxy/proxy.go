@@ -102,7 +102,13 @@ func rpmExempt(r *http.Request) bool {
 		return false
 	}
 	p := r.URL.Path
-	return strings.HasPrefix(p, "/v1/videos/") || strings.HasPrefix(p, "/admin/videos/")
+	if strings.HasPrefix(p, "/v1/videos/") || strings.HasPrefix(p, "/admin/videos/") {
+		return true
+	}
+	if strings.HasPrefix(p, "/admin/images/") && p != "/admin/images" {
+		return true
+	}
+	return strings.HasPrefix(p, "/v1/images/") && !strings.HasPrefix(p, "/v1/images/generations")
 }
 
 func (p *Proxy) ChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -553,7 +559,7 @@ func (p *Proxy) Forward(ctx context.Context, w http.ResponseWriter, k domain.API
 			return b.Name, "xAI", status, err
 		}
 		method := http.MethodPost
-		if strings.HasPrefix(path, "/v1/videos/") {
+		if strings.HasPrefix(path, "/v1/videos/") || imagePollPath(path) {
 			method = http.MethodGet
 			payload = nil
 		}
@@ -764,6 +770,9 @@ func rewriteUpstreamPath(b domain.Backend, path string) string {
 		}
 		return "/v1/images/generations"
 	default:
+		if imagePollPath(path) {
+			return path
+		}
 		if strings.HasPrefix(path, "/v1/videos") {
 			if b.KindNorm() == domain.KindOpenRouter {
 				return strings.TrimPrefix(path, "/v1")
@@ -805,12 +814,19 @@ func queueAllowed(k domain.APIKey, q domain.Queue, requested string) bool {
 	return false
 }
 
+func imagePollPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/images/") && !strings.HasPrefix(path, "/v1/images/generations")
+}
+
 func hubRelaySuffix(path string) string {
 	switch {
 	case path == "/v1/images/generations":
 		return "/images"
 	case path == "/v1/videos":
 		return "/videos"
+	case imagePollPath(path):
+		rest := strings.TrimPrefix(path, "/v1/images/")
+		return "/images/" + neturl.PathEscape(rest)
 	case strings.HasPrefix(path, "/v1/videos/"):
 		rest := strings.TrimPrefix(path, "/v1/videos/")
 		parts := strings.Split(rest, "/")
