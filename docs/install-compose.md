@@ -12,7 +12,7 @@ The gateway image does not contain the model weights. vLLM downloads them on fir
 ## Host
 
 - Linux with Docker Engine and the Compose plugin (`docker compose version`).
-- NVIDIA driver and [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). `gpus: all` does not work without it.
+- NVIDIA driver and [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). The vLLM service requests `driver: nvidia` with `capabilities: [gpu]`. That does not work without the toolkit.
 - The default vLLM image is **linux/amd64**. One GPU of 24–48 GB is enough for the default context of 32768. The model's native window is 262144 and needs about 80 GB with KV cache.
 - Blackwell (SM100 / SM120): set `VLLM_IMAGE=vllm/vllm-openai:cu130-nightly`. Qwen3.6 needs vLLM 0.17 or newer (`latest` is enough on other GPUs).
 

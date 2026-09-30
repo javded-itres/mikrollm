@@ -12,7 +12,7 @@
 ## Хост
 
 - Linux, Docker Engine и плагин Compose (`docker compose version`).
-- Драйвер NVIDIA и [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). Без него `gpus: all` не работает.
+- Драйвер NVIDIA и [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). Сервис vLLM запрашивает `driver: nvidia` и `capabilities: [gpu]`. Без toolkit это не работает.
 - Образ vLLM по умолчанию — **linux/amd64**. Для контекста 32768 хватает одной карты на 24–48 ГБ. Родное окно модели — 262144, вместе с KV это около 80 ГБ.
 - Blackwell (SM100 / SM120): `VLLM_IMAGE=vllm/vllm-openai:cu130-nightly`. Qwen3.6 нужен vLLM 0.17 или новее (на остальных картах достаточно `latest`).
 

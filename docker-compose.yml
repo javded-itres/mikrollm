@@ -1,6 +1,8 @@
 # MikroLLM + vLLM с Qwen3.6 (FP8 MoE, одна NVIDIA GPU).
 #
 # Хост: Linux + драйвер NVIDIA + nvidia-container-toolkit. Образ vLLM — linux/amd64.
+# GPU у vLLM задан явно: driver nvidia, capabilities [gpu],
+# NVIDIA_VISIBLE_DEVICES=all, NVIDIA_DRIVER_CAPABILITIES=compute,utility.
 # Qwen3.6 требует vLLM >= 0.17 (тег latest). На Blackwell (SM100/SM120) замените
 # образ на vllm/vllm-openai:cu130-nightly.
 #
@@ -54,12 +56,17 @@ services:
     image: ${VLLM_IMAGE:-vllm/vllm-openai:latest}
     restart: unless-stopped
     ipc: host
-    gpus: all
+    gpus:
+      - driver: nvidia
+        count: all
+        capabilities: [gpu]
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
       - hf-cache:/root/.cache/huggingface
     environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
     command:
