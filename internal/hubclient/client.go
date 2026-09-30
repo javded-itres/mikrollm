@@ -340,7 +340,10 @@ func (c *Client) announce(cfg Settings) error {
 			continue
 		}
 		media := domain.MergeMedia(m.Media, domain.InferMedia(m.Alias, nil), domain.InferMedia(m.UpstreamName, nil))
-		aliases = append(aliases, Alias{Alias: m.Alias, Media: media, Context: m.MaxContext})
+		aliases = append(aliases, Alias{
+			Alias: m.Alias, Media: media, Context: m.MaxContext,
+			Parameters: domain.FallbackGenerationParams(m.Alias, m.UpstreamName, media),
+		})
 	}
 	if aliases == nil {
 		aliases = []Alias{}

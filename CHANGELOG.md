@@ -6,6 +6,11 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+## 0.0.13 — 2026-09-30
+
+- Image and video aliases that have no provider parameter card publish a fallback list (`prompt`, `size` or `seconds`, `seed`, `input_image`) on `GET /v1/models` and in the hub announce. `source` is `fallback`; the provider may ignore a field. Chat aliases omit the list.
+- `docker-compose.yml` runs the gateway beside vLLM with Qwen3.6. Copy `.env.example` to `.env`, set `ADMIN_PASSWORD`, then `docker compose up`.
+
 ## 0.0.12 — 2026-09-28
 
 - Image jobs that stay queued can be polled like videos: `GET /v1/images/{id}` does not spend RPM, and a hub relay uses the chat concurrency slot.

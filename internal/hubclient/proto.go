@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+
+	"github.com/javded-itres/mikrollm/internal/domain"
 )
 
 // DefaultURL is compiled into MikroLLM. Override with MIKROLLM_HUB_URL for a local hub.
@@ -14,9 +16,10 @@ const DefaultURL = "https://hub.mikrollm.ru"
 const RelayHeader = "X-MikroLLM-Hub-Relay"
 
 type Alias struct {
-	Alias   string   `json:"alias"`
-	Media   []string `json:"media,omitempty"`
-	Context int      `json:"context,omitempty"`
+	Alias      string                   `json:"alias"`
+	Media      []string                 `json:"media,omitempty"`
+	Context    int                      `json:"context,omitempty"`
+	Parameters []domain.GenerationParam `json:"parameters,omitempty"`
 }
 
 type RegisterReq struct {

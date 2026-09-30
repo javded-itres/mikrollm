@@ -131,18 +131,19 @@ func (p *Proxy) ListModels(w http.ResponseWriter, r *http.Request) {
 	detected := p.detectedContexts()
 	models, _ := p.st.ListModels()
 	type item struct {
-		ID                  string   `json:"id"`
-		Object              string   `json:"object"`
-		OwnedBy             string   `json:"owned_by"`
-		ContextLength       int      `json:"context_length,omitempty"`
-		MaxModelLen         int      `json:"max_model_len,omitempty"`
-		MaxTokens           int      `json:"max_tokens,omitempty"`
-		MaxInputTokens      int      `json:"max_input_tokens,omitempty"`
-		Provider            string   `json:"provider,omitempty"`
-		InputCostPerToken   float64  `json:"input_cost_per_token,omitempty"`
-		OutputCostPerToken  float64  `json:"output_cost_per_token,omitempty"`
-		SupportedGeneration []string `json:"supported_generation,omitempty"`
-		Mode                string   `json:"mode,omitempty"`
+		ID                  string                   `json:"id"`
+		Object              string                   `json:"object"`
+		OwnedBy             string                   `json:"owned_by"`
+		ContextLength       int                      `json:"context_length,omitempty"`
+		MaxModelLen         int                      `json:"max_model_len,omitempty"`
+		MaxTokens           int                      `json:"max_tokens,omitempty"`
+		MaxInputTokens      int                      `json:"max_input_tokens,omitempty"`
+		Provider            string                   `json:"provider,omitempty"`
+		InputCostPerToken   float64                  `json:"input_cost_per_token,omitempty"`
+		OutputCostPerToken  float64                  `json:"output_cost_per_token,omitempty"`
+		SupportedGeneration []string                 `json:"supported_generation,omitempty"`
+		Mode                string                   `json:"mode,omitempty"`
+		Parameters          []domain.GenerationParam `json:"parameters,omitempty"`
 	}
 	out := struct {
 		Object string `json:"object"`
@@ -178,6 +179,7 @@ func (p *Proxy) ListModels(w http.ResponseWriter, r *http.Request) {
 			media = domain.MergeMedia(media, domain.InferMedia(m.UpstreamName, nil))
 		}
 		it.SupportedGeneration = media
+		it.Parameters = domain.FallbackGenerationParams(m.Alias, m.UpstreamName, media)
 		if domain.HasMedia(media, domain.MediaVideo) {
 			it.Mode = "video_generation"
 		} else if domain.HasMedia(media, domain.MediaImage) {
