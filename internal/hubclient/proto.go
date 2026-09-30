@@ -93,6 +93,7 @@ type Defaults struct {
 	NodeID   string      `json:"node_id"`
 	NodeName string      `json:"node_name,omitempty"`
 	Alias    string      `json:"alias"`
+	Context  int         `json:"context,omitempty"`
 	Pool     []PoolEntry `json:"pool,omitempty"`
 }
 

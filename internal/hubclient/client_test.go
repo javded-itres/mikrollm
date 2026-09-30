@@ -215,11 +215,12 @@ func TestClientSyncsAuto(t *testing.T) {
 }
 
 func TestClientSyncsAutoPool(t *testing.T) {
+	manual := 0
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/catalog" {
 			_ = json.NewEncoder(w).Encode(Catalog{
 				Defaults: &Defaults{
-					NodeID: "nfast", Alias: "small",
+					NodeID: "nfast", Alias: "small", Context: manual,
 					Pool: []PoolEntry{
 						{NodeID: "nfast", Alias: "small", Tier: "fast", Context: 4096, Media: []string{"chat"}},
 						{NodeID: "nbig", Alias: "coder", Tier: "strong", Context: 32768, Media: []string{"chat"}},
@@ -236,11 +237,17 @@ func TestClientSyncsAutoPool(t *testing.T) {
 	c.HubURL = hs.URL
 	c.RefreshCatalog()
 	ms, _ := st.ListModels()
-	if len(ms) != 1 || ms[0].HubNodeID != domain.HubAutoRouter || ms[0].UpstreamName != "auto" || ms[0].MaxContext != 32768 {
+	if len(ms) != 1 || ms[0].HubNodeID != domain.HubAutoRouter || ms[0].UpstreamName != "auto" || ms[0].MaxContext != 4096 {
 		t.Fatalf("pool auto %+v", ms)
 	}
 	if len(ms[0].Media) != 1 || ms[0].Media[0] != domain.MediaChat {
 		t.Fatalf("media %+v", ms[0].Media)
+	}
+	manual = 16384
+	c.RefreshCatalog()
+	ms, _ = st.ListModels()
+	if len(ms) != 1 || ms[0].MaxContext != 16384 {
+		t.Fatalf("manual context %+v", ms)
 	}
 }
 

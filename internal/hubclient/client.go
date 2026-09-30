@@ -203,6 +203,28 @@ func (c *Client) RefreshCatalog() {
 	c.applyAuto()
 }
 
+// autoContext is the hub's value for alias auto. A positive Defaults.Context
+// is either the operator override or the smallest pool context. An older hub
+// omits it, so the floor is the smallest announced context in the pool.
+func autoContext(def *Defaults) int {
+	if def == nil {
+		return 0
+	}
+	if def.Context > 0 {
+		return def.Context
+	}
+	min := 0
+	for _, p := range def.Pool {
+		if p.Context <= 0 {
+			continue
+		}
+		if min == 0 || p.Context < min {
+			min = p.Context
+		}
+	}
+	return min
+}
+
 func (c *Client) applyAuto() {
 	if c.Store == nil {
 		return
@@ -217,20 +239,14 @@ func (c *Client) applyAuto() {
 	nodes := c.cat.Nodes
 	c.catMu.Unlock()
 	if def != nil && len(def.Pool) > 0 {
-		ctxN := 0
-		for _, p := range def.Pool {
-			if p.Context > ctxN {
-				ctxN = p.Context
-			}
-		}
-		_ = c.Store.UpsertHubAuto(domain.HubAutoRouter, "auto", domain.HubAutoAlias, ctxN, []string{domain.MediaChat})
+		_ = c.Store.UpsertHubAuto(domain.HubAutoRouter, "auto", domain.HubAutoAlias, autoContext(def), []string{domain.MediaChat})
 		return
 	}
 	if def == nil || strings.TrimSpace(def.NodeID) == "" || strings.TrimSpace(def.Alias) == "" {
 		_ = c.Store.DeleteHubAuto()
 		return
 	}
-	name, ctxN, media := def.NodeName, 0, []string(nil)
+	name, ctxN, media := def.NodeName, autoContext(def), []string(nil)
 	for _, n := range nodes {
 		if n.ID != def.NodeID {
 			continue
@@ -240,7 +256,9 @@ func (c *Client) applyAuto() {
 		}
 		for _, a := range n.Aliases {
 			if a.Alias == def.Alias {
-				ctxN = a.Context
+				if ctxN <= 0 {
+					ctxN = a.Context
+				}
 				media = a.Media
 			}
 		}
