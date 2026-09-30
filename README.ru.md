@@ -71,6 +71,7 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 | Ноутбук / десктоп, одна команда | [docs/ru/install-desktop.md](docs/ru/install-desktop.md) |
 | Разработка на машине с Go | [docs/install-local.md](docs/ru/install-local.md) |
 | Linux-сервер, Docker или systemd | [docs/install-docker.md](docs/ru/install-docker.md) |
+| Compose: образ шлюза и vLLM Qwen3.6 | [docs/ru/install-compose.md](docs/ru/install-compose.md) |
 | Контейнер MikroTik RouterOS 7 | [docs/install-mikrotik.md](docs/ru/install-mikrotik.md) |
 | KeeneticOS (Entware) | [docs/install-keenetic.md](docs/ru/install-keenetic.md) |
 | iOS (оболочка WKWebView) | [docs/install-ios.md](docs/ru/install-ios.md) |

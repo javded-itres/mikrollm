@@ -9,6 +9,7 @@
 | [install-desktop.md](install-desktop.md) | Одна команда: Ollama + MikroLLM на Linux/macOS |
 | [install-local.md](install-local.md) | Запуск с исходников, флаги, данные |
 | [install-docker.md](install-docker.md) | Docker и systemd на сервере |
+| [install-compose.md](install-compose.md) | Compose: `javded/mikrollm` и vLLM Qwen3.6 |
 | [install-mikrotik.md](install-mikrotik.md) | Контейнер RouterOS 7, veth, dst-nat, USB |
 | [install-keenetic.md](install-keenetic.md) | KeeneticOS Entware (USB, без Docker) |
 | [install-ios.md](install-ios.md) | iOS, первый шаг: gomobile + WKWebView |

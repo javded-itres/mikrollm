@@ -4,10 +4,9 @@
 # Qwen3.6 требует vLLM >= 0.17 (тег latest). На Blackwell (SM100/SM120) замените
 # образ на vllm/vllm-openai:cu130-nightly.
 #
-# Сборка шлюза (Dockerfile копирует готовый бинарь):
+# Шлюз берётся с Docker Hub (linux/amd64 и linux/arm64). Тег = релиз, сейчас v0.0.13.
 #   cp .env.example .env          # задайте ADMIN_PASSWORD
-#   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o dist/mikrollm ./cmd/mikrollm
-#   docker compose up -d --build
+#   docker compose up -d
 #
 # Админка: http://127.0.0.1:4000/admin
 # Статус → добавить сервер: тип vLLM, URL http://vllm:8000.
@@ -36,10 +35,7 @@ name: mikrollm
 
 services:
   mikrollm:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: mikrollm:amd64
+    image: ${MIKROLLM_IMAGE:-javded/mikrollm:v0.0.13}
     restart: unless-stopped
     ports:
       - "4000:4000"

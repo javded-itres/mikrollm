@@ -9,6 +9,7 @@ English is the default. Russian copies live in [ru/](ru/README.md). GitHub Relea
 | [install-desktop.md](install-desktop.md) | One-liner: Ollama + MikroLLM on Linux/macOS |
 | [install-local.md](install-local.md) | Run from source, flags, data dir |
 | [install-docker.md](install-docker.md) | Docker and systemd on a server |
+| [install-compose.md](install-compose.md) | Compose: `javded/mikrollm` plus vLLM Qwen3.6 |
 | [install-mikrotik.md](install-mikrotik.md) | RouterOS 7 container, veth, dst-nat, USB |
 | [install-keenetic.md](install-keenetic.md) | KeeneticOS Entware (USB, no Docker) |
 | [install-ios.md](install-ios.md) | iOS first slice: gomobile + WKWebView |

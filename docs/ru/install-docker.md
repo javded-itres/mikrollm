@@ -29,12 +29,14 @@ docker buildx build --platform linux/arm64 -t mikrollm:arm64 --load .
 
 Контейнер слушает `:4000`. Данные — том `/data`. DNS контейнера должен резолвить хосты Ollama / vLLM / LM Studio (часто достаточно `--network host` в домашней сети или явные IP в админке).
 
-Пример compose:
+Шлюз и vLLM Qwen3.6 с Docker Hub: [install-compose.md](install-compose.md) (`javded/mikrollm`, скопируйте `.env.example` в `.env`, `docker compose up -d`).
+
+Только шлюз:
 
 ```yaml
 services:
   mikrollm:
-    image: mikrollm:amd64
+    image: javded/mikrollm:v0.0.13
     restart: unless-stopped
     ports:
       - "4000:4000"
@@ -56,10 +58,10 @@ volumes:
 ```bash
 docker run --rm -v mikrollm-data:/data \
   -e ADMIN_PASSWORD='новый' -e ADMIN_PASSWORD_RESET=1 \
-  mikrollm:amd64
+  javded/mikrollm:v0.0.13
 ```
 
-Затем запустите обычный контейнер **без** `ADMIN_PASSWORD_RESET`.
+Затем запустите обычный контейнер **без** `ADMIN_PASSWORD_RESET`. Имя тома Compose — `<проект>_mikrollm-data` (`docker volume ls`). Подробности: [install-compose.md](install-compose.md).
 
 ## systemd (без Docker)
 

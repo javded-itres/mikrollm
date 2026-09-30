@@ -71,6 +71,7 @@ An empty data dir **seeds** two backends `mac-82` / `mac-80` at `192.168.88.80/8
 | Laptop / desktop, one command | [docs/install-desktop.md](docs/install-desktop.md) |
 | Dev machine with Go | [docs/install-local.md](docs/install-local.md) |
 | Linux server, Docker or systemd | [docs/install-docker.md](docs/install-docker.md) |
+| Compose: gateway image and vLLM Qwen3.6 | [docs/install-compose.md](docs/install-compose.md) |
 | MikroTik RouterOS 7 container | [docs/install-mikrotik.md](docs/install-mikrotik.md) |
 | KeeneticOS (Entware) | [docs/install-keenetic.md](docs/install-keenetic.md) |
 | iOS (WKWebView shell) | [docs/install-ios.md](docs/install-ios.md) |

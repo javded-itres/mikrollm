@@ -29,12 +29,14 @@ docker buildx build --platform linux/arm64 -t mikrollm:arm64 --load .
 
 The container listens on `:4000`. Data is the `/data` volume. Container DNS must resolve Ollama / vLLM / LM Studio hosts (often `--network host` on a home LAN, or raw IPs in admin).
 
-Compose example:
+Gateway plus vLLM Qwen3.6 from Docker Hub: [install-compose.md](install-compose.md) (`javded/mikrollm`, copy `.env.example` to `.env`, `docker compose up -d`).
+
+Gateway only:
 
 ```yaml
 services:
   mikrollm:
-    image: mikrollm:amd64
+    image: javded/mikrollm:v0.0.13
     restart: unless-stopped
     ports:
       - "4000:4000"
@@ -56,10 +58,10 @@ Reset the password in an existing volume:
 ```bash
 docker run --rm -v mikrollm-data:/data \
   -e ADMIN_PASSWORD='newpass' -e ADMIN_PASSWORD_RESET=1 \
-  mikrollm:amd64
+  javded/mikrollm:v0.0.13
 ```
 
-Then start the normal container **without** `ADMIN_PASSWORD_RESET`.
+Then start the normal container **without** `ADMIN_PASSWORD_RESET`. A Compose volume is named `<project>_mikrollm-data` (`docker volume ls`). Details: [install-compose.md](install-compose.md).
 
 ## systemd (no Docker)
 

@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Инструкция Compose для образа с Docker Hub и vLLM Qwen3.6: [docs/ru/install-compose.md](docs/ru/install-compose.md).
+
 ## 0.0.13 — 2026-09-30
 
 - У картинок и видео без карточки параметров провайдера в `GET /v1/models` и в анонсе hub есть запасной список (`prompt`, `size` или `seconds`, `seed`, `input_image`). Поле `source` равно `fallback`: провайдер может проигнорировать значение. У чат-алиасов списка нет.

@@ -6,6 +6,8 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+- Compose guide for the Docker Hub image and vLLM Qwen3.6: [docs/install-compose.md](docs/install-compose.md).
+
 ## 0.0.13 — 2026-09-30
 
 - Image and video aliases that have no provider parameter card publish a fallback list (`prompt`, `size` or `seconds`, `seed`, `input_image`) on `GET /v1/models` and in the hub announce. `source` is `fallback`; the provider may ignore a field. Chat aliases omit the list.
