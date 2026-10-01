@@ -52,11 +52,17 @@ type HubPeerAlias struct {
 	Context int
 }
 
+type HubPeerMCP struct {
+	Name string
+}
+
 type HubPeer struct {
 	ID         string
 	Name       string
 	Online     bool
 	Aliases    []HubPeerAlias
+	MCPs       []HubPeerMCP
+	Agents     []HubPeerMCP
 	Rating     int
 	Schedule   HubSchedule
 	SharingNow bool
@@ -116,6 +122,8 @@ type HubSettings struct {
 	Name     string
 	Schedule HubSchedule
 	Caps     HubCaps
+	ShareMCP bool
+	ShareA2A bool
 }
 
 type APIKey struct {

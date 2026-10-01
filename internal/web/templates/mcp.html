@@ -1,0 +1,81 @@
+{{define "content"}}
+<div class="pagehead">
+  <div>
+    <h1>MCP</h1>
+    <p class="muted">Агент подключается к шлюзу тем же Bearer <code>mcp-…</code>, что и к админскому <code>/mcp</code>. Шлюз ходит на указанный сервер и подставляет сохранённый токен. Адрес и токен наружу не уходят.</p>
+  </div>
+</div>
+
+<div class="card add-box">
+  <h2>Новый сервер</h2>
+  <form method="post" action="/admin/mcp" class="grid2" style="margin-top:.6rem">
+    <div>
+      <label>Имя</label>
+      <input name="name" required maxlength="40" placeholder="files" autocomplete="off">
+    </div>
+    <div>
+      <label>URL</label>
+      <input name="url" required placeholder="http://127.0.0.1:3000/mcp" autocomplete="off">
+    </div>
+    <div>
+      <label>Токен сервера</label>
+      <input name="token" type="password" placeholder="если сервер требует Bearer" autocomplete="off">
+    </div>
+    <div class="checks" style="align-self:end">
+      <label class="inline"><input type="checkbox" name="enabled" value="1" checked> Включён</label>
+      <label class="inline"><input type="checkbox" name="hub_share" value="1" {{if not .CanShare}}disabled{{end}}> В сеть</label>
+    </div>
+    <div class="span2"><button type="submit">Добавить</button></div>
+  </form>
+  {{if not .CanShare}}
+  <p class="muted small">Галочка «В сеть» включается на Статусе: участник hub и «Доступ к MCP».</p>
+  {{end}}
+</div>
+
+{{if not .Rows}}
+<div class="card empty"><p>Серверов MCP пока нет.</p></div>
+{{end}}
+
+{{range .Rows}}
+<article class="card">
+  <form method="post" action="/admin/mcp" class="grid2">
+    <input type="hidden" name="id" value="{{.ID}}">
+    <div>
+      <label>Имя</label>
+      <input name="name" value="{{.Name}}" required maxlength="40" autocomplete="off">
+    </div>
+    <div>
+      <label>URL</label>
+      <input name="url" value="{{.URL}}" required autocomplete="off">
+    </div>
+    <div>
+      <label>Токен сервера</label>
+      <input name="token" type="password" placeholder="{{if .TokenSet}}сохранён, пустое поле не меняет{{else}}если сервер требует Bearer{{end}}" autocomplete="off">
+    </div>
+    <div class="checks" style="align-self:end">
+      <label class="inline"><input type="checkbox" name="enabled" value="1" {{if .Enabled}}checked{{end}}> Включён</label>
+      <label class="inline"><input type="checkbox" name="hub_share" value="1" {{if .HubShare}}checked{{end}} {{if not $.CanShare}}disabled{{end}}> В сеть</label>
+    </div>
+    <div class="span2 row">
+      <button type="submit">Сохранить</button>
+    </div>
+  </form>
+  <p class="muted small">Агент на этом узле: <code>/mcp/u/{{.Name}}</code></p>
+  <form method="post" action="/admin/mcp/{{.ID}}/delete"><button class="ghost" type="submit">Удалить</button></form>
+</article>
+{{end}}
+
+<section class="card">
+  <h2>MCP с других узлов</h2>
+  {{if not .HubOn}}
+  <p class="muted">Включите «Участник hub сети», чтобы видеть серверы, которые соседи открыли в сеть.</p>
+  {{else if not .Remote}}
+  <p class="muted">Пока никто не открыл MCP в сеть.</p>
+  {{else}}
+  {{range .Remote}}
+  <p><strong>{{.NodeName}}</strong> · <code>{{.Name}}</code> · <code>/mcp/u/{{.Node}}/{{.Name}}</code>{{if not .Online}} <span class="pill off">не в сети</span>{{end}}</p>
+  {{end}}
+  {{end}}
+  <p class="muted small">Тот же токен агента. Запрос уходит на узел-владелец через hub. Владелец подставляет свой токен сервера.</p>
+</section>
+{{end}}

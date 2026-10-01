@@ -19,6 +19,7 @@
 | [providers.md](providers.md) | Ollama, Ollama Cloud, OpenRouter, vLLM, LM Studio; prompt cache |
 | [api.md](api.md) | OpenAI / Ollama API, chat / images / videos, ключи; Swagger на `/docs` |
 | [mcp.md](mcp.md) | MCP: агент настраивает модели, очереди, ключи, логи |
+| [a2a.md](a2a.md) | Прокси A2A-агентов и шаринг через hub |
 | [architecture.md](architecture.md) | Пакеты, порты, внедрение зависимостей |
 | [hub.md](hub.md) | Клиент hub: вход в облачный каталог (сервис — отдельный репозиторий) |
 | [load-test.md](load-test.md) | Полевые RPS: оверхед шлюза, локальная 35B, облако 32k–128k, RAM MikroTik |

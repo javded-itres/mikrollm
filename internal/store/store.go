@@ -130,6 +130,8 @@ CREATE TABLE IF NOT EXISTS ollama_jobs (
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_name TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_schedule TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_caps TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_mcp INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.DB.Exec(`ALTER TABLE admin_meta ADD COLUMN hub_a2a INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.DB.Exec(`ALTER TABLE request_log ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`)
@@ -217,7 +219,24 @@ CREATE INDEX IF NOT EXISTS queue_jobs_status ON queue_jobs(status);
 		return err
 	}
 	_, _ = s.DB.Exec(`ALTER TABLE queue_jobs ADD COLUMN preview TEXT NOT NULL DEFAULT ''`)
-	return nil
+	_, err = s.DB.Exec(`
+CREATE TABLE IF NOT EXISTS mcp_upstreams (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  url TEXT NOT NULL,
+  token TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  hub_share INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS a2a_upstreams (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  url TEXT NOT NULL,
+  token TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  hub_share INTEGER NOT NULL DEFAULT 0
+)`)
+	return err
 }
 
 func (s *Store) EnsureAdmin(password string, reset bool) error {
@@ -862,17 +881,17 @@ func (s *Store) SetPromptCacheMode(mode string) error {
 }
 
 func (s *Store) HubSettings() (domain.HubSettings, error) {
-	var en int
+	var en, shareMCP, shareA2A int
 	var id, tok, name, sched string
 	var caps string
-	err := s.DB.QueryRow(`SELECT hub_enabled, hub_node_id, hub_token, hub_name, hub_schedule, hub_caps FROM admin_meta WHERE id=1`).Scan(&en, &id, &tok, &name, &sched, &caps)
+	err := s.DB.QueryRow(`SELECT hub_enabled, hub_node_id, hub_token, hub_name, hub_schedule, hub_caps, hub_mcp, hub_a2a FROM admin_meta WHERE id=1`).Scan(&en, &id, &tok, &name, &sched, &caps, &shareMCP, &shareA2A)
 	if err == sql.ErrNoRows {
 		return domain.HubSettings{Caps: domain.HubCaps{}.Norm()}, nil
 	}
 	if err != nil {
 		return domain.HubSettings{}, err
 	}
-	h := domain.HubSettings{Enabled: en == 1, NodeID: id, Token: tok, Name: name}
+	h := domain.HubSettings{Enabled: en == 1, NodeID: id, Token: tok, Name: name, ShareMCP: shareMCP == 1, ShareA2A: shareA2A == 1}
 	if strings.TrimSpace(sched) != "" {
 		_ = json.Unmarshal([]byte(sched), &h.Schedule)
 	}
@@ -888,11 +907,19 @@ func (s *Store) SetHubSettings(h domain.HubSettings) error {
 	if h.Enabled {
 		en = 1
 	}
+	shareMCP := 0
+	if h.Enabled && h.ShareMCP {
+		shareMCP = 1
+	}
+	shareA2A := 0
+	if h.Enabled && h.ShareA2A {
+		shareA2A = 1
+	}
 	raw, _ := json.Marshal(h.Schedule)
 	h.Caps = h.Caps.Norm()
 	caps, _ := json.Marshal(h.Caps)
-	res, err := s.DB.Exec(`UPDATE admin_meta SET hub_enabled=?, hub_node_id=?, hub_token=?, hub_name=?, hub_schedule=?, hub_caps=? WHERE id=1`,
-		en, h.NodeID, h.Token, strings.TrimSpace(h.Name), string(raw), string(caps))
+	res, err := s.DB.Exec(`UPDATE admin_meta SET hub_enabled=?, hub_node_id=?, hub_token=?, hub_name=?, hub_schedule=?, hub_caps=?, hub_mcp=?, hub_a2a=? WHERE id=1`,
+		en, h.NodeID, h.Token, strings.TrimSpace(h.Name), string(raw), string(caps), shareMCP, shareA2A)
 	if err != nil {
 		return err
 	}

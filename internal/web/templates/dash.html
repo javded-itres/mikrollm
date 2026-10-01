@@ -89,9 +89,19 @@
       </div>
     </div>
     <label class="inline span2">
-      <input type="checkbox" name="enabled" value="1" {{if .HubEnabled}}checked{{end}}>
+      <input type="checkbox" name="enabled" value="1" data-reveal="#hub-extra" {{if .HubEnabled}}checked{{end}}>
       Участник hub сети
     </label>
+    <div class="span2" id="hub-extra" {{if not .HubEnabled}}hidden{{end}}>
+      <label class="inline">
+        <input type="checkbox" name="share_mcp" value="1" {{if .HubShareMCP}}checked{{end}}>
+        Доступ к MCP
+      </label>
+      <label class="inline">
+        <input type="checkbox" name="share_a2a" value="1" {{if .HubShareA2A}}checked{{end}}>
+        Доступ к агентам
+      </label>
+    </div>
     <label class="inline span2">
       <input type="checkbox" name="share_sched" value="1" data-reveal="#hub-sched" {{if .HubSchedule.Enabled}}checked{{end}}>
       Шарить по расписанию

@@ -154,3 +154,16 @@ MCP is full admin. Whoever has the token can issue keys and change providers.
 - Do not publish `/mcp` to the internet without TLS and a filter.
 - On RouterOS keep dst-nat :4000 on the LAN.
 - Backend tokens and `sk-` are not repeated in tool replies except one-shot `create_key` / `rotate_mcp_token`.
+
+## Upstream MCP
+
+Admin **MCP** stores other MCP servers (name, URL, bearer). An agent connects to this gateway, not to the upstream:
+
+| Method | Path | What happens |
+|---|---|---|
+| POST, GET, DELETE | `/mcp/u/{name}` | Proxy to the server saved under that name |
+| POST, GET, DELETE | `/mcp/u/{node}/{name}` | Same call through the hub to a neighbor that shared the name |
+
+Auth is the gateway MCP bearer (`mcp-…` or the admin password). That header is not forwarded. The gateway adds the token saved for the server. The hub catalog stores the name only.
+
+Sharing is separate from model aliases. On **Status**, **Hub network member** reveals **MCP access** (`Доступ к MCP`). On the MCP tab, **In network** (`В сеть`) picks which servers that flag publishes. Turn either one off and the hub list is cleared. The share window is the same schedule as aliases. MCP jobs use the chat concurrency number.

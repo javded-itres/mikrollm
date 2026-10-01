@@ -72,6 +72,8 @@ func TestTemplatesParse(t *testing.T) {
 		{"templates/layout.html", "templates/keys.html"},
 		{"templates/layout.html", "templates/queues.html"},
 		{"templates/layout.html", "templates/logs.html"},
+		{"templates/layout.html", "templates/mcp.html"},
+		{"templates/layout.html", "templates/agents.html"},
 		{"templates/docs.html"},
 	} {
 		if _, err := template.New("layout.html").Funcs(fm).ParseFS(web.FS, files...); err != nil {
@@ -107,6 +109,50 @@ func TestQueueStepDeleteUsesQueueID(t *testing.T) {
 	}
 	if strings.Contains(html, "/admin/queues//steps/") {
 		t.Fatal("empty queue id in step URL")
+	}
+}
+
+func TestHubShareAndAgentTemplates(t *testing.T) {
+	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }}
+	dash := template.Must(template.New("layout.html").Funcs(fm).ParseFS(web.FS, "templates/layout.html", "templates/dash.html"))
+	var on bytes.Buffer
+	days := map[string]bool{}
+	if err := dash.ExecuteTemplate(&on, "layout.html", map[string]any{
+		"Title": "Статус", "Nav": "dash", "CSRF": "tok",
+		"HubEnabled": true, "HubShareMCP": true, "HubShareA2A": true,
+		"HubSchedule": domain.HubSchedule{}, "HubShareDays": days, "HubTZ": "Europe/Moscow",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	html := on.String()
+	if !strings.Contains(html, `name="share_mcp"`) || !strings.Contains(html, `name="share_a2a"`) || !strings.Contains(html, "Доступ к агентам") || !strings.Contains(html, "Доступ к MCP") {
+		t.Fatalf("membership checkboxes missing")
+	}
+	var off bytes.Buffer
+	if err := dash.ExecuteTemplate(&off, "layout.html", map[string]any{
+		"Title": "Статус", "Nav": "dash", "CSRF": "tok",
+		"HubEnabled": false, "HubSchedule": domain.HubSchedule{}, "HubShareDays": days, "HubTZ": "Europe/Moscow",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(off.String(), `id="hub-extra" hidden`) {
+		t.Fatal("share row stays visible without membership")
+	}
+	agents := template.Must(template.New("layout.html").Funcs(fm).ParseFS(web.FS, "templates/layout.html", "templates/agents.html"))
+	var page bytes.Buffer
+	if err := agents.ExecuteTemplate(&page, "layout.html", map[string]any{
+		"Title": "Агенты", "Nav": "agents", "CSRF": "tok",
+		"CanShare": true, "HubOn": true,
+		"Rows": []mcpRow{{ID: 3, Name: "planner", URL: "http://127.0.0.1:9/a2a", Enabled: true, HubShare: true, TokenSet: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := page.String()
+	if !strings.Contains(body, "/a2a/u/planner/.well-known/agent-card.json") || !strings.Contains(body, "/a2a/u/planner") {
+		t.Fatal(body)
+	}
+	if strings.Contains(body, "agent-secret") {
+		t.Fatal("token rendered")
 	}
 }
 

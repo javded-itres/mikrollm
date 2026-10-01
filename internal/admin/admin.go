@@ -89,6 +89,8 @@ func New(d Deps) *UI {
 			"queues":   must("templates/layout.html", "templates/queues.html"),
 			"security": must("templates/layout.html", "templates/security.html"),
 			"billing":  must("templates/layout.html", "templates/billing.html"),
+			"mcp":      must("templates/layout.html", "templates/mcp.html"),
+			"agents":   must("templates/layout.html", "templates/agents.html"),
 		},
 	}
 }
@@ -111,6 +113,12 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/backends/{id}/delete", u.protect(u.delBackend))
 	mux.HandleFunc("POST /admin/password", u.protect(u.password))
 	mux.HandleFunc("POST /admin/mcp/token", u.protect(u.rotateMCP))
+	mux.HandleFunc("GET /admin/mcp", u.protect(u.mcpPage))
+	mux.HandleFunc("POST /admin/mcp", u.protect(u.saveMCPUpstream))
+	mux.HandleFunc("POST /admin/mcp/{id}/delete", u.protect(u.deleteMCPUpstream))
+	mux.HandleFunc("GET /admin/agents", u.protect(u.agentsPage))
+	mux.HandleFunc("POST /admin/agents", u.protect(u.saveA2A))
+	mux.HandleFunc("POST /admin/agents/{id}/delete", u.protect(u.deleteA2A))
 	mux.HandleFunc("POST /admin/hub", u.protect(u.saveHub))
 	mux.HandleFunc("POST /admin/models/{id}/hub-share", u.protect(u.setModelHubShare))
 	mux.HandleFunc("POST /admin/models/hub-bulk", u.protect(u.bulkHubShare))
@@ -315,6 +323,7 @@ func (u *UI) dash(w http.ResponseWriter, r *http.Request) {
 		"HubShareDays": shareDaySet(hubCfg.Schedule.Days),
 		"HubTZ":        hubTZ(hubCfg.Schedule.TZ),
 		"HubCapChat":   hubCfg.Caps.Norm().Chat, "HubCapImages": hubCfg.Caps.Norm().Images, "HubCapVideos": hubCfg.Caps.Norm().Videos,
+		"HubShareMCP": hubCfg.ShareMCP, "HubShareA2A": hubCfg.ShareA2A,
 		"Flash": flash, "Error": errMsg(r.URL.Query().Get("err")),
 	})
 }
@@ -331,6 +340,8 @@ func (u *UI) saveHub(w http.ResponseWriter, r *http.Request) {
 		cfg.Name, _ = os.Hostname()
 	}
 	cfg.Enabled = parseEnabled(r.FormValue("enabled"))
+	cfg.ShareMCP = cfg.Enabled && parseEnabled(r.FormValue("share_mcp"))
+	cfg.ShareA2A = cfg.Enabled && parseEnabled(r.FormValue("share_a2a"))
 	cfg.Schedule = domain.HubSchedule{
 		Enabled: parseEnabled(r.FormValue("share_sched")),
 		Days:    domain.ParseShareDays(r.Form["share_day"]),
@@ -1463,6 +1474,14 @@ func flashMsg(code string) string {
 		return "Очередь удалена."
 	case "mcp_token":
 		return "MCP-токен выпущен. Скопируйте его сейчас."
+	case "mcp_saved":
+		return "MCP-сервер сохранён."
+	case "mcp_deleted":
+		return "MCP-сервер удалён."
+	case "agent_saved":
+		return "Агент сохранён."
+	case "agent_deleted":
+		return "Агент удалён."
 	default:
 		return ""
 	}
@@ -1480,6 +1499,18 @@ func errMsg(code string) string {
 		return "Для OpenRouter, Ollama Cloud и OpenComfy нужен API-ключ."
 	case "name+and+url+required":
 		return "Нужны имя и URL."
+	case "mcp name":
+		return "Имя MCP: латиница в нижнем регистре, цифры, _ и -, до 40 символов."
+	case "mcp url":
+		return "URL MCP должен быть http или https, без логина в адресе."
+	case "mcp name taken":
+		return "MCP с таким именем уже есть."
+	case "agent name":
+		return "Имя агента: латиница в нижнем регистре, цифры, _ и -, до 40 символов."
+	case "agent url":
+		return "URL агента должен быть http или https, без логина в адресе."
+	case "agent name taken":
+		return "Агент с таким именем уже есть."
 	case "min+6+chars", "min+8+chars":
 		return "Пароль не короче 8 символов."
 	default:

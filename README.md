@@ -24,6 +24,7 @@ Docs: [docs/](docs/README.md) (English default). Russian: [docs/ru/](docs/ru/REA
 - Virtual keys with model allowlists and RPM.
 - Admin: servers, models (provider and price filters), keys, queues, filtered logs, chat, **billing** (hour/day/week/month/year), **security** (system prompt, injection, PII).
 - **MCP** at `POST /mcp`: an agent can configure providers, models, queues, and keys, and read logs/status. [docs/mcp.md](docs/mcp.md)
+- **A2A** agents at `/a2a/u/{name}`: the gateway proxies JSON-RPC and can publish the name on the hub. [docs/a2a.md](docs/a2a.md)
 - Model download (`pull`) with a progress bar on Ollama and LM Studio; refresh does not abort the job.
 - Load / unload weights in RAM (Ollama `keep_alive`, LM Studio `/api/v1/models/load|unload`).
 - vLLM: the model is bound to the process (`vllm serve <HuggingFace-id>`) — [guide](docs/providers.md#vllm).
@@ -80,6 +81,7 @@ An empty data dir **seeds** two backends `mac-82` / `mac-80` at `192.168.88.80/8
 | Ollama / Cloud / OpenRouter / vLLM / LM Studio | [docs/providers.md](docs/providers.md) |
 | HTTP API | [docs/api.md](docs/api.md) (Swagger `/docs`) |
 | MCP for an agent | [docs/mcp.md](docs/mcp.md) |
+| A2A agent proxy | [docs/a2a.md](docs/a2a.md) |
 | Code layout | [docs/architecture.md](docs/architecture.md) |
 | Hub network (outbound client) | [docs/hub.md](docs/hub.md) |
 

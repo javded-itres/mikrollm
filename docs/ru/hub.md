@@ -40,7 +40,9 @@ Hub отдаёт JSON (или байты видео) узлу A
 2. Блок **Участник hub сети**.
 3. Короткое **имя** (например `hap-ax3`, `ams-1`, `home-mac`). Так вас видят другие.
 4. Галочка **Участник hub сети** → сохранить.
-5. По желанию **Шарить по расписанию** — окно времени и дни недели (пустые дни = каждый день). Пояс IANA (по умолчанию `Europe/Moscow`). Вне окна узел остаётся в каталоге, alias «не сейчас», relay отвечает 503.
+5. По желанию **Доступ к MCP** — появляется вместе с участием. Публикует имена серверов с вкладки **MCP** (галочка **В сеть**). Hub хранит только имя. [mcp.md](mcp.md)
+6. По желанию **Доступ к агентам** — вторая галочка. Публикует имена с вкладки **Агенты**. Интерфейс hub показывает и MCP, и агентов. [a2a.md](a2a.md)
+7. По желанию **Шарить по расписанию** — окно времени и дни недели (пустые дни = каждый день). Пояс IANA (по умолчанию `Europe/Moscow`). Вне окна узел остаётся в каталоге, alias «не сейчас», relay отвечает 503.
 
 Клиент:
 
@@ -231,11 +233,13 @@ hub.example.com {
 | Метод | Путь | Заметка |
 |---|---|---|
 | POST | `/v1/register` | `{name}` → `{node_id, token}` |
-| PUT | `/v1/announce` | `{name, aliases:[{alias, media, context}]}` |
+| PUT | `/v1/announce` | `{name, aliases:[{alias, media, context}], mcps:[{name}], agents:[{name}]}`. Списки MCP и агентов — только имена |
 | GET | `/v1/pull` | Long-poll ~20 с; `204` тихо; `200` + `{job_id, alias, kind, ref, body}` |
 | POST | `/v1/result` | `{job_id, status, body}` или `{b64, content_type}` |
 | GET | `/v1/catalog` | Публично. Онлайн = видели за 45 с, не в бане |
 | POST | `/v1/relay/{node}/chat` | Chat JSON (`model` в теле), ждать ≤ 120 с |
+| POST | `/v1/relay/{node}/mcp/{name}` | Вызов MCP. `{name}` должен быть в анонсе `mcps` (только имя) |
+| POST | `/v1/relay/{node}/a2a/{name}` | Конверт A2A, 1 МиБ. `{name}` должен быть в анонсе `agents` |
 | POST | `/v1/relay/{node}/images` | Images JSON |
 | POST | `/v1/relay/{node}/images/{id}` | статус картинки, пока `queued` есть `queue_ahead` |
 | POST | `/v1/relay/{node}/videos` | Создание видео |
@@ -244,7 +248,7 @@ hub.example.com {
 
 Хозяин ставит `X-MikroLLM-Hub-Relay` на внутренний `/v1/chat/completions`, `/v1/images/generations` или `/v1/videos`, `sk-` не нужен. Исполняются только alias с пометкой **в hub**.
 
-`kind` задачи: `chat` (по умолчанию), `images`, `videos`, `videos_status`, `videos_content`.
+`kind` задачи: `chat` (по умолчанию), `images`, `videos`, `videos_status`, `videos_content`, `mcp`, `a2a`.
 
 ---
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/javded-itres/mikrollm/internal/a2aproxy"
 	"github.com/javded-itres/mikrollm/internal/admin"
 	"github.com/javded-itres/mikrollm/internal/auth"
 	"github.com/javded-itres/mikrollm/internal/domain"
@@ -19,6 +20,7 @@ import (
 	"github.com/javded-itres/mikrollm/internal/hubclient"
 	"github.com/javded-itres/mikrollm/internal/jobs"
 	"github.com/javded-itres/mikrollm/internal/mcp"
+	"github.com/javded-itres/mikrollm/internal/mcpproxy"
 	"github.com/javded-itres/mikrollm/internal/ports"
 	"github.com/javded-itres/mikrollm/internal/proxy"
 	"github.com/javded-itres/mikrollm/internal/queue"
@@ -111,10 +113,13 @@ func New(cfg Config) (*App, error) {
 	mux.HandleFunc("POST /api/chat", px.OllamaChat)
 	mux.HandleFunc("GET /api/tags", px.OllamaTags)
 	ui.Mount(mux)
-	mcp.New(mcp.Deps{
+	mcpSrv := mcp.New(mcp.Deps{
 		Store: st, Health: checker, Auth: keys, Host: hosts, Jobs: tracker, Queues: queues,
 		Version: cfg.Version,
-	}).Mount(mux)
+	})
+	mcpSrv.Mount(mux)
+	mcpproxy.New(st, mcpSrv.Allow, hubc.URL).Mount(mux)
+	a2aproxy.New(st, mcpSrv.Allow, hubc.URL).Mount(mux)
 
 	hubc.Handler = mux
 	ctx, stop := context.WithCancel(context.Background())
@@ -187,7 +192,7 @@ func limitBody(next http.Handler) http.Handler {
 		if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
 			n := int64(32 << 20)
 			p := r.URL.Path
-			if (strings.HasPrefix(p, "/admin") && p != "/admin/chat" && p != "/admin/images" && p != "/admin/videos") || p == "/mcp" || strings.HasPrefix(p, "/mcp/") {
+			if (strings.HasPrefix(p, "/admin") && p != "/admin/chat" && p != "/admin/images" && p != "/admin/videos") || p == "/mcp" || strings.HasPrefix(p, "/mcp/") || strings.HasPrefix(p, "/a2a/") {
 				n = 1 << 20
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, n)

@@ -5,6 +5,8 @@
 ## Unreleased
 
 - Инструкция Compose для образа с Docker Hub и vLLM Qwen3.6: [docs/ru/install-compose.md](docs/ru/install-compose.md).
+- Вкладка **MCP** проксирует серверы на `/mcp/u/{name}`. Галочка **Доступ к MCP** на карточке hub и **В сеть** на вкладке публикуют только имя. Соседи ходят на `/mcp/u/{node}/{name}`. [docs/ru/mcp.md](docs/ru/mcp.md)
+- Вкладка **Агенты** проксирует A2A JSON-RPC на `/a2a/u/{name}` и переписывает `url` карточки на этот шлюз. **Доступ к агентам** — отдельная галочка. Hub хранит только имя, в его интерфейсе видно MCP и агентов. [docs/ru/a2a.md](docs/ru/a2a.md)
 
 ## 0.0.13 — 2026-09-30
 

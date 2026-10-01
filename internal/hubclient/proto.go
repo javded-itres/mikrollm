@@ -46,11 +46,44 @@ type Caps struct {
 	Videos int `json:"videos"`
 }
 
+// MCPName is the only MCP field a hub catalog stores. URL and token stay on the owner.
+type MCPName struct {
+	Name string `json:"name"`
+}
+
 type AnnounceReq struct {
 	Name     string         `json:"name"`
 	Aliases  []Alias        `json:"aliases"`
 	Schedule *ShareSchedule `json:"schedule,omitempty"`
 	Caps     *Caps          `json:"caps,omitempty"`
+	MCPs     []MCPName      `json:"mcps"`
+	Agents   []MCPName      `json:"agents"`
+}
+
+// MCPRelay carries one Streamable HTTP call through the hub job queue.
+// Body is the raw JSON-RPC payload, or a JSON string when the bytes are not JSON.
+type MCPRelay struct {
+	Method      string          `json:"method"`
+	Session     string          `json:"session,omitempty"`
+	Accept      string          `json:"accept,omitempty"`
+	Protocol    string          `json:"protocol,omitempty"`
+	ContentType string          `json:"content_type,omitempty"`
+	Path        string          `json:"path,omitempty"`
+	Body        json.RawMessage `json:"body,omitempty"`
+}
+
+func (m MCPRelay) Payload() []byte {
+	raw := bytes.TrimSpace(m.Body)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	if raw[0] == '"' {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			return []byte(s)
+		}
+	}
+	return append([]byte(nil), raw...)
 }
 
 type Job struct {
@@ -67,6 +100,8 @@ type Result struct {
 	Body        json.RawMessage `json:"body,omitempty"`
 	ContentType string          `json:"content_type,omitempty"`
 	B64         string          `json:"b64,omitempty"`
+	Session     string          `json:"session,omitempty"`
+	Protocol    string          `json:"protocol,omitempty"`
 }
 
 type NodePublic struct {
@@ -78,6 +113,8 @@ type NodePublic struct {
 	Schedule   *ShareSchedule `json:"schedule,omitempty"`
 	SharingNow bool           `json:"sharing_now"`
 	Caps       *Caps          `json:"caps,omitempty"`
+	MCPs       []MCPName      `json:"mcps,omitempty"`
+	Agents     []MCPName      `json:"agents,omitempty"`
 }
 
 type PoolEntry struct {

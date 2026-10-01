@@ -24,6 +24,7 @@
 - Виртуальные ключи с ограничением моделей и RPM.
 - Админка: серверы, модели (фильтр по провайдеру и цене), ключи, очереди, лог с фильтрами, чат, **биллинг** (час/день/неделя/месяц/год), **безопасность** (системный промпт, injection, PII).
 - **MCP** на `POST /mcp`: агент настраивает провайдеры, модели, очереди и ключи, читает логи и статус. [docs/mcp.md](docs/ru/mcp.md)
+- **A2A**-агенты на `/a2a/u/{name}`: шлюз проксирует JSON-RPC и может опубликовать имя в hub. [docs/ru/a2a.md](docs/ru/a2a.md)
 - Скачивание модели (`pull`) с полосой прогресса на Ollama и LM Studio; F5 не обрывает задачу.
 - Загрузка / выгрузка весов в RAM (Ollama `keep_alive`, LM Studio `/api/v1/models/load|unload`).
 - vLLM: модель задаётся на сервере (`vllm serve <HuggingFace-id>`) — [инструкция](docs/ru/providers.md#vllm).
@@ -80,6 +81,7 @@ curl http://127.0.0.1:4000/v1/chat/completions \
 | Ollama / Cloud / OpenRouter / vLLM / LM Studio | [docs/providers.md](docs/ru/providers.md) |
 | HTTP API | [docs/api.md](docs/ru/api.md) (Swagger `/docs`) |
 | MCP для агента | [docs/mcp.md](docs/ru/mcp.md) |
+| Прокси A2A-агентов | [docs/a2a.md](docs/ru/a2a.md) |
 | Устройство кода | [docs/architecture.md](docs/ru/architecture.md) |
 | Сеть hub (исходящий клиент) | [docs/ru/hub.md](docs/ru/hub.md) |
 

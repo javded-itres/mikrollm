@@ -40,7 +40,9 @@ Online in the catalog = the node is pulling (last seen **&lt; 45 s**). Announce 
 2. Section **Hub network member** (`Участник hub сети`).
 3. Set a short **name** (e.g. `hap-ax3`, `ams-1`, `home-mac`). This is what others see in the catalog.
 4. Check **Hub network member** → Save.
-5. Optional: **Share on a schedule** (`Шарить по расписанию`) — time window and weekdays (empty days = every day). Timezone is IANA (default `Europe/Moscow`). Outside the window the node stays listed but aliases show as unavailable and relay returns 503.
+5. Optional: **MCP access** (`Доступ к MCP`) appears with membership. It publishes MCP server names from the **MCP** tab (**In network**). The hub stores the name only. [mcp.md](mcp.md)
+6. Optional: **Agent access** (`Доступ к агентам`) is a second checkbox. It publishes agent names from the **Agents** tab. The hub UI shows both MCP and agents. [a2a.md](a2a.md)
+7. Optional: **Share on a schedule** (`Шарить по расписанию`) — time window and weekdays (empty days = every day). Timezone is IANA (default `Europe/Moscow`). Outside the window the node stays listed but aliases show as unavailable and relay returns 503.
 
 The client:
 
@@ -231,11 +233,13 @@ All node calls except register use `Authorization: Bearer <node token>`.
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/v1/register` | `{name}` → `{node_id, token}` |
-| PUT | `/v1/announce` | `{name, aliases:[{alias, media, context}]}` |
+| PUT | `/v1/announce` | `{name, aliases:[{alias, media, context}], mcps:[{name}], agents:[{name}]}`. MCP and agent lists are names only |
 | GET | `/v1/pull` | Long-poll ~20 s; `204` idle; `200` + `{job_id, alias, kind, ref, body}` |
 | POST | `/v1/result` | `{job_id, status, body}` or `{b64, content_type}` |
 | GET | `/v1/catalog` | Public. Online = seen in 45 s, not banned |
 | POST | `/v1/relay/{node}/chat` | Chat JSON (`model` in body), wait ≤ 120 s |
+| POST | `/v1/relay/{node}/mcp/{name}` | MCP call. `{name}` must be in the node's announced `mcps` (name only) |
+| POST | `/v1/relay/{node}/a2a/{name}` | A2A envelope, 1 MiB. `{name}` must be in the announced `agents` |
 | POST | `/v1/relay/{node}/images` | Images JSON |
 | POST | `/v1/relay/{node}/images/{id}` | Image job status (`queue_ahead` while queued) |
 | POST | `/v1/relay/{node}/videos` | Videos create |
@@ -244,7 +248,7 @@ All node calls except register use `Authorization: Bearer <node token>`.
 
 The owner injects `X-MikroLLM-Hub-Relay` on the in-process `/v1/chat/completions`, `/v1/images/generations`, or `/v1/videos` call so no `sk-` is required. Only aliases with **in hub** are executed.
 
-`kind` on a job: `chat` (default), `images`, `images_status`, `videos`, `videos_status`, `videos_content`.
+`kind` on a job: `chat` (default), `images`, `images_status`, `videos`, `videos_status`, `videos_content`, `mcp`, `a2a`.
 
 ---
 

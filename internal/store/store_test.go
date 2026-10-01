@@ -307,8 +307,71 @@ func TestHubSettingsAndShare(t *testing.T) {
 	if err != nil || !got.Enabled || got.NodeID != "n1" || got.Token != "hk" || got.Name != "hap" {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if !got.Schedule.Enabled || got.Schedule.Start != "00:00" || len(got.Schedule.Days) != 3 {
+	if !got.Schedule.Enabled || got.Schedule.Start != "00:00" || len(got.Schedule.Days) != 3 || got.ShareMCP {
 		t.Fatalf("schedule %+v", got.Schedule)
+	}
+	got.ShareMCP = true
+	if err := st.SetHubSettings(got); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.HubSettings()
+	if err != nil || !got.ShareMCP {
+		t.Fatalf("share mcp %+v %v", got, err)
+	}
+	idMCP, err := st.SaveMCP(domain.MCPUpstream{Name: "Files", URL: "http://127.0.0.1:9/mcp", Token: "sek", Enabled: true, HubShare: true})
+	if err != nil || idMCP == 0 {
+		t.Fatal(err)
+	}
+	again, err := st.SaveMCP(domain.MCPUpstream{ID: idMCP, Name: "files", URL: "https://mcp.example/mcp", Enabled: true, HubShare: false})
+	if err != nil || again != idMCP {
+		t.Fatal(err)
+	}
+	row, err := st.GetMCPByName("files")
+	if err != nil || row.Token != "sek" || row.URL != "https://mcp.example/mcp" || row.HubShare {
+		t.Fatalf("%+v %v", row, err)
+	}
+	if _, err := st.SaveMCP(domain.MCPUpstream{Name: "bad name", URL: "http://127.0.0.1/mcp", Enabled: true}); err == nil {
+		t.Fatal("bad name accepted")
+	}
+	if _, err := st.SaveMCP(domain.MCPUpstream{Name: "x", URL: "ftp://127.0.0.1/mcp", Enabled: true}); err == nil {
+		t.Fatal("bad url accepted")
+	}
+	off := got
+	off.Enabled = false
+	off.ShareA2A = true
+	if err := st.SetHubSettings(off); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.HubSettings()
+	if err != nil || got.Enabled || got.ShareA2A {
+		t.Fatalf("share a2a forced off %+v %v", got, err)
+	}
+	got.Enabled = true
+	got.ShareA2A = true
+	if err := st.SetHubSettings(got); err != nil {
+		t.Fatal(err)
+	}
+	idA2A, err := st.SaveA2A(domain.A2AUpstream{Name: "Planner", URL: "http://127.0.0.1:9/a2a", Token: "agent-secret", Enabled: true, HubShare: true})
+	if err != nil || idA2A == 0 {
+		t.Fatal(err)
+	}
+	againA, err := st.SaveA2A(domain.A2AUpstream{ID: idA2A, Name: "planner", URL: "https://agent.example/a2a", Enabled: true, HubShare: false})
+	if err != nil || againA != idA2A {
+		t.Fatal(err)
+	}
+	agent, err := st.GetA2AByName("planner")
+	if err != nil || agent.Token != "agent-secret" || agent.URL != "https://agent.example/a2a" || agent.HubShare {
+		t.Fatalf("%+v %v", agent, err)
+	}
+	shared, err := st.ListSharedA2A()
+	if err != nil || len(shared) != 0 {
+		t.Fatalf("shared %+v %v", shared, err)
+	}
+	if _, err := st.SaveA2A(domain.A2AUpstream{Name: "bad name", URL: "http://127.0.0.1/a2a", Enabled: true}); err == nil {
+		t.Fatal("bad agent name accepted")
+	}
+	if _, err := st.SaveA2A(domain.A2AUpstream{Name: "x", URL: "ftp://127.0.0.1/a2a", Enabled: true}); err == nil {
+		t.Fatal("bad agent url accepted")
 	}
 	bid, err := st.UpsertBackend("mac", "http://127.0.0.1:11434", true, 1, "ollama", "")
 	if err != nil {

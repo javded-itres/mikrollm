@@ -1,0 +1,79 @@
+{{define "content"}}
+<div class="pagehead">
+  <div>
+    <h1>Агенты</h1>
+    <p class="muted">A2A-агент подключается к шлюзу тем же Bearer <code>mcp-…</code>. Шлюз ходит на URL из карточки агента (JSON-RPC) и подставляет сохранённый токен. Адрес и токен в сеть не уходят.</p>
+  </div>
+</div>
+
+<div class="card add-box">
+  <h2>Новый агент</h2>
+  <form method="post" action="/admin/agents" class="grid2" style="margin-top:.6rem">
+    <div>
+      <label>Имя</label>
+      <input name="name" required maxlength="40" placeholder="planner" autocomplete="off">
+    </div>
+    <div>
+      <label>URL JSON-RPC</label>
+      <input name="url" required placeholder="http://127.0.0.1:8000/a2a" autocomplete="off">
+    </div>
+    <div>
+      <label>Токен агента</label>
+      <input name="token" type="password" placeholder="если агент требует Bearer" autocomplete="off">
+    </div>
+    <div class="checks" style="align-self:end">
+      <label class="inline"><input type="checkbox" name="enabled" value="1" checked> Включён</label>
+      <label class="inline"><input type="checkbox" name="hub_share" value="1" {{if not .CanShare}}disabled{{end}}> В сеть</label>
+    </div>
+    <div class="span2"><button type="submit">Добавить</button></div>
+  </form>
+  {{if not .CanShare}}
+  <p class="muted small">Галочка «В сеть» включается на Статусе: участник hub и «Доступ к агентам».</p>
+  {{end}}
+</div>
+
+{{if not .Rows}}
+<div class="card empty"><p>Агентов пока нет.</p></div>
+{{end}}
+
+{{range .Rows}}
+<article class="card">
+  <form method="post" action="/admin/agents" class="grid2">
+    <input type="hidden" name="id" value="{{.ID}}">
+    <div>
+      <label>Имя</label>
+      <input name="name" value="{{.Name}}" required maxlength="40" autocomplete="off">
+    </div>
+    <div>
+      <label>URL JSON-RPC</label>
+      <input name="url" value="{{.URL}}" required autocomplete="off">
+    </div>
+    <div>
+      <label>Токен агента</label>
+      <input name="token" type="password" placeholder="{{if .TokenSet}}сохранён, пустое поле не меняет{{else}}если агент требует Bearer{{end}}" autocomplete="off">
+    </div>
+    <div class="checks" style="align-self:end">
+      <label class="inline"><input type="checkbox" name="enabled" value="1" {{if .Enabled}}checked{{end}}> Включён</label>
+      <label class="inline"><input type="checkbox" name="hub_share" value="1" {{if .HubShare}}checked{{end}} {{if not $.CanShare}}disabled{{end}}> В сеть</label>
+    </div>
+    <div class="span2 row"><button type="submit">Сохранить</button></div>
+  </form>
+  <p class="muted small">Карточка: <code>/a2a/u/{{.Name}}/.well-known/agent-card.json</code><br>Вызов: <code>/a2a/u/{{.Name}}</code></p>
+  <form method="post" action="/admin/agents/{{.ID}}/delete"><button class="ghost" type="submit">Удалить</button></form>
+</article>
+{{end}}
+
+<section class="card">
+  <h2>Агенты с других узлов</h2>
+  {{if not .HubOn}}
+  <p class="muted">Включите «Участник hub сети», чтобы видеть агентов, которых соседи открыли в сеть.</p>
+  {{else if not .Remote}}
+  <p class="muted">Пока никто не открыл агентов в сеть.</p>
+  {{else}}
+  {{range .Remote}}
+  <p><strong>{{.NodeName}}</strong> · <code>{{.Name}}</code> · <code>/a2a/u/{{.Node}}/{{.Name}}</code>{{if not .Online}} <span class="pill off">не в сети</span>{{end}}</p>
+  {{end}}
+  {{end}}
+  <p class="muted small">Тот же токен агента шлюза. Карточка соседа переписывает <code>url</code> на этот шлюз, запрос уходит владельцу через hub.</p>
+</section>
+{{end}}

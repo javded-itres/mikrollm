@@ -15,7 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/javded-itres/mikrollm/internal/a2aproxy"
 	"github.com/javded-itres/mikrollm/internal/domain"
+	"github.com/javded-itres/mikrollm/internal/mcpproxy"
 	"github.com/javded-itres/mikrollm/internal/ports"
 )
 
@@ -30,6 +32,10 @@ type Store interface {
 	UpsertHubAuto(nodeID, nodeName, upstream string, maxContext int, media []string) error
 	DeleteHubAuto() error
 	DeleteHubPeers() error
+	ListSharedMCP() ([]domain.MCPUpstream, error)
+	MCPUpstream(name string) (domain.MCPUpstream, error)
+	ListSharedA2A() ([]domain.A2AUpstream, error)
+	A2AUpstream(name string) (domain.A2AUpstream, error)
 }
 
 type Client struct {
@@ -304,6 +310,18 @@ func (c *Client) Peers() (selfID string, peers []domain.HubPeer) {
 			}
 			p.Aliases = append(p.Aliases, domain.HubPeerAlias{Alias: a.Alias, Media: a.Media, Context: a.Context})
 		}
+		for _, m := range n.MCPs {
+			if m.Name == "" {
+				continue
+			}
+			p.MCPs = append(p.MCPs, domain.HubPeerMCP{Name: m.Name})
+		}
+		for _, m := range n.Agents {
+			if m.Name == "" {
+				continue
+			}
+			p.Agents = append(p.Agents, domain.HubPeerMCP{Name: m.Name})
+		}
 		peers = append(peers, p)
 	}
 	return selfID, peers
@@ -371,7 +389,31 @@ func (c *Client) announce(cfg Settings) error {
 		name = "mikrollm"
 	}
 	caps := cfg.Caps.Norm()
-	ann := AnnounceReq{Name: name, Aliases: aliases, Caps: &Caps{Chat: caps.Chat, Images: caps.Images, Videos: caps.Videos}}
+	ann := AnnounceReq{Name: name, Aliases: aliases, Caps: &Caps{Chat: caps.Chat, Images: caps.Images, Videos: caps.Videos}, MCPs: []MCPName{}, Agents: []MCPName{}}
+	if cfg.Enabled && cfg.ShareMCP {
+		ups, err := c.Store.ListSharedMCP()
+		if err != nil {
+			return err
+		}
+		for _, u := range ups {
+			if !u.Enabled || !u.HubShare || u.Name == "" {
+				continue
+			}
+			ann.MCPs = append(ann.MCPs, MCPName{Name: u.Name})
+		}
+	}
+	if cfg.Enabled && cfg.ShareA2A {
+		ups, err := c.Store.ListSharedA2A()
+		if err != nil {
+			return err
+		}
+		for _, u := range ups {
+			if !u.Enabled || !u.HubShare || u.Name == "" {
+				continue
+			}
+			ann.Agents = append(ann.Agents, MCPName{Name: u.Name})
+		}
+	}
 	if cfg.Schedule.Enabled {
 		ann.Schedule = &ShareSchedule{
 			Enabled: true, Days: cfg.Schedule.Days,
@@ -434,6 +476,14 @@ func (c *Client) pullOnce(ctx context.Context, cfg Settings) error {
 }
 
 func (c *Client) runJob(cfg Settings, job Job) {
+	switch job.Kind {
+	case "mcp":
+		c.runMCP(cfg, job)
+		return
+	case "a2a":
+		c.runA2A(cfg, job)
+		return
+	}
 	if c.Handler == nil {
 		c.postResult(cfg, Result{JobID: job.ID, Status: 503, Body: []byte(`{"error":"no handler"}`)})
 		return
@@ -491,6 +541,101 @@ func (c *Client) runJob(cfg Settings, job Job) {
 		raw = CollapseChat(raw)
 	}
 	c.postResult(cfg, Result{JobID: job.ID, Status: rec.code, Body: raw})
+}
+
+func (c *Client) runMCP(cfg Settings, job Job) {
+	if !cfg.Enabled || !cfg.ShareMCP {
+		c.postResult(cfg, Result{JobID: job.ID, Status: 404, Body: []byte(`{"error":"mcp not shared"}`)})
+		return
+	}
+	if !cfg.Schedule.SharingAt(time.Now()) {
+		c.postResult(cfg, Result{JobID: job.ID, Status: 503, Body: []byte(`{"error":"sharing window closed"}`)})
+		return
+	}
+	up, err := c.Store.MCPUpstream(job.Alias)
+	if err != nil || !up.Enabled || !up.HubShare {
+		c.postResult(cfg, Result{JobID: job.ID, Status: 404, Body: []byte(`{"error":"mcp not shared"}`)})
+		return
+	}
+	var env MCPRelay
+	_ = json.Unmarshal(job.Body, &env)
+	c.acquire("mcp")
+	defer c.release("mcp")
+	payload := env.Payload()
+	ct := env.ContentType
+	if ct == "" && len(payload) > 0 && (env.Method == "" || strings.EqualFold(env.Method, http.MethodPost)) {
+		ct = "application/json"
+	}
+	rep, err := mcpproxy.Do(context.Background(), up, mcpproxy.Forward{
+		Method: env.Method, Session: env.Session, Accept: env.Accept,
+		Protocol: env.Protocol, ContentType: ct, Body: payload,
+	})
+	if err != nil {
+		c.postResult(cfg, Result{JobID: job.ID, Status: 502, Body: []byte(`{"error":"upstream mcp"}`)})
+		return
+	}
+	res := Result{JobID: job.ID, Status: rep.Status, ContentType: rep.ContentType, Session: rep.Session, Protocol: rep.Protocol}
+	if json.Valid(bytes.TrimSpace(rep.Body)) {
+		res.Body = rep.Body
+	} else if len(rep.Body) > 0 {
+		res.B64 = base64.StdEncoding.EncodeToString(rep.Body)
+	}
+	c.postResult(cfg, res)
+}
+
+func (c *Client) runA2A(cfg Settings, job Job) {
+	if !cfg.Enabled || !cfg.ShareA2A {
+		c.postResult(cfg, Result{JobID: job.ID, Status: 404, Body: []byte(`{"error":"agent not shared"}`)})
+		return
+	}
+	if !cfg.Schedule.SharingAt(time.Now()) {
+		c.postResult(cfg, Result{JobID: job.ID, Status: 503, Body: []byte(`{"error":"sharing window closed"}`)})
+		return
+	}
+	up, err := c.Store.A2AUpstream(job.Alias)
+	if err != nil || !up.Enabled || !up.HubShare {
+		c.postResult(cfg, Result{JobID: job.ID, Status: 404, Body: []byte(`{"error":"agent not shared"}`)})
+		return
+	}
+	var env MCPRelay
+	_ = json.Unmarshal(job.Body, &env)
+	target := up.URL
+	if a2aproxy.IsCard(env.Path) {
+		rep, err := a2aproxy.FetchCard(context.Background(), up)
+		if err != nil {
+			c.postResult(cfg, Result{JobID: job.ID, Status: 502, Body: []byte(`{"error":"upstream agent"}`)})
+			return
+		}
+		c.postResult(cfg, Result{JobID: job.ID, Status: rep.Status, ContentType: "application/json", Body: rep.Body})
+		return
+	}
+	joined, ok := a2aproxy.Join(up.URL, env.Path)
+	if !ok {
+		c.postResult(cfg, Result{JobID: job.ID, Status: 404, Body: []byte(`{"error":"agent not shared"}`)})
+		return
+	}
+	target = joined
+	c.acquire("a2a")
+	defer c.release("a2a")
+	payload := env.Payload()
+	ct := env.ContentType
+	if ct == "" && len(payload) > 0 && (env.Method == "" || strings.EqualFold(env.Method, http.MethodPost)) {
+		ct = "application/json"
+	}
+	rep, err := mcpproxy.Do(context.Background(), domain.MCPUpstream{URL: target, Token: up.Token}, mcpproxy.Forward{
+		Method: env.Method, Accept: env.Accept, ContentType: ct, Body: payload,
+	})
+	if err != nil {
+		c.postResult(cfg, Result{JobID: job.ID, Status: 502, Body: []byte(`{"error":"upstream agent"}`)})
+		return
+	}
+	res := Result{JobID: job.ID, Status: rep.Status, ContentType: rep.ContentType}
+	if json.Valid(bytes.TrimSpace(rep.Body)) {
+		res.Body = rep.Body
+	} else if len(rep.Body) > 0 {
+		res.B64 = base64.StdEncoding.EncodeToString(rep.Body)
+	}
+	c.postResult(cfg, res)
 }
 
 func localRelay(job Job) (method, path string, body []byte) {

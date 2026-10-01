@@ -19,6 +19,8 @@ type memStore struct {
 	mu     sync.Mutex
 	cfg    Settings
 	models []domain.Model
+	mcps   []domain.MCPUpstream
+	agents []domain.A2AUpstream
 }
 
 func (m *memStore) HubSettings() (Settings, error) {
@@ -76,6 +78,52 @@ func (m *memStore) DeleteHubPeers() error {
 	}
 	m.models = out
 	return nil
+}
+
+func (m *memStore) ListSharedMCP() ([]domain.MCPUpstream, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []domain.MCPUpstream
+	for _, u := range m.mcps {
+		if u.Enabled && u.HubShare {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
+func (m *memStore) ListSharedA2A() ([]domain.A2AUpstream, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []domain.A2AUpstream
+	for _, u := range m.agents {
+		if u.Enabled && u.HubShare {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
+func (m *memStore) A2AUpstream(name string) (domain.A2AUpstream, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, u := range m.agents {
+		if u.Name == name {
+			return u, nil
+		}
+	}
+	return domain.A2AUpstream{}, fmt.Errorf("missing")
+}
+
+func (m *memStore) MCPUpstream(name string) (domain.MCPUpstream, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, u := range m.mcps {
+		if u.Name == name {
+			return u, nil
+		}
+	}
+	return domain.MCPUpstream{}, fmt.Errorf("missing")
 }
 
 func (m *memStore) DeleteHubAuto() error {
@@ -183,6 +231,8 @@ func TestClientSyncsAuto(t *testing.T) {
 				Nodes: []NodePublic{{
 					ID: "npeer", Name: "ams-1", Online: true,
 					Aliases: []Alias{{Alias: "coder", Media: []string{"chat"}, Context: 8192}},
+					MCPs:    []MCPName{{Name: "files"}},
+					Agents:  []MCPName{{Name: "planner"}},
 				}},
 			})
 			return
@@ -200,7 +250,8 @@ func TestClientSyncsAuto(t *testing.T) {
 	}
 	st.models = append(st.models, domain.Model{Alias: "local-qwen", UpstreamName: "qwen", Enabled: true})
 	st.models = append(st.models, domain.Model{Alias: "openrouter/free", UpstreamName: "openrouter/free", Enabled: true, HubNodeID: "npeer", HubNodeName: "ams-1"})
-	if _, peers := c.Peers(); len(peers) != 1 || peers[0].Name != "ams-1" {
+	_, peers := c.Peers()
+	if len(peers) != 1 || peers[0].Name != "ams-1" || len(peers[0].MCPs) != 1 || peers[0].MCPs[0].Name != "files" || len(peers[0].Agents) != 1 || peers[0].Agents[0].Name != "planner" {
 		t.Fatalf("peers %+v", peers)
 	}
 	st.cfg.Enabled = false
@@ -312,6 +363,142 @@ func TestRunJobPreservesToolCalls(t *testing.T) {
 	}
 	if json.Unmarshal(collapsed, &parsed) != nil || len(parsed.Choices[0].Message.ToolCalls) != 1 {
 		t.Fatalf("collapsed body not parseable: %s", collapsed)
+	}
+}
+
+func TestAnnounceMCPNamesOnly(t *testing.T) {
+	var got AnnounceReq
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/announce" {
+			_ = json.NewDecoder(r.Body).Decode(&got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(hs.Close)
+	st := &memStore{
+		cfg: Settings{Enabled: true, ShareMCP: true, Token: "hk"},
+		mcps: []domain.MCPUpstream{
+			{Name: "files", URL: "http://127.0.0.1:9/mcp", Token: "secret-token", Enabled: true, HubShare: true},
+			{Name: "local", URL: "http://127.0.0.1:9/other", Token: "other", Enabled: true, HubShare: false},
+		},
+	}
+	c := New(st, nil, ":4000")
+	c.HubURL = hs.URL
+	if err := c.announce(st.cfg); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(got)
+	if len(got.MCPs) != 1 || got.MCPs[0].Name != "files" || bytes.Contains(raw, []byte("secret-token")) || bytes.Contains(raw, []byte("127.0.0.1")) {
+		t.Fatalf("announce leaked or missed mcp: %s", raw)
+	}
+	st.cfg.ShareMCP = false
+	got = AnnounceReq{}
+	if err := c.announce(st.cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.MCPs) != 0 {
+		t.Fatalf("share off still published %+v", got.MCPs)
+	}
+}
+
+func TestAnnounceAgentNamesOnly(t *testing.T) {
+	var got AnnounceReq
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/announce" {
+			_ = json.NewDecoder(r.Body).Decode(&got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(hs.Close)
+	st := &memStore{
+		cfg: Settings{Enabled: true, ShareA2A: true, Token: "hk"},
+		agents: []domain.A2AUpstream{
+			{Name: "planner", URL: "http://10.1.1.9:9/a2a", Token: "agent-secret", Enabled: true, HubShare: true},
+		},
+	}
+	c := New(st, nil, ":4000")
+	c.HubURL = hs.URL
+	if err := c.announce(st.cfg); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(got)
+	if len(got.Agents) != 1 || got.Agents[0].Name != "planner" || bytes.Contains(raw, []byte("agent-secret")) || bytes.Contains(raw, []byte("10.1.1.9")) {
+		t.Fatalf("%s", raw)
+	}
+}
+
+func TestRunJobProxiesSharedAgent(t *testing.T) {
+	var authz string
+	var body []byte
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authz = r.Header.Get("Authorization")
+		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"id":"task"}}`))
+	}))
+	t.Cleanup(up.Close)
+	var got Result
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/result" {
+			_ = json.NewDecoder(r.Body).Decode(&got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(hs.Close)
+	st := &memStore{agents: []domain.A2AUpstream{{
+		Name: "planner", URL: up.URL, Token: "agent-secret", Enabled: true, HubShare: true,
+	}}}
+	c := New(st, nil, ":4000")
+	c.HubURL = hs.URL
+	env, _ := json.Marshal(MCPRelay{Method: http.MethodPost, Body: json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"message/send"}`)})
+	c.runJob(Settings{Enabled: true, ShareA2A: true}, Job{ID: "ja", Alias: "planner", Kind: "a2a", Body: env})
+	if authz != "Bearer agent-secret" || !bytes.Contains(body, []byte(`message/send`)) {
+		t.Fatalf("auth=%q body=%s", authz, body)
+	}
+	if got.Status != 200 || !bytes.Contains(got.Body, []byte(`"task"`)) {
+		t.Fatalf("%+v %s", got, got.Body)
+	}
+}
+
+func TestRunJobProxiesSharedMCP(t *testing.T) {
+	var authz, method string
+	var body []byte
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authz = r.Header.Get("Authorization")
+		method = r.Method
+		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", "sess-1")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	t.Cleanup(up.Close)
+	var got Result
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/result" {
+			_ = json.NewDecoder(r.Body).Decode(&got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(hs.Close)
+	st := &memStore{mcps: []domain.MCPUpstream{{
+		Name: "files", URL: up.URL, Token: "secret-token", Enabled: true, HubShare: true,
+	}}}
+	c := New(st, nil, ":4000")
+	c.HubURL = hs.URL
+	c.Handler = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("mcp job must not enter the local chat handler")
+	})
+	env, _ := json.Marshal(MCPRelay{Method: http.MethodPost, Body: json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"ping"}`)})
+	c.runJob(Settings{Enabled: true, ShareMCP: true}, Job{ID: "jm", Alias: "files", Kind: "mcp", Body: env})
+	if authz != "Bearer secret-token" || method != http.MethodPost || !bytes.Contains(body, []byte(`"ping"`)) {
+		t.Fatalf("upstream auth=%q method=%s body=%s", authz, method, body)
+	}
+	if got.Status != 200 || got.Session != "sess-1" || !bytes.Contains(got.Body, []byte(`"result"`)) {
+		t.Fatalf("result %+v %s", got, got.Body)
+	}
+	c.runJob(Settings{Enabled: true, ShareMCP: false}, Job{ID: "jx", Alias: "files", Kind: "mcp", Body: env})
+	if got.Status != 404 {
+		t.Fatalf("share off status %d", got.Status)
 	}
 }
 

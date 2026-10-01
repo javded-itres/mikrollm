@@ -7,6 +7,8 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 ## Unreleased
 
 - Compose guide for the Docker Hub image and vLLM Qwen3.6: [docs/install-compose.md](docs/install-compose.md).
+- Admin **MCP** proxies upstream MCP servers at `/mcp/u/{name}`. **MCP access** on the hub card plus **In network** on that tab publishes the name only. Neighbors call `/mcp/u/{node}/{name}`. [docs/mcp.md](docs/mcp.md)
+- Admin **Agents** proxies A2A JSON-RPC at `/a2a/u/{name}` and rewrites the agent card `url` to this gateway. **Agent access** is a separate checkbox. The hub stores the name only and its UI shows MCP and agents. [docs/a2a.md](docs/a2a.md)
 
 ## 0.0.13 — 2026-09-30
 

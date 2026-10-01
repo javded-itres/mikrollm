@@ -92,6 +92,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Allow is the bearer check for /mcp and for proxied upstream MCP routes.
+func (s *Server) Allow(w http.ResponseWriter, r *http.Request) bool {
+	return s.authorize(w, r)
+}
+
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) bool {
 	ip := auth.ClientIP(r)
 	if s.keys != nil && s.keys.LoginBlocked(ip) {

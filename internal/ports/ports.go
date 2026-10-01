@@ -121,6 +121,16 @@ type Store interface {
 	SetPromptCacheMode(string) error
 	HubSettings() (domain.HubSettings, error)
 	SetHubSettings(domain.HubSettings) error
+	ListMCP() ([]domain.MCPUpstream, error)
+	GetMCP(id int64) (domain.MCPUpstream, error)
+	GetMCPByName(name string) (domain.MCPUpstream, error)
+	SaveMCP(domain.MCPUpstream) (int64, error)
+	DeleteMCP(id int64) error
+	ListA2A() ([]domain.A2AUpstream, error)
+	GetA2A(id int64) (domain.A2AUpstream, error)
+	GetA2AByName(name string) (domain.A2AUpstream, error)
+	SaveA2A(domain.A2AUpstream) (int64, error)
+	DeleteA2A(id int64) error
 	Billing(period string, now time.Time) (domain.BillingView, error)
 	SeedIfEmpty(backends []domain.Backend) error
 	Close() error
