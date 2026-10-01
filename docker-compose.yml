@@ -1,10 +1,18 @@
-# MikroLLM + vLLM с Qwen3.6 (FP8 MoE, одна NVIDIA GPU).
+# MikroLLM + vLLM с Qwen3.6 на одной Tesla V100S-PCIE-32GB (Volta, sm_70).
 #
 # Хост: Linux + драйвер NVIDIA + nvidia-container-toolkit. Образ vLLM — linux/amd64.
 # GPU у vLLM задан явно: driver nvidia, capabilities [gpu],
 # NVIDIA_VISIBLE_DEVICES=all, NVIDIA_DRIVER_CAPABILITIES=compute,utility.
-# Qwen3.6 требует vLLM >= 0.17 (тег latest). На Blackwell (SM100/SM120) замените
-# образ на vllm/vllm-openai:cu130-nightly.
+#
+# V100 — compute capability 7.0. У неё нет BF16 и FP8.
+# Официальный vllm/vllm-openai:latest собран без sm_70 и на этой карте не стартует.
+# Образ по умолчанию — v0.18.0: в его Dockerfile arch list ещё включает 7.0.
+# Чекпоинт — GPTQ Int4 (~16–20 ГБ). FP8-веса и --kv-cache-dtype fp8 на V100
+# не считаются. Считаем в float16, без prefix cache и chunked prefill
+# (на Volta vLLM их не включает) и с --enforce-eager: CUDA graph у Gated
+# DeltaNet на sm_70 часто падает на старте.
+# Контекст 16384. Родные 262144 на 32 ГБ не влезают.
+# Картинки выключены (--language-model-only): vision tower не оставляет KV.
 #
 # Шлюз берётся с Docker Hub (linux/amd64 и linux/arm64). Тег = релиз, сейчас v0.0.13.
 #   cp .env.example .env          # задайте ADMIN_PASSWORD
@@ -13,23 +21,12 @@
 # Админка: http://127.0.0.1:4000/admin
 # Статус → добавить сервер: тип vLLM, URL http://vllm:8000.
 # Модели → «в шлюз». Имя в каталоге vLLM: qwen3.6
-#   (чекпоинт Qwen/Qwen3.6-35B-A3B-FP8, --served-model-name).
+#   (чекпоинт btbtyler09/Qwen3.6-27B-GPTQ-4bit, --served-model-name).
 #
-# Веса ~18 ГБ, первый старт качает их в том hf-cache. Родной контекст модели —
-# 262144 токена и просит ~80 ГБ. Ниже по умолчанию 32768, чтобы чекпоинт
-# поднялся на одной карте 24–48 ГБ. Полное окно: VLLM_MAX_MODEL_LEN=262144
-# и карта с запасом под KV.
+# Первый старт качает веса в том hf-cache.
+# У официального Qwen нет GPTQ Int4 для 3.6; этот чекпоинт — GPTQ той же
+# Qwen/Qwen3.6-27B, архитектура qwen3_5, его грузит vLLM 0.18.
 #
-# Другие чекпоинты (поменяйте VLLM_MODEL, имя qwen3.6 не трогайте):
-#   Qwen/Qwen3.6-35B-A3B          BF16, 2×H100 / 1×H200
-#   Qwen/Qwen3.6-27B-FP8          плотная 27B, от ~40 ГБ
-#   Qwen/Qwen3.6-27B-GPTQ-Int4    плотная 27B, одна карта 24 ГБ
-#
-# Если в логе vLLM cuda graph больше mamba-кэша — добавьте в command
-# --max-cudagraph-capture-size 64.
-# Только текст (больше места под KV, без картинок): --language-model-only
-# вместо --mm-encoder-tp-mode / --mm-processor-cache-type.
-# Низкая задержка, один клиент: --speculative-config {"method":"mtp","num_speculative_tokens":2}
 # Выключить thinking на стороне сервера:
 #   --default-chat-template-kwargs {"enable_thinking": false}
 
@@ -53,7 +50,7 @@ services:
       - vllm
 
   vllm:
-    image: ${VLLM_IMAGE:-vllm/vllm-openai:latest}
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.18.0}
     restart: unless-stopped
     ipc: host
     gpus:
@@ -67,10 +64,12 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      # V100 часто живёт со старым драйвером; образ собран на CUDA 12.9.
+      VLLM_ENABLE_CUDA_COMPATIBILITY: "1"
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
     command:
-      - ${VLLM_MODEL:-Qwen/Qwen3.6-35B-A3B-FP8}
+      - ${VLLM_MODEL:-btbtyler09/Qwen3.6-27B-GPTQ-4bit}
       - --served-model-name
       - qwen3.6
       - --host
@@ -78,27 +77,25 @@ services:
       - --port
       - "8000"
       - --trust-remote-code
+      - --dtype
+      - float16
+      - --quantization
+      - gptq
       - --tensor-parallel-size
       - ${VLLM_TENSOR_PARALLEL_SIZE:-1}
       - --max-model-len
-      - ${VLLM_MAX_MODEL_LEN:-32768}
+      - ${VLLM_MAX_MODEL_LEN:-16384}
       - --gpu-memory-utilization
       - ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
       - --max-num-seqs
-      - ${VLLM_MAX_NUM_SEQS:-8}
-      - --kv-cache-dtype
-      - fp8
+      - ${VLLM_MAX_NUM_SEQS:-4}
+      - --enforce-eager
+      - --language-model-only
       - --reasoning-parser
       - qwen3
       - --enable-auto-tool-choice
       - --tool-call-parser
       - qwen3_coder
-      - --enable-prefix-caching
-      - --enable-chunked-prefill
-      - --mm-encoder-tp-mode
-      - data
-      - --mm-processor-cache-type
-      - shm
     healthcheck:
       test:
         [

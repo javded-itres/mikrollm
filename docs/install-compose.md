@@ -5,16 +5,16 @@
 [`docker-compose.yml`](../docker-compose.yml) starts two containers:
 
 - **mikrollm** — the published image `javded/mikrollm` (linux/amd64 and linux/arm64). Admin and the OpenAI API listen on port **4000**.
-- **vllm** — `vllm/vllm-openai` serving **Qwen3.6** as the client model name `qwen3.6`. The process port **8000** is bound only to `127.0.0.1` on the host. The gateway reaches it as `http://vllm:8000`.
+- **vllm** — `vllm/vllm-openai:v0.18.0` serving **Qwen3.6** as the client model name `qwen3.6`. The process port **8000** is bound only to `127.0.0.1` on the host. The gateway reaches it as `http://vllm:8000`.
 
-The gateway image does not contain the model weights. vLLM downloads them on first start (~18 GB for the default FP8 checkpoint) into the `hf-cache` volume.
+The gateway image does not contain the model weights. vLLM downloads them on first start into the `hf-cache` volume. The default checkpoint is GPTQ Int4 of Qwen3.6-27B, sized for one Tesla V100S 32 GB.
 
 ## Host
 
 - Linux with Docker Engine and the Compose plugin (`docker compose version`).
 - NVIDIA driver and [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). The vLLM service requests `driver: nvidia` with `capabilities: [gpu]`. That does not work without the toolkit.
-- The default vLLM image is **linux/amd64**. One GPU of 24–48 GB is enough for the default context of 32768. The model's native window is 262144 and needs about 80 GB with KV cache.
-- Blackwell (SM100 / SM120): set `VLLM_IMAGE=vllm/vllm-openai:cu130-nightly`. Qwen3.6 needs vLLM 0.17 or newer (`latest` is enough on other GPUs).
+- One **Tesla V100S-PCIE-32GB** (Volta, compute capability 7.0). The default image is `vllm/vllm-openai:v0.18.0` (linux/amd64). Its build still compiles CUDA arch 7.0. `vllm/vllm-openai:latest` does not, and it will not start on this card.
+- V100 has no BF16 or FP8 tensor cores. The default checkpoint is `btbtyler09/Qwen3.6-27B-GPTQ-4bit` (GPTQ Int4 of `Qwen/Qwen3.6-27B`, about 16–20 GB) served as `float16`, context **16384**, text only. FP8 weights and an FP8 KV cache do not run here. The native 262144 window does not fit in 32 GB.
 
 ## Start
 
@@ -81,20 +81,14 @@ Issue `sk-…` under **Keys**. vLLM on the host loopback is not the public API.
 | `ADMIN_PASSWORD` | none, required | Admin password on first create. |
 | `MIKROLLM_IMAGE` | `javded/mikrollm:v0.0.13` | Gateway image. The tag matches a GitHub release. |
 | `HF_TOKEN` | empty | Hugging Face token. The default Qwen weights are public; a token raises the download rate limit. |
-| `VLLM_IMAGE` | `vllm/vllm-openai:latest` | vLLM image. Use `cu130-nightly` on Blackwell. |
-| `VLLM_MODEL` | `Qwen/Qwen3.6-35B-A3B-FP8` | Checkpoint. The name clients send stays `qwen3.6`. |
-| `VLLM_MAX_MODEL_LEN` | `32768` | Context. `262144` is the native window and needs a larger GPU. |
-| `VLLM_GPU_MEMORY_UTILIZATION` | `0.90` | Fraction of GPU memory vLLM may use. |
-| `VLLM_MAX_NUM_SEQS` | `8` | Parallel sequences. |
-| `VLLM_TENSOR_PARALLEL_SIZE` | `1` | GPUs the weights are split across. |
+| `VLLM_IMAGE` | `vllm/vllm-openai:v0.18.0` | vLLM image with CUDA arch 7.0. `latest` has no V100 kernels. |
+| `VLLM_MODEL` | `btbtyler09/Qwen3.6-27B-GPTQ-4bit` | GPTQ Int4 checkpoint. The name clients send stays `qwen3.6`. |
+| `VLLM_MAX_MODEL_LEN` | `16384` | Context that fits in 32 GB next to the Int4 weights. |
+| `VLLM_GPU_MEMORY_UTILIZATION` | `0.90` | Fraction of the 32 GB vLLM may use. |
+| `VLLM_MAX_NUM_SEQS` | `4` | Parallel sequences. |
+| `VLLM_TENSOR_PARALLEL_SIZE` | `1` | One V100S. |
 
-Other checkpoints (change `VLLM_MODEL` only):
-
-| Checkpoint | Hardware |
-|---|---|
-| `Qwen/Qwen3.6-35B-A3B` | BF16, 2×H100 or 1×H200 |
-| `Qwen/Qwen3.6-27B-FP8` | dense 27B, from about 40 GB |
-| `Qwen/Qwen3.6-27B-GPTQ-Int4` | dense 27B, one 24 GB GPU |
+Qwen does not publish a GPTQ Int4 of Qwen3.6. `btbtyler09/Qwen3.6-27B-GPTQ-4bit` is a GPTQ of the same `Qwen/Qwen3.6-27B` weights (`qwen3_5`), which vLLM 0.18 can load. BF16 (`Qwen/Qwen3.6-27B`, about 55 GB) and FP8 (`Qwen/Qwen3.6-27B-FP8`, and the 35B-A3B FP8 checkpoint) do not fit this card and do not have Volta kernels.
 
 After a checkpoint or context change, recreate vLLM:
 
@@ -108,9 +102,11 @@ The old weights stay in `hf-cache` until you delete that volume.
 
 These are arguments in `docker-compose.yml` under `vllm.command`. Edit the file, then recreate the vLLM container.
 
-- CUDA graph larger than the mamba cache: add `--max-cudagraph-capture-size` `64`.
-- Text only (more room for KV, no pictures): replace `--mm-encoder-tp-mode` / `--mm-processor-cache-type` with `--language-model-only`.
-- Lower latency, one client: `--speculative-config` `{"method":"mtp","num_speculative_tokens":2}`.
+- `--dtype float16` and `--quantization gptq`: V100 has no BF16 or FP8. GPTQ is the Volta path; Marlin is not.
+- `--enforce-eager`: Gated DeltaNet CUDA graphs fail to capture on sm_70.
+- `--language-model-only`: skips the vision tower so the 32 GB card has room for KV.
+- No `--kv-cache-dtype fp8`, no prefix caching, no chunked prefill. vLLM does not enable those on Volta.
+- `VLLM_ENABLE_CUDA_COMPATIBILITY=1`: the image is CUDA 12.9; this lets an older datacenter driver drive the V100.
 - Thinking off on the server: `--default-chat-template-kwargs` `{"enable_thinking": false}`.
 
 ## Upgrade the gateway

@@ -5,16 +5,16 @@
 [`docker-compose.yml`](../../docker-compose.yml) поднимает два контейнера:
 
 - **mikrollm** — образ `javded/mikrollm` с Docker Hub (linux/amd64 и linux/arm64). Админка и OpenAI API слушают порт **4000**.
-- **vllm** — `vllm/vllm-openai` с моделью **Qwen3.6**. Имя для клиентов — `qwen3.6`. Порт **8000** на хосте открыт только на `127.0.0.1`. Шлюз ходит на `http://vllm:8000`.
+- **vllm** — `vllm/vllm-openai:v0.18.0` с моделью **Qwen3.6**. Имя для клиентов — `qwen3.6`. Порт **8000** на хосте открыт только на `127.0.0.1`. Шлюз ходит на `http://vllm:8000`.
 
-Весов модели в образе шлюза нет. vLLM качает их при первом старте (около 18 ГБ у чекпоинта FP8 по умолчанию) в том `hf-cache`.
+Весов модели в образе шлюза нет. vLLM качает их при первом старте в том `hf-cache`. Чекпоинт по умолчанию — GPTQ Int4 Qwen3.6-27B под одну Tesla V100S 32 ГБ.
 
 ## Хост
 
 - Linux, Docker Engine и плагин Compose (`docker compose version`).
 - Драйвер NVIDIA и [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). Сервис vLLM запрашивает `driver: nvidia` и `capabilities: [gpu]`. Без toolkit это не работает.
-- Образ vLLM по умолчанию — **linux/amd64**. Для контекста 32768 хватает одной карты на 24–48 ГБ. Родное окно модели — 262144, вместе с KV это около 80 ГБ.
-- Blackwell (SM100 / SM120): `VLLM_IMAGE=vllm/vllm-openai:cu130-nightly`. Qwen3.6 нужен vLLM 0.17 или новее (на остальных картах достаточно `latest`).
+- Одна **Tesla V100S-PCIE-32GB** (Volta, compute capability 7.0). Образ по умолчанию — `vllm/vllm-openai:v0.18.0` (linux/amd64): при сборке arch list ещё содержит 7.0. `vllm/vllm-openai:latest` ядер sm_70 не содержит и на этой карте не стартует.
+- У V100 нет тензорных ядер BF16 и FP8. Чекпоинт по умолчанию — `btbtyler09/Qwen3.6-27B-GPTQ-4bit` (GPTQ Int4 от `Qwen/Qwen3.6-27B`, около 16–20 ГБ), счёт в `float16`, контекст **16384**, только текст. FP8-веса и FP8 KV на этой карте не работают. Родные 262144 токена в 32 ГБ не помещаются.
 
 ## Запуск
 
@@ -81,20 +81,14 @@ curl -fsS http://127.0.0.1:4000/v1/chat/completions \
 | `ADMIN_PASSWORD` | нет, обязателен | Пароль админки при первом создании. |
 | `MIKROLLM_IMAGE` | `javded/mikrollm:v0.0.13` | Образ шлюза. Тег совпадает с релизом GitHub. |
 | `HF_TOKEN` | пусто | Токен Hugging Face. Веса Qwen открытые; токен поднимает лимит скачивания. |
-| `VLLM_IMAGE` | `vllm/vllm-openai:latest` | Образ vLLM. На Blackwell — `cu130-nightly`. |
-| `VLLM_MODEL` | `Qwen/Qwen3.6-35B-A3B-FP8` | Чекпоинт. Имя, которое шлют клиенты, остаётся `qwen3.6`. |
-| `VLLM_MAX_MODEL_LEN` | `32768` | Контекст. `262144` — родное окно, нужна карта больше. |
-| `VLLM_GPU_MEMORY_UTILIZATION` | `0.90` | Доля памяти GPU, которую может занять vLLM. |
-| `VLLM_MAX_NUM_SEQS` | `8` | Число параллельных последовательностей. |
-| `VLLM_TENSOR_PARALLEL_SIZE` | `1` | На сколько GPU режутся веса. |
+| `VLLM_IMAGE` | `vllm/vllm-openai:v0.18.0` | Образ vLLM с CUDA arch 7.0. В `latest` ядер V100 нет. |
+| `VLLM_MODEL` | `btbtyler09/Qwen3.6-27B-GPTQ-4bit` | Чекпоинт GPTQ Int4. Имя для клиентов остаётся `qwen3.6`. |
+| `VLLM_MAX_MODEL_LEN` | `16384` | Контекст, который влезает в 32 ГБ рядом с весами Int4. |
+| `VLLM_GPU_MEMORY_UTILIZATION` | `0.90` | Доля 32 ГБ, которую может занять vLLM. |
+| `VLLM_MAX_NUM_SEQS` | `4` | Число параллельных последовательностей. |
+| `VLLM_TENSOR_PARALLEL_SIZE` | `1` | Одна V100S. |
 
-Другие чекпоинты (меняется только `VLLM_MODEL`):
-
-| Чекпоинт | Железо |
-|---|---|
-| `Qwen/Qwen3.6-35B-A3B` | BF16, 2×H100 или 1×H200 |
-| `Qwen/Qwen3.6-27B-FP8` | плотная 27B, от ~40 ГБ |
-| `Qwen/Qwen3.6-27B-GPTQ-Int4` | плотная 27B, одна карта 24 ГБ |
+У Qwen нет официального GPTQ Int4 для Qwen3.6. `btbtyler09/Qwen3.6-27B-GPTQ-4bit` — GPTQ тех же весов `Qwen/Qwen3.6-27B` (архитектура `qwen3_5`), его поднимает vLLM 0.18. BF16 (`Qwen/Qwen3.6-27B`, около 55 ГБ) и FP8 (`Qwen/Qwen3.6-27B-FP8` и FP8 35B-A3B) на эту карту не встают и ядер под Volta не имеют.
 
 После смены чекпоинта или контекста пересоздайте vLLM:
 
@@ -108,9 +102,11 @@ docker compose up -d --force-recreate vllm
 
 Это аргументы `vllm.command` в `docker-compose.yml`. Правьте файл и пересоздайте контейнер vLLM.
 
-- CUDA graph больше mamba-кэша: добавьте `--max-cudagraph-capture-size` `64`.
-- Только текст (больше места под KV, без картинок): вместо `--mm-encoder-tp-mode` / `--mm-processor-cache-type` поставьте `--language-model-only`.
-- Ниже задержка, один клиент: `--speculative-config` `{"method":"mtp","num_speculative_tokens":2}`.
+- `--dtype float16` и `--quantization gptq`: у V100 нет BF16 и FP8. На Volta работает GPTQ, Marlin — нет.
+- `--enforce-eager`: CUDA graph у Gated DeltaNet на sm_70 не снимается и роняет старт.
+- `--language-model-only`: без vision tower, чтобы на 32 ГБ осталось место под KV.
+- Нет `--kv-cache-dtype fp8`, prefix cache и chunked prefill: на Volta vLLM их не включает.
+- `VLLM_ENABLE_CUDA_COMPATIBILITY=1`: образ на CUDA 12.9, так старый датацентровый драйвер всё ещё видит V100.
 - Выключить thinking на сервере: `--default-chat-template-kwargs` `{"enable_thinking": false}`.
 
 ## Обновить шлюз
