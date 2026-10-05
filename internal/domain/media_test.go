@@ -18,6 +18,15 @@ func TestInferMedia(t *testing.T) {
 }
 
 func TestExclusiveMedia(t *testing.T) {
+	if !HasMedia(InferMedia("s1gnature/laya:latest", nil), MediaEmbed) {
+		t.Fatal("laya")
+	}
+	if ExclusiveMedia(InferMedia("s1gnature/laya", nil)) != MediaEmbed {
+		t.Fatal("laya exclusive")
+	}
+	if HasMedia(InferMedia("s1gnature/laya", nil), MediaImage) || HasMedia(InferMedia("nomic-embed-text", nil), MediaChat) {
+		t.Fatal("embed mixed with chat or image")
+	}
 	if ExclusiveMedia(InferMedia("minimax-hailuo-02", nil)) != MediaVideo {
 		t.Fatal("hailuo")
 	}
@@ -26,5 +35,16 @@ func TestExclusiveMedia(t *testing.T) {
 	}
 	if ExclusiveMedia(nil) != "" {
 		t.Fatal("chat")
+	}
+	for _, name := range []string{"jev-latest", "jev-1.13.0", "typesafe-jev-1.13.0", "typesafe/jev-1.13", "nimble", "tev1:0.8b"} {
+		if ExclusiveMedia(InferMedia(name, nil)) != MediaDecision {
+			t.Fatal(name)
+		}
+	}
+	if IsDecisionModel("jeffrey") || IsDecisionModel("jevembed-qwen3") {
+		t.Fatal("not a decision model")
+	}
+	if ExclusiveMedia(InferMedia("jevembed-qwen3", nil)) != MediaEmbed {
+		t.Fatal("jevembed stays embed")
 	}
 }

@@ -16,6 +16,9 @@ type GenerationParam struct {
 // FallbackGenerationParams is used when the upstream model card has no parameters.
 // Source is "fallback": the gateway forwards the fields, and the provider may ignore them.
 func FallbackGenerationParams(alias, upstream string, media []string) []GenerationParam {
+	if HasMedia(media, MediaEmbed) || HasMedia(media, MediaDecision) {
+		return nil
+	}
 	id := strings.ToLower(alias + " " + upstream)
 	kind := ""
 	if HasMedia(media, MediaVideo) || strings.Contains(id, "video") || strings.Contains(id, "hailuo") || strings.Contains(id, "seedance") || strings.Contains(id, "sora") {

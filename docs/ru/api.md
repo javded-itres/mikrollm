@@ -87,6 +87,44 @@ curl http://192.168.88.1:4000/api/chat \
 
 Проксируется в `POST <ollama>/api/chat` для локального Ollama и Ollama Cloud. Иначе путь меняется на OpenAI-чат провайдера (`/v1/chat/completions` или `/chat/completions` у OpenRouter).
 
+Модели эмбеддингов (`s1gnature/laya`, `laya`, имена с `embed`) здесь отвечают `400`. Для них нужен [Embeddings](#embeddings).
+
+## Embeddings
+
+```bash
+curl http://192.168.88.1:4000/v1/embeddings \
+  -H "Authorization: Bearer sk-…" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"laya","input":"Почему небо голубое?"}'
+```
+
+Ответ в форме OpenAI: `data[].embedding`. `input` — строка или массив строк. Локальный Ollama вызывается как `POST /api/embed`. `POST /api/embed` на шлюзе отдаёт JSON Ollama без перевода. Чат для этих моделей не используется. Через hub эмбеддинги не ходят.
+
+## Jev (`/v1/systemone`)
+
+Решения, не текст. Имена `jev`, `jev-latest`, `jev-1.13.0`, `typesafe-jev-1.13.0`, `nimble`, `tev1` (включая `tev1:0.8b`) в чат не попадают и отвечают `400`.
+
+```bash
+curl http://192.168.88.1:4000/v1/systemone \
+  -H "Authorization: Bearer sk-…" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "jev-latest",
+    "state": "Списание прошло дважды. Верните лишнее.",
+    "questions": {
+      "team": {
+        "type": "choice",
+        "instructions": "Какая команда должна взять тикет?",
+        "criteria": {"billing": "оплаты и возвраты", "technical": "ошибки", "other": "другое"}
+      }
+    }
+  }'
+```
+
+Тело как у TypeSafe и Ollama 0.35: `state` (строка, объект или массив) и непустой объект `questions`. Типы вопросов: `choice`, `noul`, `score`. Ответ: `answers` и `usage.input_tokens` / `output_tokens`. Поле `model` в ответе — alias шлюза.
+
+Локальный Ollama и облачный бэкенд вызываются как `POST <base>/v1/systemone`. У OpenRouter путь `/systemone`, потому что base URL уже кончается на `/api/v1`. `nimble` и `tev1` на Ollama требуют сервер 0.35. Через hub решения не ходят.
+
 ## Выбор бэкенда
 
 1. Ищется включённый alias с таким именем.

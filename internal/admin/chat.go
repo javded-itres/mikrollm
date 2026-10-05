@@ -120,6 +120,10 @@ func (u *UI) chatModelOpts() (aliases, catalog []chatOpt) {
 				media = domain.MergeMedia(media, domain.InferMedia(m.UpstreamName, nil))
 			}
 		}
+		switch domain.ExclusiveMedia(media) {
+		case domain.MediaEmbed, domain.MediaDecision:
+			continue
+		}
 		ml := domain.MediaLabel(media)
 		lb := label(m.Alias, meta)
 		if m.HubNodeName != "" {
@@ -142,6 +146,10 @@ func (u *UI) chatModelOpts() (aliases, catalog []chatOpt) {
 				continue
 			}
 		} else if seen[e.Name] {
+			continue
+		}
+		switch domain.ExclusiveMedia(e.Media) {
+		case domain.MediaEmbed, domain.MediaDecision:
 			continue
 		}
 		ml := domain.MediaLabel(e.Media)

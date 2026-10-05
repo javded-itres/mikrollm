@@ -3,9 +3,11 @@ package domain
 import "strings"
 
 const (
-	MediaChat  = "chat"
-	MediaImage = "image"
-	MediaVideo = "video"
+	MediaChat     = "chat"
+	MediaImage    = "image"
+	MediaVideo    = "video"
+	MediaEmbed    = "embed"
+	MediaDecision = "decision"
 )
 
 func ParseMedia(s string) []string {
@@ -16,7 +18,7 @@ func ParseMedia(s string) []string {
 		if p == "" || p == MediaChat {
 			continue
 		}
-		if p != MediaImage && p != MediaVideo {
+		if p != MediaImage && p != MediaVideo && p != MediaEmbed && p != MediaDecision {
 			continue
 		}
 		if seen[p] {
@@ -50,7 +52,57 @@ func MergeMedia(parts ...[]string) []string {
 }
 
 // InferMedia marks image/video models from OpenRouter output_modalities and name heuristics (LiteLLM-style).
+// IsEmbeddingModel reports encoder models that answer with vectors, not text.
+// Ollama publishes ModernBERT Laya as s1gnature/laya; the name is the signal
+// when /api/show still lists the blob as completion.
+func IsEmbeddingModel(name string) bool {
+	low := strings.ToLower(strings.TrimSpace(name))
+	if low == "" {
+		return false
+	}
+	base := low
+	if i := strings.IndexByte(base, ':'); i >= 0 {
+		base = base[:i]
+	}
+	if base == "laya" || strings.HasSuffix(base, "/laya") {
+		return true
+	}
+	for _, tok := range embeddingNameTokens {
+		if strings.Contains(low, tok) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsDecisionModel reports Jev and the Ollama models that speak the same
+// POST /v1/systemone API (nimble, tev1) instead of chat text.
+func IsDecisionModel(name string) bool {
+	low := strings.ToLower(strings.TrimSpace(name))
+	if low == "" {
+		return false
+	}
+	base := low
+	if i := strings.IndexByte(base, ':'); i >= 0 {
+		base = base[:i]
+	}
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	switch base {
+	case "jev", "nimble", "tev1":
+		return true
+	}
+	return strings.HasPrefix(base, "jev-") || strings.HasPrefix(base, "typesafe-jev")
+}
+
 func InferMedia(name string, outputModalities []string) []string {
+	if IsEmbeddingModel(name) {
+		return []string{MediaEmbed}
+	}
+	if IsDecisionModel(name) {
+		return []string{MediaDecision}
+	}
 	var out []string
 	for _, m := range outputModalities {
 		switch strings.ToLower(strings.TrimSpace(m)) {
@@ -86,6 +138,12 @@ func MediaLabel(ms []string) string {
 	if HasMedia(ms, MediaImage) {
 		return "image"
 	}
+	if HasMedia(ms, MediaEmbed) {
+		return "embed"
+	}
+	if HasMedia(ms, MediaDecision) {
+		return "decision"
+	}
 	return ""
 }
 
@@ -93,10 +151,18 @@ func MediaLabel(ms []string) string {
 func ExclusiveMedia(ms []string) string {
 	v := HasMedia(ms, MediaVideo)
 	i := HasMedia(ms, MediaImage)
-	if v && !i {
+	e := HasMedia(ms, MediaEmbed)
+	d := HasMedia(ms, MediaDecision)
+	if d && !v && !i && !e {
+		return MediaDecision
+	}
+	if e && !v && !i && !d {
+		return MediaEmbed
+	}
+	if v && !i && !e && !d {
 		return MediaVideo
 	}
-	if i && !v {
+	if i && !v && !e && !d {
 		return MediaImage
 	}
 	return ""
@@ -107,6 +173,11 @@ var imageNameTokens = []string{
 	"sdxl", "stable-diffusion", "stable_diffusion", "hidream", "grok-imagine",
 	"seedream", "photon", "flash-image", "pro-image", "image-preview", "nanobanana",
 	"z-image", "z_image",
+}
+
+var embeddingNameTokens = []string{
+	"embed", "/laya", "laya:", ":laya", "modern-bert", "modernbert",
+	"bge-", "bge/", "minilm", "nomic-embed", "snowflake-arctic-embed",
 }
 
 var videoNameTokens = []string{

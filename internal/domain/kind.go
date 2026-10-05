@@ -164,6 +164,15 @@ func (b Backend) OpenAIChatPath() string {
 	return "/v1/chat/completions"
 }
 
+// SystemOnePath is the Jev decision endpoint. OpenRouter's base URL already
+// ends in /api/v1, so the suffix there has no extra /v1.
+func (b Backend) SystemOnePath() string {
+	if b.KindNorm() == KindOpenRouter {
+		return "/systemone"
+	}
+	return "/v1/systemone"
+}
+
 func (b Backend) ModelsPath() string {
 	switch b.KindNorm() {
 	case KindOpenRouter:

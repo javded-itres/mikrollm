@@ -87,6 +87,44 @@ curl http://192.168.88.1:4000/api/chat \
 
 Proxied to `POST <ollama>/api/chat` for local Ollama and Ollama Cloud. Otherwise the path becomes the provider’s OpenAI chat (`/v1/chat/completions` or `/chat/completions` on OpenRouter).
 
+Embedding models (`s1gnature/laya`, `laya`, names containing `embed`) are rejected here with `400`. Use [Embeddings](#embeddings).
+
+## Embeddings
+
+```bash
+curl http://192.168.88.1:4000/v1/embeddings \
+  -H "Authorization: Bearer sk-…" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"laya","input":"Why is the sky blue?"}'
+```
+
+OpenAI shape: `data[].embedding`. `input` may be a string or an array of strings. Local Ollama is called at `POST /api/embed`. `POST /api/embed` on the gateway returns Ollama's own JSON. Chat completions are not used for these models. Hub relay does not carry embeddings.
+
+## Jev (`/v1/systemone`)
+
+Decisions, not chat text. Names `jev`, `jev-latest`, `jev-1.13.0`, `typesafe-jev-1.13.0`, `nimble`, and `tev1` (including `tev1:0.8b`) are rejected on chat with `400`.
+
+```bash
+curl http://192.168.88.1:4000/v1/systemone \
+  -H "Authorization: Bearer sk-…" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "jev-latest",
+    "state": "I was charged twice. Please refund the extra payment.",
+    "questions": {
+      "team": {
+        "type": "choice",
+        "instructions": "Which team should handle this ticket?",
+        "criteria": {"billing": "payments and refunds", "technical": "bugs", "other": "none of the above"}
+      }
+    }
+  }'
+```
+
+The body matches TypeSafe and Ollama 0.35: `state` (string, object, or array) and a non-empty `questions` object. Question types are `choice`, `noul`, and `score`. The response is `answers` plus `usage.input_tokens` / `output_tokens`. The response `model` is the gateway alias.
+
+Local Ollama and a hosted base URL are called at `POST <base>/v1/systemone`. OpenRouter uses `/systemone` because its base URL already ends in `/api/v1`. `nimble` and `tev1` need Ollama 0.35. Hub relay does not carry decisions.
+
 ## Backend selection
 
 1. Look up an enabled alias with that name.

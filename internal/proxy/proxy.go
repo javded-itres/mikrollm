@@ -180,10 +180,15 @@ func (p *Proxy) ListModels(w http.ResponseWriter, r *http.Request) {
 		}
 		it.SupportedGeneration = media
 		it.Parameters = domain.FallbackGenerationParams(m.Alias, m.UpstreamName, media)
-		if domain.HasMedia(media, domain.MediaVideo) {
+		switch domain.ExclusiveMedia(media) {
+		case domain.MediaVideo:
 			it.Mode = "video_generation"
-		} else if domain.HasMedia(media, domain.MediaImage) {
+		case domain.MediaImage:
 			it.Mode = "image_generation"
+		case domain.MediaEmbed:
+			it.Mode = "embedding"
+		case domain.MediaDecision:
+			it.Mode = "decision"
 		}
 		out.Data = append(out.Data, it)
 	}
@@ -421,9 +426,26 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, path string, nee
 		return
 	}
 	if isChatPath(path) {
-		if kind := p.exclusiveMedia(mb.Model); kind == domain.MediaVideo {
+		switch kind := p.exclusiveMedia(mb.Model); kind {
+		case domain.MediaVideo:
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{
 				"message": "Это видео-модель. В админке выберите тип «Видео» — POST /v1/videos, не чат.",
+				"type":    "invalid_request_error",
+				"code":    "invalid_value",
+				"param":   "model",
+			}})
+			return
+		case domain.MediaEmbed:
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{
+				"message": "Это модель эмбеддингов. Используйте POST /v1/embeddings, не чат.",
+				"type":    "invalid_request_error",
+				"code":    "invalid_value",
+				"param":   "model",
+			}})
+			return
+		case domain.MediaDecision:
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{
+				"message": "Это decision-модель Jev. Используйте POST /v1/systemone, не чат.",
 				"type":    "invalid_request_error",
 				"code":    "invalid_value",
 				"param":   "model",
