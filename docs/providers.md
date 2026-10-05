@@ -9,7 +9,7 @@ MikroLLM is a gateway. A backend can be a **local process** on the LAN or a **cl
 | **Ollama** (local) | `http://<host>:11434` | `/api/chat`, `/v1/chat/completions` | `/api/tags`, `/api/ps` | yes, from admin |
 | **Ollama Cloud** | `https://ollama.com` | `/api/chat`, `/v1/chat/completions` | `/api/tags` | no: models already in the cloud |
 | **OpenRouter** | `https://openrouter.ai/api/v1` | `/chat/completions` | `/models` | no: models already in the cloud |
-| **vLLM** | `http://<host>:8000` | `/v1/chat/completions` | `/health`, `/v1/models` | no API: the model is the process |
+| **vLLM** | `http://<host>:8000` | `/v1/chat/completions` | `/health`, `/v1/models` | no API: the model is the process; also fits any OpenAI-compatible server (llama.cpp, LiteLLM proxy, TabbyAPI, …) |
 | **LM Studio** | `http://<host>:1234` | `/v1/chat/completions` | `/api/v1/models` | yes, from admin |
 | **OpenComfy** | `http://<host>:8788` | image chat shim | `/health`, `/v1/models` | no: workflows live on the GPU box |
 
@@ -28,6 +28,8 @@ More: [admin.md](admin.md).
 ## vLLM
 
 vLLM holds **one** model for the life of the process. Changing weights = stop the server and start with another id. That cannot be done over HTTP — so admin has no “download” / “into RAM” buttons.
+
+The **vLLM** kind is generic — it is not bound to vLLM itself. Any server speaking the OpenAI protocol (`/v1/models` for the catalog, `/v1/chat/completions` for chat) works through it: llama.cpp `llama-server`, LiteLLM proxy, TabbyAPI, tensorrt-llm and similar. Only the health probe differs: when there is no `/health`, the backend is judged by the model list. URL is entered **without** `/v1` (e.g. `http://<host>:8000`) — the gateway appends the `/v1/*` paths itself.
 
 ### Install
 
@@ -94,7 +96,7 @@ In MikroLLM click **Refresh status** — the new name appears in the catalog.
 
 ### Connect to the gateway
 
-Admin → **Status** → kind **vLLM**, URL `http://<host>:8000`, token if you set `--api-key`. Then **Models → To gateway**.
+Admin → **Status** → kind **vLLM**, URL `http://<host>:8000` (no `/v1` suffix), token if your server requires one. Then **Models → To gateway**. The same recipe applies to any OpenAI-compatible server, not just vLLM.
 
 systemd example:
 

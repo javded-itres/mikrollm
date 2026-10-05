@@ -9,7 +9,7 @@ MikroLLM — шлюз. Бэкенд может быть **локальным п�
 | **Ollama** (локальный) | `http://<хост>:11434` | `/api/chat`, `/v1/chat/completions` | `/api/tags`, `/api/ps` | да, из админки |
 | **Ollama Cloud** | `https://ollama.com` | `/api/chat`, `/v1/chat/completions` | `/api/tags` | нет: модели уже в облаке |
 | **OpenRouter** | `https://openrouter.ai/api/v1` | `/chat/completions` | `/models` | нет: модели уже в облаке |
-| **vLLM** | `http://<хост>:8000` | `/v1/chat/completions` | `/health`, `/v1/models` | нет API: модель = процесс |
+| **vLLM** | `http://<хост>:8000` | `/v1/chat/completions` | `/health`, `/v1/models` | нет API: модель = процесс; подходит и любому OpenAI-совместимому серверу (llama.cpp, LiteLLM proxy, TabbyAPI, …) |
 | **LM Studio** | `http://<хост>:1234` | `/v1/chat/completions` | `/api/v1/models` | да, из админки |
 | **OpenComfy** | `http://<хост>:8788` | image chat shim | `/health`, `/v1/models` | нет: workflow на GPU-машине |
 
@@ -28,6 +28,8 @@ MikroLLM — шлюз. Бэкенд может быть **локальным п�
 ## vLLM
 
 vLLM поднимает **одну** модель на время жизни процесса. Сменить веса = остановить сервер и запустить с другим id. Через HTTP это сделать нельзя — поэтому в админке нет кнопок «скачать» / «в RAM».
+
+Тип **vLLM** — универсальный, он не привязан к самому vLLM. Через него подключается любой сервер с OpenAI-протоколом (`/v1/models` — каталог, `/v1/chat/completions` — чат): `llama-server` из llama.cpp, LiteLLM proxy, TabbyAPI, tensorrt-llm и похожие. Разница только в health-пробе: если `/health` нет, бэкенд оценивается по списку моделей. URL вводится **без** суффикса `/v1` (например `http://<хост>:8000`) — пути `/v1/*` шлюз приклеивает сам.
 
 ### Установка
 
@@ -94,7 +96,7 @@ vllm serve mistralai/Mistral-7B-Instruct-v0.3 --host 0.0.0.0 --port 8000
 
 ### Подключить к шлюзу
 
-Админка → **Статус** → тип **vLLM**, URL `http://<хост>:8000`, токен если задавали `--api-key`. Дальше **Модели → В шлюз**.
+Админка → **Статус** → тип **vLLM**, URL `http://<хост>:8000` (без суффикса `/v1`), токен если сервер его требует. Дальше **Модели → В шлюз**. Тот же рецепт подходит любому OpenAI-совместимому серверу, не только vLLM.
 
 systemd-пример:
 
