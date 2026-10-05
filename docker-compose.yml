@@ -34,7 +34,7 @@ name: mikrollm
 
 services:
   mikrollm:
-    image: ${MIKROLLM_IMAGE:-javded/mikrollm:v0.0.13}
+    image: ${MIKROLLM_IMAGE:-javded/mikrollm:v0.0.14}
     restart: unless-stopped
     ports:
       - "4000:4000"

@@ -36,7 +36,7 @@ Gateway only:
 ```yaml
 services:
   mikrollm:
-    image: javded/mikrollm:v0.0.13
+    image: javded/mikrollm:v0.0.14
     restart: unless-stopped
     ports:
       - "4000:4000"
@@ -58,7 +58,7 @@ Reset the password in an existing volume:
 ```bash
 docker run --rm -v mikrollm-data:/data \
   -e ADMIN_PASSWORD='newpass' -e ADMIN_PASSWORD_RESET=1 \
-  javded/mikrollm:v0.0.13
+  javded/mikrollm:v0.0.14
 ```
 
 Then start the normal container **without** `ADMIN_PASSWORD_RESET`. A Compose volume is named `<project>_mikrollm-data` (`docker volume ls`). Details: [install-compose.md](install-compose.md).

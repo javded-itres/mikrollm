@@ -47,7 +47,7 @@ curl -fsS http://127.0.0.1:4000/health
 docker compose stop mikrollm
 docker run --rm -v mikrollm_mikrollm-data:/data \
   -e ADMIN_PASSWORD='новый-пароль' -e ADMIN_PASSWORD_RESET=1 \
-  javded/mikrollm:v0.0.13
+  javded/mikrollm:v0.0.14
 ```
 
 Тот же пароль запишите в `.env` и выполните `docker compose up -d`. Не оставляйте `ADMIN_PASSWORD_RESET` включённым.
@@ -79,7 +79,7 @@ curl -fsS http://127.0.0.1:4000/v1/chat/completions \
 | Переменная | По умолчанию | Что меняет |
 |---|---|---|
 | `ADMIN_PASSWORD` | нет, обязателен | Пароль админки при первом создании. |
-| `MIKROLLM_IMAGE` | `javded/mikrollm:v0.0.13` | Образ шлюза. Тег совпадает с релизом GitHub. |
+| `MIKROLLM_IMAGE` | `javded/mikrollm:v0.0.14` | Образ шлюза. Тег совпадает с релизом GitHub. |
 | `HF_TOKEN` | пусто | Токен Hugging Face. Веса Qwen открытые; токен поднимает лимит скачивания. |
 | `VLLM_IMAGE` | `vllm/vllm-openai:v0.18.0` | Образ vLLM с CUDA arch 7.0. В `latest` ядер V100 нет. |
 | `VLLM_MODEL` | `btbtyler09/Qwen3.6-27B-GPTQ-4bit` | Чекпоинт GPTQ Int4. Имя для клиентов остаётся `qwen3.6`. |

@@ -36,7 +36,7 @@ docker buildx build --platform linux/arm64 -t mikrollm:arm64 --load .
 ```yaml
 services:
   mikrollm:
-    image: javded/mikrollm:v0.0.13
+    image: javded/mikrollm:v0.0.14
     restart: unless-stopped
     ports:
       - "4000:4000"
@@ -58,7 +58,7 @@ volumes:
 ```bash
 docker run --rm -v mikrollm-data:/data \
   -e ADMIN_PASSWORD='новый' -e ADMIN_PASSWORD_RESET=1 \
-  javded/mikrollm:v0.0.13
+  javded/mikrollm:v0.0.14
 ```
 
 Затем запустите обычный контейнер **без** `ADMIN_PASSWORD_RESET`. Имя тома Compose — `<проект>_mikrollm-data` (`docker volume ls`). Подробности: [install-compose.md](install-compose.md).

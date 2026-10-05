@@ -6,6 +6,8 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+## 0.0.14 — 2026-10-06
+
 - `POST /v1/systemone` proxies Jev decision models (`jev`, `jev-latest`, `nimble`, `tev1`). Chat completions return 400 for those aliases. Hub relay does not carry decisions. [docs/api.md](docs/api.md)
 - `POST /v1/embeddings` and `POST /api/embed` proxy embedding models such as `laya` / `s1gnature/laya`. Chat completions return 400 for those aliases. [docs/api.md](docs/api.md)
 - Compose guide for the Docker Hub image and vLLM Qwen3.6: [docs/install-compose.md](docs/install-compose.md).

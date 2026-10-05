@@ -47,7 +47,7 @@ Admin: `http://127.0.0.1:4000/admin`. The password is `ADMIN_PASSWORD` from `.en
 docker compose stop mikrollm
 docker run --rm -v mikrollm_mikrollm-data:/data \
   -e ADMIN_PASSWORD='new-password' -e ADMIN_PASSWORD_RESET=1 \
-  javded/mikrollm:v0.0.13
+  javded/mikrollm:v0.0.14
 ```
 
 Write the same password into `.env`, then `docker compose up -d`. Do not leave `ADMIN_PASSWORD_RESET` set.
@@ -79,7 +79,7 @@ Issue `sk-…` under **Keys**. vLLM on the host loopback is not the public API.
 | Variable | Default | What it changes |
 |---|---|---|
 | `ADMIN_PASSWORD` | none, required | Admin password on first create. |
-| `MIKROLLM_IMAGE` | `javded/mikrollm:v0.0.13` | Gateway image. The tag matches a GitHub release. |
+| `MIKROLLM_IMAGE` | `javded/mikrollm:v0.0.14` | Gateway image. The tag matches a GitHub release. |
 | `HF_TOKEN` | empty | Hugging Face token. The default Qwen weights are public; a token raises the download rate limit. |
 | `VLLM_IMAGE` | `vllm/vllm-openai:v0.18.0` | vLLM image with CUDA arch 7.0. `latest` has no V100 kernels. |
 | `VLLM_MODEL` | `btbtyler09/Qwen3.6-27B-GPTQ-4bit` | GPTQ Int4 checkpoint. The name clients send stays `qwen3.6`. |

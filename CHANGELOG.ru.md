@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## 0.0.14 — 2026-10-06
+
 - `POST /v1/systemone` проксирует decision-модели Jev (`jev`, `jev-latest`, `nimble`, `tev1`). Чат для таких alias отвечает 400. Через hub решения не ходят. [docs/ru/api.md](docs/ru/api.md)
 - `POST /v1/embeddings` и `POST /api/embed` проксируют модели эмбеддингов, в том числе `laya` / `s1gnature/laya`. Чат для таких alias отвечает 400. [docs/ru/api.md](docs/ru/api.md)
 - Инструкция Compose для образа с Docker Hub и vLLM Qwen3.6: [docs/ru/install-compose.md](docs/ru/install-compose.md).
