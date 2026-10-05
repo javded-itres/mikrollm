@@ -100,8 +100,11 @@ func TestOpenAPIDocs(t *testing.T) {
 	if rec.Code != 200 || !json.Valid(rec.Body.Bytes()) {
 		t.Fatalf("openapi %d %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "/v1/chat/completions") || !strings.Contains(rec.Body.String(), "/v1/images/generations") {
-		t.Fatal("spec missing chat/images")
+	body := rec.Body.String()
+	for _, path := range []string{"/v1/chat/completions", "/v1/images/generations", "/v1/embeddings", "/api/embed", "/v1/systemone"} {
+		if !strings.Contains(body, path) {
+			t.Fatal("spec missing " + path)
+		}
 	}
 	rec = httptest.NewRecorder()
 	a.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/docs", nil))

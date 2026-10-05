@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Swagger показывает `POST /v1/embeddings`, `POST /api/embed` и `POST /v1/systemone`. [docs/ru/api.md](docs/ru/api.md)
+
 ## 0.0.14 — 2026-10-06
 
 - `POST /v1/systemone` проксирует decision-модели Jev (`jev`, `jev-latest`, `nimble`, `tev1`). Чат для таких alias отвечает 400. Через hub решения не ходят. [docs/ru/api.md](docs/ru/api.md)

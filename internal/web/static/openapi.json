@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "MikroLLM API",
-    "version": "0.0.6",
-    "description": "OpenAI-совместимый шлюз MikroLLM.\n\nКлюч: `Authorization: Bearer sk-…` или `X-Api-Key: sk-…` (вкладка Ключи). Без ключа — 401, кроме `/health` и `/ready`.\n\n`model` — **alias шлюза** (в том числе `auto` у участника hub) или имя с бэкенда.\n\n- Чат: `POST /v1/chat/completions` (и Ollama `POST /api/chat`)\n- Картинки: `POST /v1/images/generations`\n- Видео: `POST /v1/videos`, статус и файл — `GET /v1/videos/{id}` и `/content`\n- MCP (настройка шлюза, не чат): `POST /mcp` с токеном `mcp-…`"
+    "version": "0.0.14",
+    "description": "OpenAI-совместимый шлюз MikroLLM.\n\nКлюч: `Authorization: Bearer sk-…` или `X-Api-Key: sk-…` (вкладка Ключи). Без ключа — 401, кроме `/health` и `/ready`.\n\n`model` — **alias шлюза** (в том числе `auto` у участника hub) или имя с бэкенда.\n\n- Чат: `POST /v1/chat/completions` (и Ollama `POST /api/chat`)\n- Эмбеддинги: `POST /v1/embeddings` и Ollama `POST /api/embed`\n- Решения Jev: `POST /v1/systemone`\n- Картинки: `POST /v1/images/generations`\n- Видео: `POST /v1/videos`, статус и файл — `GET /v1/videos/{id}` и `/content`\n- MCP (настройка шлюза, не чат): `POST /mcp` с токеном `mcp-…`"
   },
   "servers": [
     { "url": "/", "description": "Этот шлюз" }
@@ -12,6 +12,8 @@
     { "name": "Health", "description": "Жив ли процесс" },
     { "name": "Models", "description": "Список alias" },
     { "name": "Chat", "description": "Chat Completions" },
+    { "name": "Embeddings", "description": "Векторы текста" },
+    { "name": "Decisions", "description": "Jev /v1/systemone" },
     { "name": "Images", "description": "Генерация изображений" },
     { "name": "Videos", "description": "Генерация видео" },
     { "name": "Ollama", "description": "Совместимость с Ollama HTTP" },
@@ -55,7 +57,7 @@
       "get": {
         "tags": ["Models"],
         "summary": "Список alias",
-        "description": "OpenAI `list`. Поля `context_length` / `max_input_tokens`, цены OpenRouter, `supported_generation` (chat/image/video). Очереди тоже попадают как model.",
+        "description": "OpenAI `list`. Поля `context_length` / `max_input_tokens`, цены OpenRouter, `supported_generation` (chat/image/video/embed/decision). `mode` бывает `embedding` и `decision`. Очереди тоже попадают как model.",
         "operationId": "listModels",
         "responses": {
           "200": {
@@ -99,7 +101,7 @@
       "post": {
         "tags": ["Chat"],
         "summary": "Chat Completions",
-        "description": "Как OpenAI. `model` — alias. `stream: true` — SSE (`data: …` / `data: [DONE]`).\n\nОпционально `X-Session-Id` (prompt cache на OpenRouter). Non-stream: заголовок `X-MikroLLM-Cache-Tokens`. Fallback alias: `X-MikroLLM-Fallback`.\n\nВидео-only модель сюда не посылайте — 400, нужен `POST /v1/videos`.",
+        "description": "Как OpenAI. `model` — alias. `stream: true` — SSE (`data: …` / `data: [DONE]`).\n\nОпционально `X-Session-Id` (prompt cache на OpenRouter). Non-stream: заголовок `X-MikroLLM-Cache-Tokens`. Fallback alias: `X-MikroLLM-Fallback`.\n\nВидео-only модель сюда не посылайте — 400, нужен `POST /v1/videos`. Модель эмбеддингов — `POST /v1/embeddings`. Decision-модель Jev — `POST /v1/systemone`.",
         "operationId": "chatCompletions",
         "parameters": [
           { "name": "X-Session-Id", "in": "header", "required": false, "schema": { "type": "string" }, "description": "Сессия prompt cache (OpenRouter)" }
@@ -227,6 +229,100 @@
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/v1/embeddings": {
+      "post": {
+        "tags": ["Embeddings"],
+        "summary": "Эмбеддинги",
+        "description": "OpenAI Embeddings. `input` — строка или массив строк. Локальный Ollama вызывается как `POST /api/embed`, ответ переводится в `data[].embedding`. Через hub эмбеддинги не ходят (400).",
+        "operationId": "embeddings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EmbeddingRequest" },
+              "example": { "model": "laya", "input": "Почему небо голубое?" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Список векторов",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmbeddingResponse" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "502": { "$ref": "#/components/responses/BadGateway" }
+        }
+      }
+    },
+    "/v1/systemone": {
+      "post": {
+        "tags": ["Decisions"],
+        "summary": "Решение Jev",
+        "description": "Тот же JSON, что у TypeSafe и Ollama 0.35. `state` — строка, объект или массив. `questions` — непустая карта вопросов `choice`, `noul` или `score`. Локальный Ollama и облачный бэкенд: `POST <base>/v1/systemone`. У OpenRouter путь `/systemone`. В ответе `model` — alias шлюза. `nimble` и `tev1` требуют Ollama 0.35. Через hub решения не ходят (400). Чат для этих имён отвечает 400.",
+        "operationId": "systemOne",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SystemOneRequest" },
+              "example": {
+                "model": "jev-latest",
+                "state": "Списание прошло дважды. Верните лишнее.",
+                "questions": {
+                  "team": {
+                    "type": "choice",
+                    "instructions": "Какая команда должна взять тикет?",
+                    "criteria": { "billing": "оплаты и возвраты", "technical": "ошибки", "other": "другое" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "answers и usage",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SystemOneResponse" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "502": { "$ref": "#/components/responses/BadGateway" }
+        }
+      }
+    },
+    "/api/embed": {
+      "post": {
+        "tags": ["Ollama", "Embeddings"],
+        "summary": "Ollama /api/embed",
+        "description": "Тело и ответ в форме Ollama. Для бэкенда не-Ollama шлюз ходит в `POST /v1/embeddings` и переводит ответ обратно. Через hub не проксируется.",
+        "operationId": "ollamaEmbed",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OllamaEmbedRequest" },
+              "example": { "model": "laya", "input": ["раз", "два"] }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "embeddings[]",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OllamaEmbedResponse" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "502": { "$ref": "#/components/responses/BadGateway" }
         }
       }
     },
@@ -466,6 +562,115 @@
                 "litellm_params": { "type": "object" },
                 "model_info": { "type": "object" }
               }
+            }
+          }
+        }
+      },
+      "EmbeddingRequest": {
+        "type": "object",
+        "required": ["model", "input"],
+        "properties": {
+          "model": { "type": "string", "description": "Alias шлюза, например laya" },
+          "input": {
+            "description": "Строка или массив строк",
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          }
+        }
+      },
+      "EmbeddingResponse": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "example": "list" },
+          "model": { "type": "string" },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "object": { "type": "string", "example": "embedding" },
+                "index": { "type": "integer" },
+                "embedding": { "type": "array", "items": { "type": "number" } }
+              }
+            }
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "prompt_tokens": { "type": "integer" },
+              "total_tokens": { "type": "integer" }
+            }
+          }
+        }
+      },
+      "OllamaEmbedRequest": {
+        "type": "object",
+        "required": ["model", "input"],
+        "properties": {
+          "model": { "type": "string" },
+          "input": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          }
+        }
+      },
+      "OllamaEmbedResponse": {
+        "type": "object",
+        "properties": {
+          "model": { "type": "string" },
+          "embeddings": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } },
+          "prompt_eval_count": { "type": "integer" }
+        }
+      },
+      "SystemOneQuestion": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "enum": ["choice", "noul", "score"] },
+          "instructions": { "type": "string" },
+          "criteria": {
+            "description": "choice: карта ключ → описание. score: упорядоченный список уровней. noul может обойтись без criteria.",
+            "oneOf": [
+              { "type": "object", "additionalProperties": true },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          }
+        }
+      },
+      "SystemOneRequest": {
+        "type": "object",
+        "required": ["model", "state", "questions"],
+        "properties": {
+          "model": { "type": "string", "description": "jev-latest, nimble, tev1 или alias шлюза" },
+          "state": {
+            "description": "Текст, объект или массив",
+            "oneOf": [
+              { "type": "string" },
+              { "type": "object", "additionalProperties": true },
+              { "type": "array", "items": {} }
+            ]
+          },
+          "questions": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": { "$ref": "#/components/schemas/SystemOneQuestion" }
+          }
+        }
+      },
+      "SystemOneResponse": {
+        "type": "object",
+        "properties": {
+          "model": { "type": "string" },
+          "answers": { "type": "object", "additionalProperties": true },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "input_tokens": { "type": "integer" },
+              "output_tokens": { "type": "integer" }
             }
           }
         }

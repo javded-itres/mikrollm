@@ -6,6 +6,8 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+- Swagger lists `POST /v1/embeddings`, `POST /api/embed`, and `POST /v1/systemone`. [docs/api.md](docs/api.md)
+
 ## 0.0.14 — 2026-10-06
 
 - `POST /v1/systemone` proxies Jev decision models (`jev`, `jev-latest`, `nimble`, `tev1`). Chat completions return 400 for those aliases. Hub relay does not carry decisions. [docs/api.md](docs/api.md)
