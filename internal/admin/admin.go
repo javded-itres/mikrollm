@@ -72,6 +72,14 @@ func New(d Deps) *UI {
 			}
 			return false
 		},
+		"hasint": func(ids []int64, id int64) bool {
+			for _, v := range ids {
+				if v == id {
+					return true
+				}
+			}
+			return false
+		},
 	}
 	must := func(files ...string) *template.Template {
 		return template.Must(template.New("layout.html").Funcs(fm).ParseFS(web.FS, files...))
@@ -119,6 +127,11 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/agents", u.protect(u.agentsPage))
 	mux.HandleFunc("POST /admin/agents", u.protect(u.saveA2A))
 	mux.HandleFunc("POST /admin/agents/{id}/delete", u.protect(u.deleteA2A))
+	mux.HandleFunc("POST /admin/agents/groups", u.protect(u.saveA2AGroup))
+	mux.HandleFunc("POST /admin/agents/groups/{id}/rotate", u.protect(u.rotateA2AInvite))
+	mux.HandleFunc("POST /admin/agents/groups/{id}/delete", u.protect(u.deleteA2AGroup))
+	mux.HandleFunc("POST /admin/agents/messages/{id}/confirm", u.protect(u.confirmA2AMessage))
+	mux.HandleFunc("POST /admin/agents/messages/{id}/reject", u.protect(u.rejectA2AMessage))
 	mux.HandleFunc("POST /admin/hub", u.protect(u.saveHub))
 	mux.HandleFunc("POST /admin/models/{id}/hub-share", u.protect(u.setModelHubShare))
 	mux.HandleFunc("POST /admin/models/hub-bulk", u.protect(u.bulkHubShare))
@@ -1482,6 +1495,14 @@ func flashMsg(code string) string {
 		return "Агент сохранён."
 	case "agent_deleted":
 		return "Агент удалён."
+	case "group_invite":
+		return "Группа сохранена. Приглашение показано один раз."
+	case "group_deleted":
+		return "Группа удалена."
+	case "message_confirmed":
+		return "Сообщение подтверждено и отдано агентам."
+	case "message_rejected":
+		return "Сообщение отклонено."
 	default:
 		return ""
 	}
@@ -1511,6 +1532,12 @@ func errMsg(code string) string {
 		return "URL агента должен быть http или https, без логина в адресе."
 	case "agent name taken":
 		return "Агент с таким именем уже есть."
+	case "group name":
+		return "Имя группы: латиница в нижнем регистре, цифры, _ и -, до 40 символов."
+	case "group name taken":
+		return "Группа с таким именем уже есть."
+	case "message":
+		return "Не удалось записать сообщение."
 	case "min+6+chars", "min+8+chars":
 		return "Пароль не короче 8 символов."
 	default:

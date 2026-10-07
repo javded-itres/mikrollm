@@ -89,6 +89,26 @@ func GenerateKey() (plain, prefix, hash string, err error) {
 	return
 }
 
+func GenerateAgentToken() (plain, hash string, err error) {
+	b := make([]byte, 24)
+	if _, err = rand.Read(b); err != nil {
+		return
+	}
+	plain = "agt-" + hex.EncodeToString(b)
+	hash = HashKey(plain)
+	return
+}
+
+func GenerateInvite() (plain, hash string, err error) {
+	b := make([]byte, 24)
+	if _, err = rand.Read(b); err != nil {
+		return
+	}
+	plain = "inv-" + hex.EncodeToString(b)
+	hash = HashKey(plain)
+	return
+}
+
 func GenerateMCPToken() (plain, prefix, hash string, err error) {
 	b := make([]byte, 24)
 	if _, err = rand.Read(b); err != nil {

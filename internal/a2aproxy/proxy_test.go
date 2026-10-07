@@ -1,6 +1,7 @@
 package a2aproxy
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -63,6 +64,22 @@ func TestLocalCardRewritesURL(t *testing.T) {
 	}
 	if gotAuth != "Bearer agent-secret" || gotPath != "/.well-known/agent-card.json" {
 		t.Fatalf("upstream auth %q path %q", gotAuth, gotPath)
+	}
+}
+
+func TestFetchCardUsesProfileWithoutURL(t *testing.T) {
+	rep, err := FetchCard(context.Background(), domain.A2AUpstream{
+		Name: "shop", DisplayName: "Магазин", Description: "товары", Company: "Shop",
+		Skills: []domain.A2ASkill{{ID: "goods", Name: "Товары", Description: "каталог"}},
+	})
+	if err != nil || rep.Status != 200 {
+		t.Fatal(err, rep.Status)
+	}
+	body := string(rep.Body)
+	for _, want := range []string{`"name":"Магазин"`, `"id":"goods"`, `"organization":"Shop"`, "каталог"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %s in %s", want, body)
+		}
 	}
 }
 

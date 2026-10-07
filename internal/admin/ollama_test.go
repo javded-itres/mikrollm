@@ -64,7 +64,14 @@ func TestNextPath(t *testing.T) {
 }
 
 func TestTemplatesParse(t *testing.T) {
-	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }}
+	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }, "hasint": func(ids []int64, id int64) bool {
+		for _, v := range ids {
+			if v == id {
+				return true
+			}
+		}
+		return false
+	}}
 	for _, files := range [][]string{
 		{"templates/layout.html", "templates/dash.html"},
 		{"templates/layout.html", "templates/models.html"},
@@ -113,7 +120,14 @@ func TestQueueStepDeleteUsesQueueID(t *testing.T) {
 }
 
 func TestHubShareAndAgentTemplates(t *testing.T) {
-	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }}
+	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }, "hasint": func(ids []int64, id int64) bool {
+		for _, v := range ids {
+			if v == id {
+				return true
+			}
+		}
+		return false
+	}}
 	dash := template.Must(template.New("layout.html").Funcs(fm).ParseFS(web.FS, "templates/layout.html", "templates/dash.html"))
 	var on bytes.Buffer
 	days := map[string]bool{}
@@ -143,7 +157,8 @@ func TestHubShareAndAgentTemplates(t *testing.T) {
 	if err := agents.ExecuteTemplate(&page, "layout.html", map[string]any{
 		"Title": "Агенты", "Nav": "agents", "CSRF": "tok",
 		"CanShare": true, "HubOn": true,
-		"Rows": []mcpRow{{ID: 3, Name: "planner", URL: "http://127.0.0.1:9/a2a", Enabled: true, HubShare: true, TokenSet: true}},
+		"Rows":   []agentRow{{ID: 3, Name: "planner", URL: "http://127.0.0.1:9/a2a", Enabled: true, HubShare: true, TokenSet: true, GroupIDs: []int64{1}}},
+		"Groups": []groupView{{ID: 1, Name: "orders", Title: "Заказы"}},
 	}); err != nil {
 		t.Fatal(err)
 	}

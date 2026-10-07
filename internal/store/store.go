@@ -236,6 +236,43 @@ CREATE TABLE IF NOT EXISTS a2a_upstreams (
   enabled INTEGER NOT NULL DEFAULT 1,
   hub_share INTEGER NOT NULL DEFAULT 0
 )`)
+	if err != nil {
+		return err
+	}
+	for _, q := range []string{
+		`ALTER TABLE a2a_upstreams ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE a2a_upstreams ADD COLUMN company TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE a2a_upstreams ADD COLUMN description TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE a2a_upstreams ADD COLUMN skills TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE a2a_upstreams ADD COLUMN auth_hash TEXT NOT NULL DEFAULT ''`,
+	} {
+		_, _ = s.DB.Exec(q)
+	}
+	_, err = s.DB.Exec(`
+CREATE TABLE IF NOT EXISTS a2a_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  invite_hash TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS a2a_group_members (
+  group_id INTEGER NOT NULL REFERENCES a2a_groups(id) ON DELETE CASCADE,
+  agent_id INTEGER NOT NULL REFERENCES a2a_upstreams(id) ON DELETE CASCADE,
+  PRIMARY KEY (group_id, agent_id)
+);
+CREATE TABLE IF NOT EXISTS a2a_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id INTEGER NOT NULL REFERENCES a2a_groups(id) ON DELETE CASCADE,
+  from_agent TEXT NOT NULL,
+  to_agent TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'posted',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS a2a_messages_group ON a2a_messages(group_id, id);
+CREATE INDEX IF NOT EXISTS a2a_groups_invite ON a2a_groups(invite_hash);
+CREATE INDEX IF NOT EXISTS a2a_upstreams_auth ON a2a_upstreams(auth_hash)`)
 	return err
 }
 

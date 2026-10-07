@@ -129,8 +129,25 @@ type Store interface {
 	ListA2A() ([]domain.A2AUpstream, error)
 	GetA2A(id int64) (domain.A2AUpstream, error)
 	GetA2AByName(name string) (domain.A2AUpstream, error)
+	GetA2AByAuthHash(hash string) (domain.A2AUpstream, error)
 	SaveA2A(domain.A2AUpstream) (int64, error)
 	DeleteA2A(id int64) error
+	ListA2AGroups() ([]domain.A2AGroup, error)
+	SaveA2AGroup(domain.A2AGroup) (int64, error)
+	DeleteA2AGroup(id int64) error
+	SetA2AInvite(id int64, hash string) error
+	GetA2AGroup(id int64) (domain.A2AGroup, error)
+	GetA2AGroupByInvite(hash string) (domain.A2AGroup, error)
+	AgentGroupIDs(agentID int64) ([]int64, error)
+	AgentGroups(agentID int64) ([]domain.A2AGroup, error)
+	SetAgentGroups(agentID int64, groupIDs []int64) error
+	AddAgentToGroup(agentID, groupID int64) error
+	ListGroupAgents(groupID int64) ([]domain.A2AUpstream, error)
+	InsertA2AMessage(domain.A2AMessage) (domain.A2AMessage, error)
+	ListA2AMessages(groupID, after int64, limit int) ([]domain.A2AMessage, error)
+	ListA2ATranscript(groupID int64, limit int) ([]domain.A2AMessage, error)
+	GetA2AMessage(id int64) (domain.A2AMessage, error)
+	SetA2AMessageStatus(id int64, status string) error
 	Billing(period string, now time.Time) (domain.BillingView, error)
 	SeedIfEmpty(backends []domain.Backend) error
 	Close() error

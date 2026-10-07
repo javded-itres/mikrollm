@@ -169,7 +169,11 @@ func call(ctx context.Context, token, target string, in mcpproxy.Forward) (mcppr
 }
 
 // FetchCard loads the upstream agent card. The RPC URL is not returned to the client.
+// An empty URL is a poll-only agent: the card is the published profile.
 func FetchCard(ctx context.Context, up domain.A2AUpstream) (mcpproxy.Reply, error) {
+	if strings.TrimSpace(up.URL) == "" {
+		return mcpproxy.Reply{Status: http.StatusOK, ContentType: "application/json", Body: ProfileCard(up)}, nil
+	}
 	var last mcpproxy.Reply
 	var lastErr error
 	for _, raw := range cardCandidates(up.URL) {
@@ -180,18 +184,76 @@ func FetchCard(ctx context.Context, up domain.A2AUpstream) (mcpproxy.Reply, erro
 		}
 		last = rep
 		if rep.Status > 0 && rep.Status < 300 && json.Valid(rep.Body) {
+			rep.Body = applyProfile(rep.Body, up)
 			return rep, nil
 		}
 	}
 	if lastErr != nil && last.Status == 0 {
 		return mcpproxy.Reply{}, lastErr
 	}
+	return mcpproxy.Reply{Status: http.StatusOK, ContentType: "application/json", Body: ProfileCard(up)}, nil
+}
+
+// ProfileCard is the agent card built from the published profile.
+func ProfileCard(up domain.A2AUpstream) []byte {
+	name := up.DisplayName
+	if name == "" {
+		name = up.Name
+	}
 	raw, _ := json.Marshal(map[string]any{
-		"name": up.Name, "version": "1.0.0", "protocolVersion": "0.3.0",
-		"capabilities": map[string]any{"streaming": true},
-		"skills":       []any{},
+		"name": name, "description": up.Description, "version": "1.0.0", "protocolVersion": "0.3.0",
+		"capabilities": map[string]any{"streaming": false},
+		"skills":       skillJSON(up.Skills),
+		"provider":     map[string]any{"organization": up.Company},
 	})
-	return mcpproxy.Reply{Status: http.StatusOK, ContentType: "application/json", Body: raw}, nil
+	return raw
+}
+
+func applyProfile(body []byte, up domain.A2AUpstream) []byte {
+	if up.DisplayName == "" && up.Description == "" && up.Company == "" && len(up.Skills) == 0 {
+		return body
+	}
+	var m map[string]any
+	if json.Unmarshal(body, &m) != nil || m == nil {
+		return ProfileCard(up)
+	}
+	if up.DisplayName != "" {
+		cur, _ := m["name"].(string)
+		if cur == "" || cur == up.Name {
+			m["name"] = up.DisplayName
+		}
+	}
+	if up.Description != "" {
+		if d, _ := m["description"].(string); d == "" {
+			m["description"] = up.Description
+		}
+	}
+	if up.Company != "" {
+		if _, ok := m["provider"]; !ok {
+			m["provider"] = map[string]any{"organization": up.Company}
+		}
+	}
+	if len(up.Skills) > 0 && skillsEmpty(m["skills"]) {
+		m["skills"] = skillJSON(up.Skills)
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+func skillJSON(skills []domain.A2ASkill) []any {
+	out := make([]any, 0, len(skills))
+	for _, sk := range skills {
+		out = append(out, map[string]any{"id": sk.ID, "name": sk.Name, "description": sk.Description})
+	}
+	return out
+}
+
+func skillsEmpty(v any) bool {
+	list, ok := v.([]any)
+	return !ok || len(list) == 0
 }
 
 func cardCandidates(base string) []string {

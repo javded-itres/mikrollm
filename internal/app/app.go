@@ -28,15 +28,16 @@ import (
 )
 
 var (
-	_ ports.Store       = (*store.Store)(nil)
-	_ ports.Health      = (*health.Checker)(nil)
-	_ ports.Auth        = (*auth.Service)(nil)
-	_ ports.Host        = (*host.Manager)(nil)
-	_ ports.Jobs        = (*jobs.Tracker)(nil)
-	_ ports.HTTPGetter  = (*http.Client)(nil)
-	_ ports.HTTPDoer    = (*http.Client)(nil)
-	_ ports.JobRepo     = (*store.Store)(nil)
-	_ ports.ChatGateway = (*proxy.Proxy)(nil)
+	_ ports.Store         = (*store.Store)(nil)
+	_ ports.Health        = (*health.Checker)(nil)
+	_ ports.Auth          = (*auth.Service)(nil)
+	_ ports.Host          = (*host.Manager)(nil)
+	_ ports.Jobs          = (*jobs.Tracker)(nil)
+	_ ports.HTTPGetter    = (*http.Client)(nil)
+	_ ports.HTTPDoer      = (*http.Client)(nil)
+	_ ports.JobRepo       = (*store.Store)(nil)
+	_ ports.ChatGateway   = (*proxy.Proxy)(nil)
+	_ a2aproxy.GroupStore = (*store.Store)(nil)
 )
 
 type Config struct {
@@ -123,6 +124,7 @@ func New(cfg Config) (*App, error) {
 	mcpSrv.Mount(mux)
 	mcpproxy.New(st, mcpSrv.Allow, hubc.URL).Mount(mux)
 	a2aproxy.New(st, mcpSrv.Allow, hubc.URL).Mount(mux)
+	a2aproxy.MountGroups(mux, st)
 
 	hubc.Handler = mux
 	ctx, stop := context.WithCancel(context.Background())
