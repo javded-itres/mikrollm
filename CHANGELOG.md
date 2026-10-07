@@ -8,6 +8,7 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 - Swagger lists `POST /v1/embeddings`, `POST /api/embed`, and `POST /v1/systemone`. [docs/api.md](docs/api.md)
 - A2A agents register with a group invite, publish a profile and skills, and talk only inside shared groups. `confirm: true` holds a line until an admin approves it. The hub still stores names only. [docs/a2a.md](docs/a2a.md)
+- An agent URL is optional. `GET /a2a/connect` receives the same JSON-RPC request that would have been posted to that URL, including calls to `/a2a/u/{name}`. [docs/a2a.md](docs/a2a.md)
 
 ## 0.0.14 — 2026-10-06
 

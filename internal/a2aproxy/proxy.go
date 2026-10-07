@@ -89,6 +89,10 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		writeReply(w, rep)
 		return
 	}
+	if strings.TrimSpace(up.URL) == "" {
+		p.connected(w, r, up.Name, body)
+		return
+	}
 	target, ok := Join(up.URL, rest)
 	if !ok {
 		writeErr(w, http.StatusNotFound, "unknown agent")
@@ -100,6 +104,30 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeReply(w, rep)
+}
+
+// connected hands a JSON-RPC call to the agent holding GET /a2a/connect and waits for its reply.
+func (p *Proxy) connected(w http.ResponseWriter, r *http.Request, name string, body []byte) {
+	if len(body) == 0 {
+		writeErr(w, http.StatusBadRequest, "bad body")
+		return
+	}
+	id := rpcID(body)
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, "bad body")
+		return
+	}
+	reply := make(chan []byte, 1)
+	PushAgent(name, body, reply)
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	select {
+	case out := <-reply:
+		writeReply(w, mcpproxy.Reply{Status: http.StatusOK, ContentType: "application/json", Body: out})
+	case <-ctx.Done():
+		CancelAgent(name, id)
+		writeErr(w, http.StatusGatewayTimeout, "agent offline")
+	}
 }
 
 func (p *Proxy) remote(w http.ResponseWriter, r *http.Request, node, name, rest string) {

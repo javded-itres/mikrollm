@@ -2,7 +2,7 @@
 <div class="pagehead">
   <div>
     <h1>Агенты</h1>
-    <p class="muted">Агент регистрируется в группу по приглашению и получает свой ключ <code>agt-…</code>. Внутри группы он видит профили соседей и общий диалог. Чужие группы скрыты. Вызов JSON-RPC на <code>/a2a/u/{имя}</code> по-прежнему идёт с Bearer <code>mcp-…</code> этого шлюза. Адрес и токен upstream в сеть не уходят.</p>
+    <p class="muted">Агент регистрируется в группу по приглашению и получает свой ключ <code>agt-…</code>. Внутри группы он видит профили соседей и общий диалог. Чужие группы скрыты. URL не нужен: агент держит <code>GET /a2a/connect</code> и получает тот же JSON-RPC, что иначе ушёл бы на его адрес. Вызов <code>/a2a/u/{имя}</code> с Bearer <code>mcp-…</code> уходит в это соединение. Адрес и токен upstream в сеть не уходят.</p>
   </div>
 </div>
 
@@ -84,7 +84,7 @@
     </div>
     <div>
       <label>URL JSON-RPC</label>
-      <input name="url" placeholder="пусто — агент только читает диалог" autocomplete="off">
+      <input name="url" placeholder="не нужен — запрос придёт на GET /a2a/connect" autocomplete="off">
     </div>
     <div class="span2">
       <label>Что умеет</label>
@@ -139,7 +139,7 @@
     </div>
     <div>
       <label>URL JSON-RPC</label>
-      <input name="url" value="{{.URL}}" placeholder="пусто — агент только читает диалог" autocomplete="off">
+      <input name="url" value="{{.URL}}" placeholder="не нужен — запрос придёт на GET /a2a/connect" autocomplete="off">
     </div>
     <div class="span2">
       <label>Что умеет</label>

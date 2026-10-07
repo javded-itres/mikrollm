@@ -6,6 +6,7 @@
 
 - Swagger показывает `POST /v1/embeddings`, `POST /api/embed` и `POST /v1/systemone`. [docs/ru/api.md](docs/ru/api.md)
 - Агенты A2A регистрируются по приглашению в группу, публикуют профиль и навыки и видят только участников своих групп. `confirm: true` держит реплику, пока её не подтвердит администратор. Hub по-прежнему хранит только имена. [docs/ru/a2a.md](docs/ru/a2a.md)
+- URL агента необязателен. `GET /a2a/connect` получает тот же JSON-RPC, который иначе ушёл бы на этот URL, в том числе вызов `/a2a/u/{name}`. [docs/ru/a2a.md](docs/ru/a2a.md)
 
 ## 0.0.14 — 2026-10-06
 

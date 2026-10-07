@@ -56,6 +56,8 @@ func MountGroups(mux *http.ServeMux, st GroupStore) {
 	mux.HandleFunc("GET /a2a/directory", g.directory)
 	mux.HandleFunc("GET /a2a/messages", g.listMessages)
 	mux.HandleFunc("POST /a2a/messages", g.postMessage)
+	mux.HandleFunc("GET /a2a/connect", g.connect)
+	mux.HandleFunc("POST /a2a/connect", g.connectReply)
 }
 
 type groups struct {
@@ -192,10 +194,52 @@ func (g *groups) directory(w http.ResponseWriter, r *http.Request) {
 	if agents == nil {
 		agents = []any{}
 	}
+	selfCard := publicAgent(self, selfGroups)
+	selfCard["connect"] = "/a2a/connect"
 	writeJSON(w, http.StatusOK, map[string]any{
-		"self":   publicAgent(self, selfGroups),
+		"self":   selfCard,
 		"agents": agents,
 	})
+}
+
+func (g *groups) connect(w http.ResponseWriter, r *http.Request) {
+	self, ok := g.caller(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), connectWait)
+	defer cancel()
+	body, busy := TakeAgent(ctx, self.Name)
+	if busy {
+		writeAPIErr(w, http.StatusConflict, "busy")
+		return
+	}
+	if body == nil {
+		if r.Context().Err() != nil {
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
+}
+
+func (g *groups) connectReply(w http.ResponseWriter, r *http.Request) {
+	self, ok := g.caller(w, r)
+	if !ok {
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil || !json.Valid(body) {
+		writeAPIErr(w, http.StatusBadRequest, "bad body")
+		return
+	}
+	if !ReplyAgent(self.Name, body) {
+		writeAPIErr(w, http.StatusNotFound, "no call")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (g *groups) listMessages(w http.ResponseWriter, r *http.Request) {

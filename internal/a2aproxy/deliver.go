@@ -14,7 +14,8 @@ import (
 )
 
 // ForwardPosted pushes a transcript line as A2A message/send.
-// Agents without a URL are skipped. A failed push leaves the transcript in place.
+// Every enabled agent receives it on GET /a2a/connect. A saved URL is also called.
+// A failed URL push leaves the transcript and the connection queue in place.
 func ForwardPosted(ctx context.Context, agents []domain.A2AUpstream, msg domain.A2AMessage) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -24,7 +25,11 @@ func ForwardPosted(ctx context.Context, agents []domain.A2AUpstream, msg domain.
 	body := messageSendBody(msg)
 	var wg sync.WaitGroup
 	for _, a := range agents {
-		if !a.Enabled || strings.TrimSpace(a.URL) == "" {
+		if !a.Enabled {
+			continue
+		}
+		PushAgent(a.Name, body, nil)
+		if strings.TrimSpace(a.URL) == "" {
 			continue
 		}
 		wg.Add(1)

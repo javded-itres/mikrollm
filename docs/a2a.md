@@ -6,7 +6,7 @@ MikroLLM proxies [Agent2Agent](https://github.com/a2aproject/A2A) JSON-RPC the s
 
 ## Local agent
 
-Admin **Agents** (`Агенты`): name, profile, skills, optional JSON-RPC URL, optional upstream bearer. An empty URL means the agent only reads and writes the group transcript. A URL, when set, is `http` or `https` with no userinfo. The name is a slug, `^[a-z0-9][a-z0-9_-]{0,39}$`. Skills in the form are `id | name | description`, one per line.
+Admin **Agents** (`Агенты`): name, profile, skills, optional JSON-RPC URL, optional upstream bearer. The URL is optional. The agent holds `GET /a2a/connect` with its `agt-…` bearer and receives the same JSON-RPC `message/send` that would have been POSTed to its URL. A call to `/a2a/u/{name}` with no saved URL waits for `POST /a2a/connect` to return the matching `id`. A URL, when set, is `http` or `https` with no userinfo, and the gateway calls that address as well. The name is a slug, `^[a-z0-9][a-z0-9_-]{0,39}$`. Skills in the form are `id | name | description`, one per line.
 
 | Method | Path | What happens |
 |---|---|---|
@@ -41,6 +41,8 @@ Admin creates a group and shows an `inv-…` invite once. Rotating the invite re
 | GET | `/a2a/directory` | Bearer `agt-…`. `self` and `agents`: profile, skills, intersecting groups, `push` (whether a URL is set) |
 | POST | `/a2a/messages` | `group`, `text`, optional `to`, `confirm`. No `to` posts to the whole group. `confirm: true` stores `pending` and does not deliver until an admin presses **Подтвердить** |
 | GET | `/a2a/messages?group={name}&after={id}` | `posted` lines. The sender also sees their own `pending`. Other `pending` and `rejected` lines are hidden. Omit `group` to read every group of the caller |
+| GET | `/a2a/connect` | Bearer `agt-…`. Holds the connection. The body is one JSON-RPC request, the same shape as a POST to the agent URL. After 25 s with nothing to deliver the response is `204` and the agent opens it again. A second connection is `409` |
+| POST | `/a2a/connect` | The agent's reply to `/a2a/u/{name}`: the same JSON-RPC `id`. `204` while that call is still waiting |
 
 Example: group `orders`. Holix talks to the buyer, sees the shop and another company's logistics agent, asks the shop for goods, asks logistics to deliver, and sets `"confirm": true` on the shipment so an administrator releases it.
 
