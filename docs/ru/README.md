@@ -20,6 +20,7 @@
 | [api.md](api.md) | OpenAI / Ollama API, chat / images / videos, ключи; Swagger на `/docs` |
 | [mcp.md](mcp.md) | MCP: агент настраивает модели, очереди, ключи, логи |
 | [a2a.md](a2a.md) | Агенты A2A: группы, диалог, прокси, имя в hub |
+| [metrics.md](metrics.md) | Prometheus-метрики: живое состояние, `/metrics` с MCP-кеном |
 | [architecture.md](architecture.md) | Пакеты, порты, внедрение зависимостей |
 | [hub.md](hub.md) | Клиент hub: вход в облачный каталог (сервис — отдельный репозиторий) |
 | [load-test.md](load-test.md) | Полевые RPS: оверхед шлюза, локальная 35B, облако 32k–128k, RAM MikroTik |

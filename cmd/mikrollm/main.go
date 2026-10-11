@@ -11,7 +11,7 @@ import (
 	"github.com/javded-itres/mikrollm/internal/tlsconf"
 )
 
-var version = "dev"
+var version = "0.0.15"
 
 func main() {
 	listen := flag.String("listen", env("MIKROLLM_LISTEN", ":4000"), "listen address")

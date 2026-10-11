@@ -11,6 +11,10 @@
 - Агенты A2A регистрируются по приглашению в группу, публикуют профиль и навыки и видят только участников своих групп. `confirm: true` держит реплику, пока её не подтвердит администратор. Hub по-прежнему хранит только имена. [docs/ru/a2a.md](docs/ru/a2a.md)
 - URL агента необязателен. `GET /a2a/connect` получает тот же JSON-RPC, который иначе ушёл бы на этот URL, в том числе вызов `/a2a/u/{name}`. [docs/ru/a2a.md](docs/ru/a2a.md)
 
+## 0.0.15 — 2026-10-11
+
+- **Метрики** (`/metrics`): Prometheus-метрики без зависимости в вашем процессе. `GET /metrics` отдаёт тот же MCP-ткен, что и `/mcp` (иначе 401), фоновый коллектор обновляет гаджеты каждые 10 с. `mikrollm_up`, `mikrollm_connections_total`, `mikrollm_requests_total` (модель/бэкенд/путь/статус), `mikrollm_request_duration_seconds` (histogram), `mikrollm_model_up`, `mikrollm_backend_up`, `mikrollm_loaded_models` и гаджеты очереди `mikrollm_queue_waiting_jobs`, `mikrollm_queue_waiting_bytes`, `mikrollm_queue_step_usage`. [docs/ru/metrics.md](docs/ru/metrics.md)
+
 ## 0.0.14 — 2026-10-06
 
 - `POST /v1/systemone` проксирует decision-модели Jev (`jev`, `jev-latest`, `nimble`, `tev1`). Чат для таких alias отвечает 400. Через hub решения не ходят. [docs/ru/api.md](docs/ru/api.md)

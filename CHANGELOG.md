@@ -13,6 +13,10 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 - A2A agents register with a group invite, publish a profile and skills, and talk only inside shared groups. `confirm: true` holds a line until an admin approves it. The hub still stores names only. [docs/a2a.md](docs/a2a.md)
 - An agent URL is optional. `GET /a2a/connect` receives the same JSON-RPC request that would have been posted to that URL, including calls to `/a2a/u/{name}`. [docs/a2a.md](docs/a2a.md)
 
+## 0.0.15 — 2026-10-11
+
+- **Metrics** (`/metrics`): Prometheus metrics without a dependency in your own process. `GET /metrics` serves the same MCP token as `/mcp` (401 otherwise), and a background collector refreshes gauges every 10 s. `mikrollm_up`, `mikrollm_connections_total`, `mikrollm_requests_total` (model/backend/path/status), `mikrollm_request_duration_seconds` (histogram), `mikrollm_model_up`, `mikrollm_backend_up`, `mikrollm_loaded_models`, and queue gauges `mikrollm_queue_waiting_jobs`, `mikrollm_queue_waiting_bytes`, `mikrollm_queue_step_usage`. [docs/metrics.md](docs/metrics.md)
+
 ## 0.0.14 — 2026-10-06
 
 - `POST /v1/systemone` proxies Jev decision models (`jev`, `jev-latest`, `nimble`, `tev1`). Chat completions return 400 for those aliases. Hub relay does not carry decisions. [docs/api.md](docs/api.md)
