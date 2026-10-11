@@ -6,6 +6,9 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+- A2A proxy streams `text/event-stream`. `message/stream` and `Accept: text/event-stream` are flushed as the upstream agent writes them. A JSON reply is still buffered. [docs/a2a.md](docs/a2a.md)
+- MCP proxy, chat (`stream: true`), hub chat when the relay itself is an event stream, and Grok flush `text/event-stream` the same way. Embeddings, decisions, images, and Codex stay one body: those replies are rewritten or translated. [docs/mcp.md](docs/mcp.md)
+- The Agents page is a short list. RU/EN in the header switches the menu and that page.
 - Swagger lists `POST /v1/embeddings`, `POST /api/embed`, and `POST /v1/systemone`. [docs/api.md](docs/api.md)
 - A2A agents register with a group invite, publish a profile and skills, and talk only inside shared groups. `confirm: true` holds a line until an admin approves it. The hub still stores names only. [docs/a2a.md](docs/a2a.md)
 - An agent URL is optional. `GET /a2a/connect` receives the same JSON-RPC request that would have been posted to that URL, including calls to `/a2a/u/{name}`. [docs/a2a.md](docs/a2a.md)

@@ -20,6 +20,7 @@ English is the default. Russian copies live in [ru/](ru/README.md). GitHub Relea
 | [api.md](api.md) | OpenAI / Ollama API, chat / images / videos, keys; live Swagger at `/docs` |
 | [mcp.md](mcp.md) | MCP: agent configures models, queues, keys, logs |
 | [a2a.md](a2a.md) | A2A agents: groups, transcript, proxy, hub name |
+| [metrics.md](metrics.md) | Prometheus metrics: live state, `/metrics` with MCP token |
 | [architecture.md](architecture.md) | Packages, ports, dependency injection |
 | [hub.md](hub.md) | Hub client: join the cloud catalog (service is a separate repo) |
 | [load-test.md](load-test.md) | Field RPS: gateway overhead, local 35B, cloud 32k–128k, MikroTik RAM |

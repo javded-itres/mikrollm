@@ -229,6 +229,93 @@ func Complete(ctx context.Context, client Doer, base string, s Session, chat []b
 	return status, raw, ct, nil
 }
 
+// Write proxies one chat call onto w. text/event-stream is flushed as it arrives.
+// A JSON body is still read fully, then written. Status 401 is returned unread so the caller can refresh.
+func Write(ctx context.Context, client Doer, base string, s Session, chat []byte, persist func(Session), w http.ResponseWriter) (int, int64, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	body, model, err := prepare(chat, s.Model)
+	if err != nil {
+		return 400, 0, err
+	}
+	status, n, wrote, err := writeChat(ctx, client, base, s, body, model, w)
+	if err != nil || wrote || status != http.StatusUnauthorized || s.RefreshToken == "" {
+		return status, n, err
+	}
+	next, rerr := Refresh(ctx, client, s)
+	if rerr != nil {
+		return status, n, nil
+	}
+	if persist != nil {
+		persist(next)
+	}
+	status, n, _, err = writeChat(ctx, client, base, next, body, model, w)
+	return status, n, err
+}
+
+func writeChat(ctx context.Context, client Doer, base string, s Session, body []byte, model string, w http.ResponseWriter) (int, int64, bool, error) {
+	url := strings.TrimRight(base, "/") + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, 0, false, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	applyCLIHeaders(req, s)
+	req.Header.Set("x-grok-model-override", model)
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return resp.StatusCode, 0, false, nil
+	}
+	ct := resp.Header.Get("Content-Type")
+	if strings.Contains(strings.ToLower(ct), "text/event-stream") {
+		if ct == "" {
+			ct = "text/event-stream"
+		}
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Accel-Buffering", "no")
+		code := resp.StatusCode
+		if code == 0 {
+			code = http.StatusOK
+		}
+		w.WriteHeader(code)
+		flusher, _ := w.(http.Flusher)
+		buf := make([]byte, 32*1024)
+		var n int64
+		for {
+			nr, rerr := resp.Body.Read(buf)
+			if nr > 0 {
+				wn, _ := w.Write(buf[:nr])
+				n += int64(wn)
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+			if rerr != nil {
+				break
+			}
+		}
+		return code, n, true, nil
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if ct == "" {
+		ct = "application/json"
+	}
+	w.Header().Set("Content-Type", ct)
+	code := resp.StatusCode
+	if code == 0 {
+		code = http.StatusOK
+	}
+	w.WriteHeader(code)
+	wn, _ := w.Write(raw)
+	return code, int64(wn), true, nil
+}
+
 func postChat(ctx context.Context, client Doer, base string, s Session, body []byte, model string) (int, []byte, string, error) {
 	url := strings.TrimRight(base, "/") + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))

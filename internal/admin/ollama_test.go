@@ -64,7 +64,7 @@ func TestNextPath(t *testing.T) {
 }
 
 func TestTemplatesParse(t *testing.T) {
-	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }, "hasint": func(ids []int64, id int64) bool {
+	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }, "tr": tr, "hasint": func(ids []int64, id int64) bool {
 		for _, v := range ids {
 			if v == id {
 				return true
@@ -90,7 +90,7 @@ func TestTemplatesParse(t *testing.T) {
 }
 
 func TestQueueStepDeleteUsesQueueID(t *testing.T) {
-	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }}
+	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }, "tr": tr}
 	tpl := template.Must(template.New("layout.html").Funcs(fm).ParseFS(web.FS, "templates/layout.html", "templates/queues.html"))
 	var buf bytes.Buffer
 	err := tpl.ExecuteTemplate(&buf, "layout.html", map[string]any{
@@ -120,7 +120,7 @@ func TestQueueStepDeleteUsesQueueID(t *testing.T) {
 }
 
 func TestHubShareAndAgentTemplates(t *testing.T) {
-	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }, "hasint": func(ids []int64, id int64) bool {
+	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }, "tr": tr, "hasint": func(ids []int64, id int64) bool {
 		for _, v := range ids {
 			if v == id {
 				return true

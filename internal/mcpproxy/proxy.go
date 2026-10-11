@@ -84,8 +84,9 @@ var upstreamClient = &http.Client{
 	},
 }
 
-// Do calls the stored MCP URL. The caller bearer is never forwarded; the stored token is.
-func Do(ctx context.Context, up domain.MCPUpstream, in Forward) (Reply, error) {
+// Open calls the stored URL and leaves the body open. The caller closes it.
+// The caller bearer is never forwarded; the stored token is. Redirects are an error.
+func Open(ctx context.Context, up domain.MCPUpstream, in Forward) (*http.Response, error) {
 	method := strings.ToUpper(strings.TrimSpace(in.Method))
 	if method == "" {
 		method = http.MethodPost
@@ -93,7 +94,7 @@ func Do(ctx context.Context, up domain.MCPUpstream, in Forward) (Reply, error) {
 	switch method {
 	case http.MethodGet, http.MethodPost, http.MethodDelete:
 	default:
-		return Reply{Status: http.StatusMethodNotAllowed}, nil
+		return nil, errMethod
 	}
 	var rdr io.Reader
 	if len(in.Body) > 0 && method != http.MethodGet {
@@ -101,7 +102,7 @@ func Do(ctx context.Context, up domain.MCPUpstream, in Forward) (Reply, error) {
 	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimSpace(up.URL), rdr)
 	if err != nil {
-		return Reply{}, err
+		return nil, err
 	}
 	if tok := strings.TrimSpace(up.Token); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
@@ -112,12 +113,25 @@ func Do(ctx context.Context, up domain.MCPUpstream, in Forward) (Reply, error) {
 	setSafe(req.Header, "Mcp-Protocol-Version", in.Protocol)
 	resp, err := upstreamClient.Do(req)
 	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		resp.Body.Close()
+		return nil, errRedirect
+	}
+	return resp, nil
+}
+
+// Do calls the stored MCP URL and buffers the body. The caller bearer is never forwarded.
+func Do(ctx context.Context, up domain.MCPUpstream, in Forward) (Reply, error) {
+	resp, err := Open(ctx, up, in)
+	if err == errMethod {
+		return Reply{Status: http.StatusMethodNotAllowed}, nil
+	}
+	if err != nil {
 		return Reply{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		return Reply{}, errRedirect
-	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBody+1))
 	if err != nil {
 		return Reply{}, err
@@ -156,13 +170,27 @@ func (p *Proxy) local(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad body")
 		return
 	}
-	rep, err := Do(r.Context(), up, Forward{
+	resp, err := Open(r.Context(), up, Forward{
 		Method: r.Method, Session: r.Header.Get("Mcp-Session-Id"),
 		Accept: r.Header.Get("Accept"), Protocol: r.Header.Get("Mcp-Protocol-Version"),
 		ContentType: r.Header.Get("Content-Type"), Body: body,
 	})
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "upstream mcp")
+		return
+	}
+	defer resp.Body.Close()
+	if isEventStream(resp.Header.Get("Content-Type")) {
+		copyEventStream(w, resp)
+		return
+	}
+	rep, err := readReply(resp)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "upstream mcp")
+		return
+	}
+	if rep.Status == http.StatusRequestEntityTooLarge {
+		writeErr(w, rep.Status, "mcp response too large")
 		return
 	}
 	writeReply(w, rep)
@@ -229,21 +257,81 @@ func (p *Proxy) remote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	out, _ := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBody+1))
-	if len(out) > maxUpstreamBody {
-		writeErr(w, http.StatusRequestEntityTooLarge, "mcp response too large")
+	if isEventStream(resp.Header.Get("Content-Type")) {
+		copyEventStream(w, resp)
 		return
+	}
+	rep, err := readReply(resp)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "hub relay")
+		return
+	}
+	if rep.Status == http.StatusRequestEntityTooLarge {
+		writeErr(w, rep.Status, "mcp response too large")
+		return
+	}
+	writeReply(w, rep)
+}
+
+func readReply(resp *http.Response) (Reply, error) {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBody+1))
+	if err != nil {
+		return Reply{}, err
+	}
+	if len(body) > maxUpstreamBody {
+		return Reply{Status: http.StatusRequestEntityTooLarge}, nil
 	}
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
 		ct = "application/json"
 	}
-	writeReply(w, Reply{
-		Status: resp.StatusCode, ContentType: safeHeader(ct, 200),
-		Session:  safeHeader(resp.Header.Get("Mcp-Session-Id"), 200),
-		Protocol: safeHeader(resp.Header.Get("Mcp-Protocol-Version"), 80),
-		Body:     out,
-	})
+	return Reply{
+		Status:      resp.StatusCode,
+		ContentType: safeHeader(ct, 200),
+		Session:     safeHeader(resp.Header.Get("Mcp-Session-Id"), 200),
+		Protocol:    safeHeader(resp.Header.Get("Mcp-Protocol-Version"), 80),
+		Body:        body,
+	}, nil
+}
+
+func isEventStream(ct string) bool {
+	return strings.Contains(strings.ToLower(ct), "text/event-stream")
+}
+
+// copyEventStream flushes an upstream SSE response as events arrive.
+func copyEventStream(w http.ResponseWriter, resp *http.Response) {
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "text/event-stream"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	if sess := safeHeader(resp.Header.Get("Mcp-Session-Id"), 200); sess != "" {
+		w.Header().Set("Mcp-Session-Id", sess)
+	}
+	if proto := safeHeader(resp.Header.Get("Mcp-Protocol-Version"), 80); proto != "" {
+		w.Header().Set("Mcp-Protocol-Version", proto)
+	}
+	code := resp.StatusCode
+	if code == 0 {
+		code = http.StatusOK
+	}
+	w.WriteHeader(code)
+	flusher, _ := w.(http.Flusher)
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			_, _ = w.Write(buf[:n])
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func writeReply(w http.ResponseWriter, rep Reply) {
@@ -322,3 +410,9 @@ type redirectError struct{}
 func (redirectError) Error() string { return "upstream redirect" }
 
 var errRedirect error = redirectError{}
+
+type methodError struct{}
+
+func (methodError) Error() string { return "method" }
+
+var errMethod error = methodError{}

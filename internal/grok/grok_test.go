@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseIssuerBox(t *testing.T) {
@@ -71,5 +72,58 @@ func TestCompleteSetsCLIHeaders(t *testing.T) {
 	}
 	if !strings.Contains(ct, "json") {
 		t.Fatal(ct)
+	}
+}
+
+func TestWriteFlushesEventStream(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"n\":1}\n\n"))
+		w.(http.Flusher).Flush()
+		<-release
+		_, _ = w.Write([]byte("data: {\"n\":2}\n\n"))
+	}))
+	defer srv.Close()
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	rec := &flushRec{ResponseRecorder: httptest.NewRecorder(), saw: make(chan struct{})}
+	done := make(chan struct{})
+	go func() {
+		_, _, _ = Write(context.Background(), srv.Client(), srv.URL, Session{AccessToken: "sess-1"}, []byte(`{"model":"grok","stream":true,"messages":[]}`), nil, rec)
+		close(done)
+	}()
+	select {
+	case <-rec.saw:
+	case <-done:
+		t.Fatalf("ended before flush: %s", rec.Body.String())
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out")
+	}
+	if strings.Contains(rec.Body.String(), `"n":2`) || rec.Header().Get("X-Accel-Buffering") != "no" {
+		t.Fatalf("body %s headers %v", rec.Body.String(), rec.Header())
+	}
+	close(release)
+	<-done
+}
+
+type flushRec struct {
+	*httptest.ResponseRecorder
+	saw chan struct{}
+}
+
+func (f *flushRec) Flush() {
+	f.ResponseRecorder.Flush()
+	select {
+	case <-f.saw:
+	default:
+		if strings.Contains(f.Body.String(), `"n":1`) {
+			close(f.saw)
+		}
 	}
 }

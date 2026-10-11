@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Прокси A2A стримит `text/event-stream`. `message/stream` и `Accept: text/event-stream` уходят клиенту по мере событий агента. JSON-ответ по-прежнему собирается целиком. [docs/ru/a2a.md](docs/ru/a2a.md)
+- То же для прокси MCP, чата со `stream: true`, hub-чата если relay сам отдал поток, и Grok. Эмбеддинги, решения, картинки и Codex остаются одним телом: ответ переписывается или переводится. [docs/ru/mcp.md](docs/ru/mcp.md)
+- Вкладка **Агенты** стала коротким списком. Переключатель RU/EN в шапке меняет меню и эту вкладку.
 - Swagger показывает `POST /v1/embeddings`, `POST /api/embed` и `POST /v1/systemone`. [docs/ru/api.md](docs/ru/api.md)
 - Агенты A2A регистрируются по приглашению в группу, публикуют профиль и навыки и видят только участников своих групп. `confirm: true` держит реплику, пока её не подтвердит администратор. Hub по-прежнему хранит только имена. [docs/ru/a2a.md](docs/ru/a2a.md)
 - URL агента необязателен. `GET /a2a/connect` получает тот же JSON-RPC, который иначе ушёл бы на этот URL, в том числе вызов `/a2a/u/{name}`. [docs/ru/a2a.md](docs/ru/a2a.md)

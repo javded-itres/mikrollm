@@ -21,6 +21,7 @@ import (
 	"github.com/javded-itres/mikrollm/internal/jobs"
 	"github.com/javded-itres/mikrollm/internal/mcp"
 	"github.com/javded-itres/mikrollm/internal/mcpproxy"
+	"github.com/javded-itres/mikrollm/internal/metrics"
 	"github.com/javded-itres/mikrollm/internal/ports"
 	"github.com/javded-itres/mikrollm/internal/proxy"
 	"github.com/javded-itres/mikrollm/internal/queue"
@@ -80,14 +81,26 @@ func New(cfg Config) (*App, error) {
 	if isLocalSeed(cfg.Seed) {
 		bootstrapLocalOllama(st, checker)
 	}
+	collector := metrics.RegisterCollector()
+	// metrics.Store — обёртка, которая считает запросы к бэкенду.
+	st2 := metrics.NewStore(st, metrics.RecordRequest)
+	collector.SetDeps(st, nil)
+	go func() {
+		t := time.NewTicker(10 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			collector.Snapshot()
+		}
+	}()
 	go checker.Loop(10 * time.Second)
 	keys := auth.New(st)
 	hosts := host.New(nil)
 	tracker := jobs.New(st)
 	resumePulls(tracker, st, hosts, checker)
-	px := proxy.New(st, checker, keys, nil)
-	queues := queue.New(st, px, queue.LimitsFromEnv())
+	px := proxy.New(st2, checker, keys, nil)
+	queues := queue.New(st2, px, queue.LimitsFromEnv())
 	px.SetQueue(queues)
+	collector.SetDeps(st, queues)
 	go queues.Loop(context.Background())
 	hubc := hubclient.New(st, keys, cfg.Listen)
 	secret := newRelaySecret()
@@ -126,11 +139,26 @@ func New(cfg Config) (*App, error) {
 	a2aproxy.New(st, mcpSrv.Allow, hubc.URL).Mount(mux)
 	a2aproxy.MountGroups(mux, st)
 
+	mux.HandleFunc("GET /metrics", metricsHandler(keys))
+
 	hubc.Handler = mux
 	ctx, stop := context.WithCancel(context.Background())
 	go hubc.Loop(ctx)
 
 	return &App{Handler: logRequests(secureHeaders(limitBody(mux))), Store: st, stop: stop}, nil
+}
+
+func metricsHandler(keys *auth.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !keys.ValidMCP(auth.Bearer(r)) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="MikroLLM metrics"`)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+			return
+		}
+		metrics.Handler().ServeHTTP(w, r)
+	}
 }
 
 func isLocalSeed(s string) bool {

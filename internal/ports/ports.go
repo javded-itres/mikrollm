@@ -181,7 +181,6 @@ type Auth interface {
 	PutFlash(w http.ResponseWriter, val string)
 	TakeFlash(w http.ResponseWriter, r *http.Request) string
 }
-
 type Host interface {
 	Pull(ctx context.Context, b domain.Backend, model string, w io.Writer) error
 	Delete(ctx context.Context, b domain.Backend, model string) error

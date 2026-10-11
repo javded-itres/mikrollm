@@ -11,7 +11,7 @@ MikroLLM проксирует JSON-RPC [Agent2Agent](https://github.com/a2aproje
 | Метод | Путь | Что происходит |
 |---|---|---|
 | GET | `/a2a/u/{name}/.well-known/agent-card.json` | Карточка upstream или короткая карточка, если её нет. Поле `url` переписывается на этот шлюз |
-| POST, DELETE | `/a2a/u/{name}` | JSON-RPC на сохранённый URL |
+| POST, DELETE | `/a2a/u/{name}` | JSON-RPC на сохранённый URL. `text/event-stream` (`message/stream` или `Accept: text/event-stream`) отдаётся по мере событий |
 | POST, GET, DELETE | `/a2a/u/{name}/{path}` | Тот же URL плюс относительный путь. `..` отклоняется |
 
 Авторизация — bearer MCP этого шлюза (`mcp-…` или пароль админки). Этот заголовок дальше не уходит. Пустое поле токена при сохранении оставляет старый секрет. В HTML админки токен не попадает.
@@ -25,7 +25,7 @@ MikroLLM проксирует JSON-RPC [Agent2Agent](https://github.com/a2aproje
 | Метод | Путь | Что происходит |
 |---|---|---|
 | GET | `/a2a/u/{node}/{name}/.well-known/agent-card.json` | Карточка соседа. `url` становится этим шлюзом, следующий вызов остаётся здесь |
-| POST | `/a2a/u/{node}/{name}` | Hub `POST /v1/relay/{node}/a2a/{name}`. 404, если имя не было в анонсе |
+| POST | `/a2a/u/{node}/{name}` | Hub `POST /v1/relay/{node}/a2a/{name}`. Поток событий отдаётся так же. 404, если имя не было в анонсе |
 
 `{node}` — id hub (`n` и 32 hex-символа). Владелец отдаёт сырую карточку. Переписывает её вызывающий шлюз. Тело до 1 МиБ.
 

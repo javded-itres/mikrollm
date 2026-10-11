@@ -712,24 +712,23 @@ func (p *Proxy) forwardGrok(ctx context.Context, w http.ResponseWriter, k domain
 	if base == "" {
 		base = grok.DefaultBase
 	}
-	status, body, ct, err := grok.Complete(ctx, p.client, base, sess, payload, func(next grok.Session) {
+	status, nout, err := grok.Write(ctx, p.client, base, sess, payload, func(next grok.Session) {
 		_, _ = p.st.UpsertBackend(b.Name, b.BaseURL, b.Enabled, b.Weight, b.Kind, next.Compact())
-	})
+	}, w)
 	if err != nil {
 		p.st.Log(k.Prefix, model, b.Name, 502, time.Since(start), 0, domain.TokenUsage{})
 		writeJSON(w, 502, map[string]any{"error": map[string]any{"message": err.Error()}})
 		return 502, err
 	}
+	if status == http.StatusUnauthorized {
+		p.st.Log(k.Prefix, model, b.Name, status, time.Since(start), 0, domain.TokenUsage{})
+		writeJSON(w, status, map[string]any{"error": map[string]any{"message": "grok unauthorized"}})
+		return status, nil
+	}
 	if status == 0 {
 		status = 200
 	}
-	p.st.Log(k.Prefix, model, b.Name, status, time.Since(start), int64(len(body)), domain.TokenUsage{})
-	if ct == "" {
-		ct = "application/json"
-	}
-	w.Header().Set("Content-Type", ct)
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
+	p.st.Log(k.Prefix, model, b.Name, status, time.Since(start), nout, domain.TokenUsage{})
 	return status, nil
 }
 
@@ -899,6 +898,37 @@ func (p *Proxy) forwardHub(ctx context.Context, w http.ResponseWriter, k domain.
 	if routed := strings.TrimSpace(resp.Header.Get("X-MikroLLM-Routed-Model")); routed != "" {
 		w.Header().Set("X-MikroLLM-Routed-Model", routed)
 		b.Name = routed
+	}
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Accel-Buffering", "no")
+		code := resp.StatusCode
+		if code == 0 {
+			code = 200
+		}
+		w.WriteHeader(code)
+		flusher, _ := w.(http.Flusher)
+		buf := make([]byte, 32*1024)
+		var nout int64
+		for {
+			n, rerr := resp.Body.Read(buf)
+			if n > 0 {
+				wn, _ := w.Write(buf[:n])
+				nout += int64(wn)
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+			if rerr != nil {
+				break
+			}
+		}
+		p.st.Log(k.Prefix, requested, b.Name, code, time.Since(start), nout, domain.TokenUsage{})
+		if code >= 400 {
+			return code, errors.New("hub stream")
+		}
+		return code, nil
 	}
 	out, _ := io.ReadAll(io.LimitReader(resp.Body, 12<<20))
 	code := resp.StatusCode
@@ -1108,6 +1138,8 @@ func writeUpstream(w http.ResponseWriter, resp *http.Response, filtered []byte, 
 	switch {
 	case guard.IsStream(filtered):
 		copySafeHeaders(w.Header(), resp.Header)
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Accel-Buffering", "no")
 		w.WriteHeader(code)
 		flusher, _ := w.(http.Flusher)
 		sc := &promptcache.Scanner{}

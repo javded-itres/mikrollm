@@ -161,8 +161,8 @@ Admin **MCP** stores other MCP servers (name, URL, bearer). An agent connects to
 
 | Method | Path | What happens |
 |---|---|---|
-| POST, GET, DELETE | `/mcp/u/{name}` | Proxy to the server saved under that name |
-| POST, GET, DELETE | `/mcp/u/{node}/{name}` | Same call through the hub to a neighbor that shared the name |
+| POST, GET, DELETE | `/mcp/u/{name}` | Proxy to the server saved under that name. `text/event-stream` is flushed as events arrive |
+| POST, GET, DELETE | `/mcp/u/{node}/{name}` | Same call through the hub. An event stream from the hub is flushed the same way |
 
 Auth is the gateway MCP bearer (`mcp-…` or the admin password). That header is not forwarded. The gateway adds the token saved for the server. The hub catalog stores the name only.
 

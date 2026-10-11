@@ -80,6 +80,7 @@ func New(d Deps) *UI {
 			}
 			return false
 		},
+		"tr": tr,
 	}
 	must := func(files ...string) *template.Template {
 		return template.Must(template.New("layout.html").Funcs(fm).ParseFS(web.FS, files...))
@@ -110,6 +111,7 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /openapi.json", serveOpenAPI)
 	mux.HandleFunc("GET /docs", u.docsPage)
 	mux.HandleFunc("GET /admin/docs", u.docsPage)
+	mux.HandleFunc("GET /admin/lang", u.setLang)
 	mux.HandleFunc("GET /admin/login", u.loginPage)
 	mux.HandleFunc("POST /admin/login", u.loginPost)
 	mux.HandleFunc("POST /admin/logout", u.protect(u.logout))
@@ -1575,6 +1577,9 @@ func (u *UI) render(w http.ResponseWriter, r *http.Request, name string, data ma
 	}
 	if _, ok := data["CSRF"]; !ok && u.keys != nil {
 		data["CSRF"] = u.keys.CSRF(r)
+	}
+	if _, ok := data["Lang"]; !ok {
+		data["Lang"] = requestLang(r)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

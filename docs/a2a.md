@@ -11,7 +11,7 @@ Admin **Agents** (`Агенты`): name, profile, skills, optional JSON-RPC URL,
 | Method | Path | What happens |
 |---|---|---|
 | GET | `/a2a/u/{name}/.well-known/agent-card.json` | Upstream card, or a small card if the upstream has none. `url` is rewritten to this gateway |
-| POST, DELETE | `/a2a/u/{name}` | JSON-RPC on the saved URL |
+| POST, DELETE | `/a2a/u/{name}` | JSON-RPC on the saved URL. `text/event-stream` (`message/stream` or `Accept: text/event-stream`) is flushed as events arrive |
 | POST, GET, DELETE | `/a2a/u/{name}/{path}` | Same URL plus a relative path. `..` is rejected |
 
 Auth is the gateway MCP bearer (`mcp-…` or the admin password). That header is not forwarded. An empty token field on save keeps the stored secret. The token is not rendered in admin HTML.
@@ -25,7 +25,7 @@ The catalog and the hub UI show the name when the node shares agents or MCP.
 | Method | Path | What happens |
 |---|---|---|
 | GET | `/a2a/u/{node}/{name}/.well-known/agent-card.json` | Neighbor card. `url` becomes this gateway, so the next call stays here |
-| POST | `/a2a/u/{node}/{name}` | Hub `POST /v1/relay/{node}/a2a/{name}`. 404 if that name was not announced |
+| POST | `/a2a/u/{node}/{name}` | Hub `POST /v1/relay/{node}/a2a/{name}`. An event stream is flushed the same way. 404 if that name was not announced |
 
 `{node}` is the hub id (`n` plus 32 hex digits). The owner returns the raw card. The caller rewrites it. Body limit is 1 MiB.
 

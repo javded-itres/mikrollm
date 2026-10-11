@@ -98,12 +98,9 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "unknown agent")
 		return
 	}
-	rep, err := call(r.Context(), up.Token, target, forwardIn(r, body))
-	if err != nil {
+	if err := p.forward(w, r, up.Token, target, body, nil); err != nil {
 		writeErr(w, http.StatusBadGateway, "upstream agent")
-		return
 	}
-	writeReply(w, rep)
 }
 
 // connected hands a JSON-RPC call to the agent holding GET /a2a/connect and waits for its reply.
@@ -170,19 +167,17 @@ func (p *Proxy) remote(w http.ResponseWriter, r *http.Request, node, name, rest 
 		return
 	}
 	defer resp.Body.Close()
-	out, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20+1))
-	if len(out) > 8<<20 {
-		writeErr(w, http.StatusRequestEntityTooLarge, "agent response too large")
-		return
+	rewrite := func(out []byte) []byte { return out }
+	if IsCard(rest) {
+		public := publicURL(r, "/a2a/u/"+url.PathEscape(node)+"/"+url.PathEscape(name))
+		rewrite = func(out []byte) []byte {
+			if resp.StatusCode < 400 {
+				return RewriteCard(out, public, name)
+			}
+			return out
+		}
 	}
-	if IsCard(rest) && resp.StatusCode < 400 {
-		out = RewriteCard(out, publicURL(r, "/a2a/u/"+url.PathEscape(node)+"/"+url.PathEscape(name)), name)
-	}
-	ct := resp.Header.Get("Content-Type")
-	if ct == "" || IsCard(rest) {
-		ct = "application/json"
-	}
-	writeReply(w, mcpproxy.Reply{Status: resp.StatusCode, ContentType: ct, Body: out})
+	writeProxied(w, resp, rewrite)
 }
 
 func forwardIn(r *http.Request, body []byte) mcpproxy.Forward {
@@ -194,6 +189,76 @@ func forwardIn(r *http.Request, body []byte) mcpproxy.Forward {
 
 func call(ctx context.Context, token, target string, in mcpproxy.Forward) (mcpproxy.Reply, error) {
 	return mcpproxy.Do(ctx, domain.MCPUpstream{URL: target, Token: token}, in)
+}
+
+// forward proxies one call. A text/event-stream response is flushed as it arrives.
+// rewrite runs only on a buffered JSON body.
+func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, token, target string, body []byte, rewrite func([]byte) []byte) error {
+	resp, err := mcpproxy.Open(r.Context(), domain.MCPUpstream{URL: target, Token: token}, forwardIn(r, body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	writeProxied(w, resp, rewrite)
+	return nil
+}
+
+func writeProxied(w http.ResponseWriter, resp *http.Response, rewrite func([]byte) []byte) {
+	if isEventStream(resp.Header.Get("Content-Type")) {
+		copyEventStream(w, resp)
+		return
+	}
+	out, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20+1))
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "upstream agent")
+		return
+	}
+	if len(out) > 8<<20 {
+		writeErr(w, http.StatusRequestEntityTooLarge, "agent response too large")
+		return
+	}
+	if rewrite != nil {
+		out = rewrite(out)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/json"
+	}
+	writeReply(w, mcpproxy.Reply{Status: resp.StatusCode, ContentType: ct, Body: out})
+}
+
+func isEventStream(ct string) bool {
+	return strings.Contains(strings.ToLower(ct), "text/event-stream")
+}
+
+// copyEventStream writes an upstream SSE response without waiting for the last event.
+func copyEventStream(w http.ResponseWriter, resp *http.Response) {
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "text/event-stream"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	code := resp.StatusCode
+	if code == 0 {
+		code = http.StatusOK
+	}
+	w.WriteHeader(code)
+	flusher, _ := w.(http.Flusher)
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			_, _ = w.Write(buf[:n])
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 // FetchCard loads the upstream agent card. The RPC URL is not returned to the client.

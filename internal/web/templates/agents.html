@@ -1,189 +1,182 @@
 {{define "content"}}
-<div class="pagehead">
+<div class="pagehead tight">
   <div>
-    <h1>Агенты</h1>
-    <p class="muted">Агент регистрируется в группу по приглашению и получает свой ключ <code>agt-…</code>. Внутри группы он видит профили соседей и общий диалог. Чужие группы скрыты. URL не нужен: агент держит <code>GET /a2a/connect</code> и получает тот же JSON-RPC, что иначе ушёл бы на его адрес. Вызов <code>/a2a/u/{имя}</code> с Bearer <code>mcp-…</code> уходит в это соединение. Адрес и токен upstream в сеть не уходят.</p>
+    <h1>{{tr .Lang "agents_title"}}</h1>
+    <p class="muted">{{tr .Lang "agents_lead"}}</p>
   </div>
 </div>
 
 {{if .Invite}}
 <div class="flash secret-card">
   <div>
-    <div class="job-title">Приглашение{{if .InviteGroup}} в {{.InviteGroup}}{{end}}</div>
-    <p class="muted" style="margin:.15rem 0 0">Скопируйте сейчас — повторно не покажем. Старое приглашение этой группы больше не действует.</p>
+    <div class="job-title">{{tr .Lang "invite_title"}}{{if .InviteGroup}} {{tr .Lang "invite_in"}} {{.InviteGroup}}{{end}}</div>
+    <p class="muted" style="margin:.15rem 0 0">{{tr .Lang "invite_hint"}}</p>
   </div>
   <div class="secret-row">
     <code class="secret" id="group-invite">{{.Invite}}</code>
-    <button type="button" class="ghost" data-copy="#group-invite">Копировать</button>
+    <button type="button" class="ghost" data-copy="#group-invite">{{tr .Lang "copy"}}</button>
   </div>
 </div>
 {{end}}
 
-<div class="card add-box">
-  <h2>Группа</h2>
-  <p class="muted">Группа — граница видимости. Holix, магазин и логист видят друг друга только если они в одной группе.</p>
-  <form method="post" action="/admin/agents/groups" class="grid2" style="margin-top:.6rem">
-    <div>
-      <label>Имя</label>
-      <input name="name" required maxlength="40" placeholder="orders" autocomplete="off">
-    </div>
-    <div>
-      <label>Название</label>
-      <input name="title" maxlength="80" placeholder="Заказы" autocomplete="off">
-    </div>
-    <div class="span2">
-      <label>Описание</label>
-      <input name="description" maxlength="500" placeholder="Заказ, магазин и доставка" autocomplete="off">
-    </div>
-    <div class="span2"><button type="submit">Создать и показать приглашение</button></div>
-  </form>
-</div>
-
-{{range .Groups}}
-<article class="card">
-  <h2>{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}} <code>{{.Name}}</code></h2>
-  {{if .Description}}<p class="muted">{{.Description}}</p>{{end}}
-  <p class="muted small">Участники: {{if .Members}}{{join .Members ", "}}{{else}}пока никого{{end}}</p>
-  <div class="row">
-    <form method="post" action="/admin/agents/groups/{{.ID}}/rotate"><button class="ghost" type="submit">Новое приглашение</button></form>
-    <form method="post" action="/admin/agents/groups/{{.ID}}/delete"><button class="ghost" type="submit">Удалить группу</button></form>
+<section class="card agent-panel">
+  <div class="section-head">
+    <h2>{{tr .Lang "groups"}}</h2>
+    <form method="post" action="/admin/agents/groups" class="inline-form">
+      <input name="name" required maxlength="40" placeholder="{{tr .Lang "group_name"}}" autocomplete="off">
+      <input name="title" maxlength="80" placeholder="{{tr .Lang "group_title"}}" autocomplete="off">
+      <input name="description" maxlength="500" placeholder="{{tr .Lang "group_about"}}" autocomplete="off">
+      <button type="submit">{{tr .Lang "group_create"}}</button>
+    </form>
   </div>
-  <h3>Диалог</h3>
-  {{if not .Messages}}<p class="muted">Сообщений пока нет.</p>{{end}}
-  {{range .Messages}}
-  <p>
-    {{if eq .Status "pending"}}<span class="pill off">ожидает</span>{{else if eq .Status "rejected"}}<span class="pill off">отклонено</span>{{else}}<span class="pill">в чате</span>{{end}}
-    <code>{{.From}}</code> → <code>{{if .To}}{{.To}}{{else}}группа{{end}}</code>
-    {{.Body}}
-    <span class="muted small">{{.Created}}</span>
-  </p>
-  {{if eq .Status "pending"}}
-  <div class="row">
-    <form method="post" action="/admin/agents/messages/{{.ID}}/confirm"><button type="submit">Подтвердить</button></form>
-    <form method="post" action="/admin/agents/messages/{{.ID}}/reject"><button class="ghost" type="submit">Отклонить</button></form>
+  {{range .Groups}}
+  <div class="agent-block">
+    <div class="section-head">
+      <div>
+        <strong>{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</strong> <code>{{.Name}}</code>
+        {{if .Description}}<span class="muted">{{.Description}}</span>{{end}}
+        <div class="muted small">{{tr $.Lang "members"}}: {{if .Members}}{{join .Members ", "}}{{else}}{{tr $.Lang "nobody"}}{{end}}</div>
+      </div>
+      <div class="row">
+        <form method="post" action="/admin/agents/groups/{{.ID}}/rotate"><button class="ghost" type="submit">{{tr $.Lang "invite_new"}}</button></form>
+        <form method="post" action="/admin/agents/groups/{{.ID}}/delete"><button class="ghost" type="submit">{{tr $.Lang "group_delete"}}</button></form>
+      </div>
+    </div>
+    <div class="transcript">
+      {{if not .Messages}}<p class="muted">{{tr $.Lang "no_messages"}}</p>{{end}}
+      {{range .Messages}}
+      <div class="msg-line">
+        {{if eq .Status "pending"}}<span class="pill off">{{tr $.Lang "status_pending"}}</span>{{else if eq .Status "rejected"}}<span class="pill off">{{tr $.Lang "status_rejected"}}</span>{{else}}<span class="pill">{{tr $.Lang "status_posted"}}</span>{{end}}
+        <code>{{.From}}</code> → <code>{{if .To}}{{.To}}{{else}}{{tr $.Lang "to_group"}}{{end}}</code>
+        {{.Body}}
+        <span class="muted small">{{.Created}}</span>
+        {{if eq .Status "pending"}}
+        <form method="post" action="/admin/agents/messages/{{.ID}}/confirm"><button type="submit">{{tr $.Lang "confirm"}}</button></form>
+        <form method="post" action="/admin/agents/messages/{{.ID}}/reject"><button class="ghost" type="submit">{{tr $.Lang "reject"}}</button></form>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
   </div>
   {{end}}
-  {{end}}
-</article>
-{{end}}
+</section>
 
-<div class="card add-box">
-  <h2>Новый агент</h2>
-  <form method="post" action="/admin/agents" class="grid2" style="margin-top:.6rem">
+<details class="card agent-row" {{if not .Rows}}open{{end}}>
+  <summary><strong>{{tr .Lang "add_agent"}}</strong></summary>
+  <form method="post" action="/admin/agents" class="grid2">
     <div>
-      <label>Имя</label>
+      <label>{{tr .Lang "name"}}</label>
       <input name="name" required maxlength="40" placeholder="holix" autocomplete="off">
     </div>
     <div>
-      <label>Как показывать</label>
+      <label>{{tr .Lang "display"}}</label>
       <input name="display_name" maxlength="80" placeholder="Holix" autocomplete="off">
     </div>
     <div>
-      <label>Компания</label>
-      <input name="company" maxlength="80" placeholder="Holix" autocomplete="off">
+      <label>{{tr .Lang "company"}}</label>
+      <input name="company" maxlength="80" autocomplete="off">
     </div>
     <div>
-      <label>URL JSON-RPC</label>
-      <input name="url" placeholder="не нужен — запрос придёт на GET /a2a/connect" autocomplete="off">
-    </div>
-    <div class="span2">
-      <label>Что умеет</label>
-      <textarea name="description" maxlength="2000" placeholder="Ведёт диалог с покупателем по заказу"></textarea>
-    </div>
-    <div class="span2">
-      <label>Навыки</label>
-      <textarea name="skills" placeholder="order | Заказ | Ведёт заказ покупателя"></textarea>
-      <p class="muted small">Строка: <code>id | название | описание</code></p>
+      <label>{{tr .Lang "url"}}</label>
+      <input name="url" placeholder="{{tr .Lang "url_ph"}}" autocomplete="off">
     </div>
     <div>
-      <label>Bearer upstream</label>
-      <input name="token" type="password" placeholder="если URL требует Bearer" autocomplete="off">
+      <label>{{tr .Lang "about"}}</label>
+      <textarea name="description" maxlength="2000"></textarea>
     </div>
-    <div class="checks" style="align-self:end">
-      <label class="inline"><input type="checkbox" name="enabled" value="1" checked> Включён</label>
-      <label class="inline"><input type="checkbox" name="hub_share" value="1" {{if not .CanShare}}disabled{{end}}> В сеть</label>
+    <div>
+      <label>{{tr .Lang "skills"}}</label>
+      <textarea name="skills" placeholder="order | Заказ | товары"></textarea>
+      <p class="muted small">{{tr .Lang "skills_hint"}}</p>
     </div>
-    {{if .Groups}}
-    <div class="span2 checks">
+    <div>
+      <label>{{tr .Lang "token"}}</label>
+      <input name="token" type="password" placeholder="{{tr .Lang "token_ph"}}" autocomplete="off">
+    </div>
+    <div class="checks">
+      <label class="inline"><input type="checkbox" name="enabled" value="1" checked> {{tr .Lang "enabled"}}</label>
+      <label class="inline"><input type="checkbox" name="hub_share" value="1" {{if not .CanShare}}disabled{{end}}> {{tr .Lang "share"}}</label>
       {{range .Groups}}
       <label class="inline"><input type="checkbox" name="groups" value="{{.ID}}"> {{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</label>
       {{end}}
     </div>
-    {{end}}
-    <div class="span2"><button type="submit">Добавить</button></div>
+    <div class="span2"><button type="submit">{{tr .Lang "add"}}</button></div>
   </form>
-  {{if not .CanShare}}
-  <p class="muted small">Галочка «В сеть» включается на Статусе: участник hub и «Доступ к агентам». Группы в hub не публикуются.</p>
-  {{end}}
-</div>
+  {{if not .CanShare}}<p class="muted small">{{tr .Lang "share_off"}}</p>{{end}}
+</details>
 
 {{if not .Rows}}
-<div class="card empty"><p>Агентов пока нет. Создайте группу и отдайте приглашение, либо добавьте агента здесь.</p></div>
+<div class="card empty"><p>{{tr .Lang "empty"}}</p></div>
 {{end}}
 
 {{range .Rows}}
-<article class="card">
+<details class="card agent-row">
+  <summary>
+    <code>{{.Name}}</code>
+    <span>{{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</span>
+    {{if .Company}}<span class="muted">{{.Company}}</span>{{end}}
+    {{$agent := .}}
+    {{range $.Groups}}{{if hasint $agent.GroupIDs .ID}}<span class="pill">{{.Name}}</span>{{end}}{{end}}
+    {{if .Enabled}}<span class="pill ok">{{tr $.Lang "on"}}</span>{{else}}<span class="pill off">{{tr $.Lang "off"}}</span>{{end}}
+    {{if .Registered}}<span class="pill">{{tr $.Lang "own_key"}}</span>{{end}}
+    {{if .HubShare}}<span class="pill">{{tr $.Lang "share"}}</span>{{end}}
+  </summary>
   <form method="post" action="/admin/agents" class="grid2">
     <input type="hidden" name="id" value="{{.ID}}">
     <div>
-      <label>Имя</label>
+      <label>{{tr $.Lang "name"}}</label>
       <input name="name" value="{{.Name}}" required maxlength="40" autocomplete="off">
     </div>
     <div>
-      <label>Как показывать</label>
+      <label>{{tr $.Lang "display"}}</label>
       <input name="display_name" value="{{.DisplayName}}" maxlength="80" autocomplete="off">
     </div>
     <div>
-      <label>Компания</label>
+      <label>{{tr $.Lang "company"}}</label>
       <input name="company" value="{{.Company}}" maxlength="80" autocomplete="off">
     </div>
     <div>
-      <label>URL JSON-RPC</label>
-      <input name="url" value="{{.URL}}" placeholder="не нужен — запрос придёт на GET /a2a/connect" autocomplete="off">
+      <label>{{tr $.Lang "url"}}</label>
+      <input name="url" value="{{.URL}}" placeholder="{{tr $.Lang "url_ph"}}" autocomplete="off">
     </div>
-    <div class="span2">
-      <label>Что умеет</label>
+    <div>
+      <label>{{tr $.Lang "about"}}</label>
       <textarea name="description" maxlength="2000">{{.Description}}</textarea>
     </div>
-    <div class="span2">
-      <label>Навыки</label>
+    <div>
+      <label>{{tr $.Lang "skills"}}</label>
       <textarea name="skills">{{.SkillsText}}</textarea>
     </div>
     <div>
-      <label>Bearer upstream</label>
-      <input name="token" type="password" placeholder="{{if .TokenSet}}сохранён, пустое поле не меняет{{else}}если URL требует Bearer{{end}}" autocomplete="off">
+      <label>{{tr $.Lang "token"}}</label>
+      <input name="token" type="password" placeholder="{{if .TokenSet}}{{tr $.Lang "token_keep"}}{{else}}{{tr $.Lang "token_ph"}}{{end}}" autocomplete="off">
     </div>
-    <div class="checks" style="align-self:end">
-      <label class="inline"><input type="checkbox" name="enabled" value="1" {{if .Enabled}}checked{{end}}> Включён</label>
-      <label class="inline"><input type="checkbox" name="hub_share" value="1" {{if .HubShare}}checked{{end}} {{if not $.CanShare}}disabled{{end}}> В сеть</label>
-      {{if .Registered}}<span class="pill">свой ключ</span>{{end}}
-    </div>
-    {{if $.Groups}}
-    <div class="span2 checks">
-      {{$agent := .}}
+    <div class="checks">
+      <label class="inline"><input type="checkbox" name="enabled" value="1" {{if .Enabled}}checked{{end}}> {{tr $.Lang "enabled"}}</label>
+      <label class="inline"><input type="checkbox" name="hub_share" value="1" {{if .HubShare}}checked{{end}} {{if not $.CanShare}}disabled{{end}}> {{tr $.Lang "share"}}</label>
       {{range $.Groups}}
       <label class="inline"><input type="checkbox" name="groups" value="{{.ID}}" {{if hasint $agent.GroupIDs .ID}}checked{{end}}> {{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</label>
       {{end}}
     </div>
-    {{end}}
-    <div class="span2 row"><button type="submit">Сохранить</button></div>
+    <div class="span2 row">
+      <button type="submit">{{tr $.Lang "save"}}</button>
+    </div>
   </form>
-  <p class="muted small">Карточка: <code>/a2a/u/{{.Name}}/.well-known/agent-card.json</code><br>Вызов: <code>/a2a/u/{{.Name}}</code></p>
-  <form method="post" action="/admin/agents/{{.ID}}/delete"><button class="ghost" type="submit">Удалить</button></form>
-</article>
+  <p class="muted small">{{tr $.Lang "card"}}: <code>/a2a/u/{{.Name}}/.well-known/agent-card.json</code> · {{tr $.Lang "call"}}: <code>/a2a/u/{{.Name}}</code></p>
+  <form method="post" action="/admin/agents/{{.ID}}/delete"><button class="ghost" type="submit">{{tr $.Lang "delete"}}</button></form>
+</details>
 {{end}}
 
-<section class="card">
-  <h2>Агенты с других узлов</h2>
+<section class="card agent-panel">
+  <h2>{{tr .Lang "remote"}}</h2>
   {{if not .HubOn}}
-  <p class="muted">Включите «Участник hub сети», чтобы видеть агентов, которых соседи открыли в сеть. Группы остаются на этом шлюзе.</p>
+  <p class="muted">{{tr .Lang "remote_off"}}</p>
   {{else if not .Remote}}
-  <p class="muted">Пока никто не открыл агентов в сеть.</p>
+  <p class="muted">{{tr .Lang "remote_empty"}}</p>
   {{else}}
   {{range .Remote}}
-  <p><strong>{{.NodeName}}</strong> · <code>{{.Name}}</code> · <code>/a2a/u/{{.Node}}/{{.Name}}</code>{{if not .Online}} <span class="pill off">не в сети</span>{{end}}</p>
+  <div class="msg-line"><strong>{{.NodeName}}</strong> · <code>{{.Name}}</code> · <code>/a2a/u/{{.Node}}/{{.Name}}</code>{{if not .Online}} <span class="pill off">{{tr $.Lang "offline"}}</span>{{end}}</div>
   {{end}}
   {{end}}
-  <p class="muted small">Тот же токен MCP шлюза. Карточка соседа переписывает <code>url</code> на этот шлюз, запрос уходит владельцу через hub.</p>
 </section>
 {{end}}

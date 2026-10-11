@@ -26,8 +26,25 @@ func TestAgentsTemplateShowsGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"inv-secret", "holix", "Подтвердить", "свой ключ", "orders"} {
+	for _, want := range []string{"inv-secret", "holix", "Подтвердить", "свой ключ", "orders", ">RU<", ">EN<"} {
 		if !strings.Contains(body, want) {
+			t.Fatalf("missing %s", want)
+		}
+	}
+	rec = httptest.NewRecorder()
+	err = ui.pages["agents"].ExecuteTemplate(rec, "layout.html", map[string]any{
+		"Title": "Agents", "Nav": "agents", "CSRF": "t", "Lang": "en",
+		"Rows": []agentRow{{
+			ID: 1, Name: "holix", DisplayName: "Holix", GroupIDs: []int64{1}, Enabled: true,
+		}},
+		"Groups": []groupView{{ID: 1, Name: "orders", Title: "Orders"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	en := rec.Body.String()
+	for _, want := range []string{"Agents", "Add agent", "Groups", `lang="en"`} {
+		if !strings.Contains(en, want) {
 			t.Fatalf("missing %s", want)
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/javded-itres/mikrollm/internal/domain"
 )
@@ -109,6 +110,78 @@ func TestLocalPostUsesRPCURL(t *testing.T) {
 	}
 	if gotAuth != "Bearer agent-secret" || gotPath != "/rpc" || !strings.Contains(gotBody, "message/send") || strings.Contains(gotBody, "mcp-client") {
 		t.Fatalf("auth %q path %q body %s", gotAuth, gotPath, gotBody)
+	}
+}
+
+func TestLocalStreamFlushesFirstEvent(t *testing.T) {
+	first := make(chan struct{})
+	release := make(chan struct{})
+	var gotAccept string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"n\":1}\n\n"))
+		w.(http.Flusher).Flush()
+		close(first)
+		<-release
+		_, _ = w.Write([]byte("data: {\"n\":2}\n\n"))
+		w.(http.Flusher).Flush()
+	}))
+	t.Cleanup(up.Close)
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	p := New(memStore{up: domain.A2AUpstream{Name: "planner", URL: up.URL + "/rpc", Token: "agent-secret", Enabled: true}}, func(http.ResponseWriter, *http.Request) bool {
+		return true
+	}, func() string { return "" })
+	mux := http.NewServeMux()
+	p.Mount(mux)
+	req := httptest.NewRequest(http.MethodPost, "/a2a/u/planner", strings.NewReader(`{"jsonrpc":"2.0","id":"1","method":"message/stream"}`))
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Content-Type", "application/json")
+	rec := &flushRec{ResponseRecorder: httptest.NewRecorder(), saw: make(chan struct{})}
+	done := make(chan struct{})
+	go func() {
+		mux.ServeHTTP(rec, req)
+		close(done)
+	}()
+	select {
+	case <-rec.saw:
+	case <-done:
+		t.Fatalf("handler ended before the first flush: %s", rec.Body.String())
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for the first event")
+	}
+	if !strings.Contains(rec.Body.String(), `"n":1`) || strings.Contains(rec.Body.String(), `"n":2`) {
+		t.Fatalf("first event was not flushed alone: %s", rec.Body.String())
+	}
+	if rec.Header().Get("Content-Type") != "text/event-stream" || rec.Header().Get("X-Accel-Buffering") != "no" {
+		t.Fatalf("headers %v", rec.Header())
+	}
+	close(release)
+	<-done
+	if !strings.Contains(rec.Body.String(), `"n":2`) || gotAccept != "text/event-stream" {
+		t.Fatalf("accept %q body %s", gotAccept, rec.Body.String())
+	}
+}
+
+type flushRec struct {
+	*httptest.ResponseRecorder
+	saw chan struct{}
+}
+
+func (f *flushRec) Flush() {
+	f.ResponseRecorder.Flush()
+	select {
+	case <-f.saw:
+	default:
+		if strings.Contains(f.Body.String(), `"n":1`) {
+			close(f.saw)
+		}
 	}
 }
 
