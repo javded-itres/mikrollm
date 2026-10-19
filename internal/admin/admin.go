@@ -81,6 +81,13 @@ func New(d Deps) *UI {
 			return false
 		},
 		"tr": tr,
+		"json": func(v any) string {
+			b, err := json.Marshal(v)
+			if err != nil {
+				return "null"
+			}
+			return string(b)
+		},
 	}
 	must := func(files ...string) *template.Template {
 		return template.Must(template.New("layout.html").Funcs(fm).ParseFS(web.FS, files...))
@@ -145,6 +152,7 @@ func (u *UI) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/models/{id}/fallback", u.protect(u.setModelFallback))
 	mux.HandleFunc("POST /admin/models/{id}/prompt-cache", u.protect(u.setModelPromptCache))
 	mux.HandleFunc("POST /admin/models/{id}/params", u.protect(u.setModelParams))
+	mux.HandleFunc("POST /admin/models/{id}/settings", u.protect(u.updateModelSettings))
 	mux.HandleFunc("POST /admin/prompt-cache", u.protect(u.setPromptCache))
 	mux.HandleFunc("GET /admin/ollama/jobs", u.protect(u.ollamaJobs))
 	mux.HandleFunc("POST /admin/ollama/{id}/pull", u.protect(u.ollamaPull))
@@ -554,12 +562,13 @@ func (u *UI) password(w http.ResponseWriter, r *http.Request) {
 
 type modelVM struct {
 	domain.Model
-	BackendNames string
-	CtxLabel     string
-	Detected     int
-	Provider     string
-	PriceLabel   string
-	FallbackOK   bool
+	BackendNames  string
+	CtxLabel      string
+	Detected      int
+	Provider      string
+	PriceLabel    string
+	FallbackOK    bool
+	BackendIDsCSV string
 	// Params profile for the alias params editor.
 	ParamsSet     bool
 	ParamsThink   string
@@ -574,18 +583,18 @@ type modelVM struct {
 }
 
 type catalogHost struct {
-	ID        int64
-	Name      string
-	Short     string
-	Loaded    bool
-	Kind      string
-	Label     string
-	CanLoad   bool
-	CanDelete bool
-	Cloud     bool
-	Hub       bool
-	Online    bool
-	Hint      string
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Short     string `json:"short"`
+	Loaded    bool   `json:"loaded"`
+	Kind      string `json:"kind"`
+	Label     string `json:"label"`
+	CanLoad   bool   `json:"canLoad"`
+	CanDelete bool   `json:"canDelete"`
+	Cloud     bool   `json:"cloud"`
+	Hub       bool   `json:"hub"`
+	Online    bool   `json:"online"`
+	Hint      string `json:"hint"`
 }
 
 type catalogVM struct {
@@ -630,8 +639,10 @@ func (u *UI) models(w http.ResponseWriter, r *http.Request) {
 	var vms []modelVM
 	for _, m := range ms {
 		var names []string
+		var idStrs []string
 		for _, id := range m.BackendIDs {
 			names = append(names, bmap[id].Name)
+			idStrs = append(idStrs, strconv.FormatInt(id, 10))
 		}
 		if m.HubNodeID != "" {
 			if m.HubNodeName != "" {
@@ -641,7 +652,7 @@ func (u *UI) models(w http.ResponseWriter, r *http.Request) {
 			}
 			hubConnected[m.HubNodeID+"|"+m.UpstreamName] = true
 		}
-		vm := modelVM{Model: m, BackendNames: strings.Join(names, ", ")}
+		vm := modelVM{Model: m, BackendNames: strings.Join(names, ", "), BackendIDsCSV: strings.Join(idStrs, ",")}
 		fillParamsVM(&vm)
 		if len(vm.Media) == 0 {
 			vm.Media = domain.InferMedia(m.Alias, nil)
@@ -851,6 +862,12 @@ func (u *UI) saveModel(w http.ResponseWriter, r *http.Request) {
 			m.BackendIDs = append(m.BackendIDs, id)
 		}
 	}
+	if node := strings.TrimSpace(r.FormValue("hub_node_id")); node != "" {
+		m.HubNodeID = node
+		m.HubNodeName = strings.TrimSpace(r.FormValue("hub_node_name"))
+		m.BackendIDs = nil
+		m.HubShare = false
+	}
 	if m.Alias == "" {
 		http.Redirect(w, r, "/admin/models?err=select_models", http.StatusFound)
 		return
@@ -859,7 +876,7 @@ func (u *UI) saveModel(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/models?err=reserved_auto", http.StatusFound)
 		return
 	}
-	if len(m.BackendIDs) == 0 {
+	if len(m.BackendIDs) == 0 && m.HubNodeID == "" {
 		bs, _ := u.st.ListBackends()
 		for _, e := range u.health.Catalog(bs) {
 			if e.Name == m.UpstreamName || e.Name == m.Alias {
@@ -881,6 +898,10 @@ func (u *UI) saveModel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if existing, err := u.st.GetModelByAlias(m.Alias); err == nil {
+		if m.HubNodeID != "" && existing.HubNodeID != m.HubNodeID {
+			http.Redirect(w, r, "/admin/models?err="+neturl.QueryEscape("alias "+m.Alias+" already used"), http.StatusFound)
+			return
+		}
 		m.ID = existing.ID
 		m.HubShare = existing.HubShare
 		if m.Params == "" {
@@ -895,6 +916,21 @@ func (u *UI) saveModel(w http.ResponseWriter, r *http.Request) {
 		if m.HubNodeID == "" {
 			m.HubNodeID = existing.HubNodeID
 			m.HubNodeName = existing.HubNodeName
+		}
+	}
+	if m.HubNodeID != "" && len(m.Media) == 0 {
+		bs, _ := u.st.ListBackends()
+		for _, e := range u.health.Catalog(bs) {
+			if e.HubNodeID == m.HubNodeID && (e.Name == m.UpstreamName || e.Name == m.Alias) {
+				m.Media = e.Media
+				if m.HubNodeName == "" {
+					m.HubNodeName = e.HubNodeName
+				}
+				if m.MaxContext == 0 && e.Context > 0 {
+					m.MaxContext = e.Context
+				}
+				break
+			}
 		}
 	}
 	if len(m.BackendIDs) == 0 && m.HubNodeID == "" {
@@ -1032,14 +1068,20 @@ func fillParamsVM(vm *modelVM) {
 
 // setModelParams saves the alias params profile (think/temperature/num_predict/
 // num_ctx + locked + free x_* JSON). Filled on /admin/models per alias row.
-func (u *UI) setModelParams(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	_ = r.ParseForm()
-	m, err := u.st.GetModel(id)
-	if err != nil {
-		http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
-		return
+func cleanAlias(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 128 {
+		return "", fmt.Errorf("alias")
 	}
+	for _, r := range s {
+		if r <= 0x20 || r == 0x7f {
+			return "", fmt.Errorf("alias")
+		}
+	}
+	return s, nil
+}
+
+func profileFromForm(r *http.Request) (string, error) {
 	doc := map[string]any{}
 	if t := strings.TrimSpace(r.FormValue("think")); t != "" {
 		switch t {
@@ -1054,8 +1096,7 @@ func (u *UI) setModelParams(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(r.FormValue("temperature")); v != "" {
 		f, ferr := strconv.ParseFloat(v, 64)
 		if ferr != nil || f < 0 || f > 2 {
-			http.Redirect(w, r, "/admin/models?err=temperature+0..2", http.StatusFound)
-			return
+			return "", fmt.Errorf("temperature 0..2")
 		}
 		doc["temperature"] = f
 	}
@@ -1063,8 +1104,7 @@ func (u *UI) setModelParams(w http.ResponseWriter, r *http.Request) {
 		if v := strings.TrimSpace(r.FormValue(f)); v != "" {
 			n, nerr := strconv.Atoi(v)
 			if nerr != nil || n <= 0 {
-				http.Redirect(w, r, "/admin/models?err="+f+"+must+be+%3E+0", http.StatusFound)
-				return
+				return "", fmt.Errorf("%s must be > 0", f)
 			}
 			doc[f] = n
 		}
@@ -1072,8 +1112,7 @@ func (u *UI) setModelParams(w http.ResponseWriter, r *http.Request) {
 	if extra := strings.TrimSpace(r.FormValue("extra")); extra != "" {
 		var x map[string]any
 		if json.Unmarshal([]byte(extra), &x) != nil {
-			http.Redirect(w, r, "/admin/models?err=extra+bad+JSON", http.StatusFound)
-			return
+			return "", fmt.Errorf("extra bad JSON")
 		}
 		for k, v := range x {
 			if k != "locked" {
@@ -1088,20 +1127,115 @@ func (u *UI) setModelParams(w http.ResponseWriter, r *http.Request) {
 		}
 		doc["locked"] = list
 	}
-	raw, _ := json.Marshal(doc)
 	if len(doc) == 0 {
-		raw = []byte("")
+		return "", nil
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return "", err
 	}
 	if _, err := params.ParseProfile(string(raw)); err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func (u *UI) setModelParams(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	_ = r.ParseForm()
+	m, err := u.st.GetModel(id)
+	if err != nil {
 		http.Redirect(w, r, "/admin/models?err="+neturl.QueryEscape(err.Error()), http.StatusFound)
 		return
 	}
-	m.Params = string(raw)
+	raw, perr := profileFromForm(r)
+	if perr != nil {
+		http.Redirect(w, r, "/admin/models?err="+neturl.QueryEscape(perr.Error()), http.StatusFound)
+		return
+	}
+	m.Params = raw
 	if _, err := u.st.SaveModel(m); err != nil {
 		http.Redirect(w, r, "/admin/models?err="+err.Error(), http.StatusFound)
 		return
 	}
 	http.Redirect(w, r, "/admin/models?ok=params_saved", http.StatusFound)
+}
+
+// updateModelSettings renames an alias and stores provider, routing, and generation settings.
+func (u *UI) updateModelSettings(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	_ = r.ParseForm()
+	m, err := u.st.GetModel(id)
+	if err != nil {
+		http.Redirect(w, r, "/admin/models?err="+neturl.QueryEscape(err.Error()), http.StatusFound)
+		return
+	}
+	remote := m.HubNodeID != ""
+	if !domain.IsHubAuto(m) {
+		alias, aerr := cleanAlias(r.FormValue("alias"))
+		if aerr != nil {
+			http.Redirect(w, r, "/admin/models?err=alias", http.StatusFound)
+			return
+		}
+		if strings.EqualFold(alias, domain.HubAutoAlias) {
+			http.Redirect(w, r, "/admin/models?err=reserved_auto", http.StatusFound)
+			return
+		}
+		m.Alias = alias
+	}
+	if !remote {
+		if up := strings.TrimSpace(r.FormValue("upstream_name")); up != "" {
+			m.UpstreamName = up
+		}
+		m.BackendIDs = nil
+		for _, v := range r.Form["backend_id"] {
+			bid, _ := strconv.ParseInt(v, 10, 64)
+			if bid > 0 {
+				m.BackendIDs = append(m.BackendIDs, bid)
+			}
+		}
+		switch strings.TrimSpace(r.FormValue("lb_policy")) {
+		case "least_conn", "round_robin", "failover":
+			m.LBPolicy = r.FormValue("lb_policy")
+		}
+		m.HubShare = r.FormValue("hub_share") == "1"
+		bs, _ := u.st.ListBackends()
+		for _, e := range u.health.Catalog(bs) {
+			if e.HubNodeID == "" && e.Name == m.UpstreamName && len(e.Media) > 0 {
+				m.Media = e.Media
+				break
+			}
+		}
+		if len(m.BackendIDs) == 0 {
+			http.Redirect(w, r, "/admin/models?err=no_backend", http.StatusFound)
+			return
+		}
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("max_context")))
+	if n < 0 {
+		n = 0
+	}
+	m.MaxContext = n
+	m.Fallback = strings.TrimSpace(r.FormValue("fallback"))
+	switch strings.ToLower(strings.TrimSpace(r.FormValue("prompt_cache"))) {
+	case "inherit", "off", "auto", "on":
+		m.PromptCache = strings.ToLower(strings.TrimSpace(r.FormValue("prompt_cache")))
+	case "":
+	default:
+		http.Redirect(w, r, "/admin/models?err=prompt_cache+must+be+inherit|off|auto|on", http.StatusFound)
+		return
+	}
+	raw, perr := profileFromForm(r)
+	if perr != nil {
+		http.Redirect(w, r, "/admin/models?err="+neturl.QueryEscape(perr.Error()), http.StatusFound)
+		return
+	}
+	m.Params = raw
+	if _, err := u.st.SaveModel(m); err != nil {
+		http.Redirect(w, r, "/admin/models?err="+neturl.QueryEscape(err.Error()), http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, "/admin/models?ok=settings_saved", http.StatusFound)
 }
 
 type keyVM struct {
@@ -1475,6 +1609,10 @@ func flashMsg(code string) string {
 		return "Доступ ключа обновлён."
 	case "context_saved":
 		return "Контекст модели сохранён."
+	case "settings_saved":
+		return "Настройки alias сохранены."
+	case "params_saved":
+		return "Параметры генерации сохранены."
 	case "fallback_saved":
 		return "Запасная модель сохранена."
 	case "prompt_cache_saved":
@@ -1514,6 +1652,8 @@ func errMsg(code string) string {
 	switch code {
 	case "reserved_auto":
 		return "Alias auto задаёт оператор хаба. Его нельзя создать, шарить или удалить вручную."
+	case "alias":
+		return "Имя alias: без пробелов и управляющих символов, до 128 знаков."
 	case "select_models":
 		return "Выберите хотя бы одну модель."
 	case "no_backend":

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -64,7 +65,13 @@ func TestNextPath(t *testing.T) {
 }
 
 func TestTemplatesParse(t *testing.T) {
-	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }, "tr": tr, "hasint": func(ids []int64, id int64) bool {
+	fm := template.FuncMap{"hsize": humanSize, "hctx": domain.FormatContext, "join": strings.Join, "add": func(a, b int) int { return a + b }, "tr": tr, "json": func(v any) string {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return "null"
+		}
+		return string(b)
+	}, "hasint": func(ids []int64, id int64) bool {
 		for _, v := range ids {
 			if v == id {
 				return true

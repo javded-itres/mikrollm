@@ -117,9 +117,8 @@
           <th class="col-num">Размер</th>
           <th class="col-num">Контекст</th>
           <th class="col-num">Цена</th>
-          <th>RAM</th>
           <th>Шлюз</th>
-          <th class="col-act">Диск</th>
+          <th class="col-act"></th>
         </tr>
       </thead>
       <tbody>
@@ -139,44 +138,17 @@
           <td class="col-num muted" title="Контекст с сервера">{{if $m.CtxLabel}}{{$m.CtxLabel}}{{else}}—{{end}}</td>
           <td class="col-num muted" title="чат: вход/выход за 1M ток.; картинка: кадр или 1M img; видео: секунда">{{if $m.PriceLabel}}{{$m.PriceLabel}}{{else}}—{{end}}</td>
           <td>
-            <div class="host-pills">
-              {{range $m.Hosts}}
-              {{if .CanLoad}}
-              <form class="ram-form" method="post" action="/admin/ollama/{{.ID}}/{{if .Loaded}}unload{{else}}load{{end}}">
-                <input type="hidden" name="name" value="{{$m.Name}}">
-                <input type="hidden" name="next" value="/admin/models">
-                {{if .Loaded}}
-                <button type="submit" class="pill-btn ram" data-ollama="unload" data-id="{{.ID}}" data-name="{{$m.Name}}" title="Выгрузить из RAM на {{.Name}}">{{.Short}} · выгрузить</button>
-                {{else}}
-                <button type="submit" class="pill-btn" data-ollama="load" data-id="{{.ID}}" data-name="{{$m.Name}}" title="Загрузить в RAM на {{.Name}}">{{.Short}} · в RAM</button>
-                {{end}}
-              </form>
-              {{else if .Hub}}
-              <span class="pill{{if .Online}} ok{{end}}" title="{{.Hint}}">{{.Short}} · {{if .Online}}онлайн{{else}}офлайн{{end}}</span>
-              {{else}}
-              <span class="pill{{if .Loaded}} ram{{end}}" title="{{.Hint}}">{{.Short}} · {{if .Cloud}}облако{{else}}{{.Label}}{{end}}{{if .Loaded}} · RAM{{end}}</span>
-              {{end}}
-              {{end}}
-            </div>
-          </td>
-          <td>
             {{if $m.Connected}}<span class="pill ok">вкл</span>
             {{else}}<span class="muted">—</span>{{end}}
           </td>
           <td class="col-act">
-            <div class="act">
-              {{range $m.Hosts}}
-              {{if .CanDelete}}
-              <form class="ram-form" method="post" action="/admin/ollama/{{.ID}}/delete">
-                <input type="hidden" name="name" value="{{$m.Name}}">
-                <input type="hidden" name="next" value="/admin/models">
-                <button type="submit" class="btn-sm danger-text" data-ollama="delete" data-id="{{.ID}}" data-name="{{$m.Name}}" title="Удалить файл с {{.Name}}">✕ {{.Short}}</button>
-              </form>
-              {{else}}
-              <span class="muted" title="{{.Hint}}">—</span>
-              {{end}}
-              {{end}}
-            </div>
+            <button type="button" class="btn-sm js-model-settings"
+              data-name="{{$m.Name}}" data-title="{{$m.Title}}" data-provider="{{$m.Provider}}"
+              data-size="{{$m.SizeLabel}}" data-ctx="{{$m.CtxLabel}}" data-ctx-n="{{$m.Context}}"
+              data-price="{{$m.PriceLabel}}" data-media="{{join $m.Media " "}}"
+              data-connected="{{if $m.Connected}}1{{end}}" data-hub="{{$m.HubNodeID}}"
+              data-hub-name="{{$m.HubNodeName}}" data-online="{{if $m.HubOnline}}1{{end}}"
+              data-schedule="{{$m.HubSchedule}}" data-hosts="{{json $m.Hosts}}">Настройки</button>
           </td>
         </tr>
         {{end}}
@@ -206,9 +178,9 @@
     <button class="ghost" type="submit" form="hub-bulk-form" name="hub_share" value="0">Убрать из hub</button>
   </div>
   <div class="table-wrap">
-    <table class="tbl">
+    <table class="tbl alias-tbl">
       <thead>
-        <tr><th class="col-check"></th><th>Клиентам</th><th>На сервере</th><th>Провайдер</th><th>Цена 1M</th><th>Серверы</th><th>Контекст</th><th>Запасная</th><th>Кэш</th><th>Параметры</th><th>Hub</th><th>LB</th><th class="col-act"></th></tr>
+        <tr><th class="col-check"></th><th>Alias</th></tr>
       </thead>
       <tbody>
         {{range $m := .Models}}
@@ -217,92 +189,30 @@
             {{if not $m.HubNodeID}}<input type="checkbox" form="hub-bulk-form" name="id" value="{{$m.ID}}" title="Выбрать для hub">{{end}}
           </td>
           <td>
-            <code>{{$m.Alias}}</code>
-            {{if and (eq $m.Alias "auto") $m.HubNodeID}}<span class="pill hub" title="Задаёт оператор хаба: узел и модель по умолчанию">auto из hub</span>{{end}}
-            {{if $m.HubShare}}<span class="pill hub" title="Alias отдаётся в каталог hub сети">в hub</span>{{end}}
-            {{if $m.HubNodeID}}<span class="pill hub-peer" title="Модель с другого MikroLLM ({{$m.HubNodeID}})">с {{if $m.HubNodeName}}{{$m.HubNodeName}}{{else}}hub{{end}}</span>{{end}}
-            {{range $m.Media}} <span class="pill media-{{.}}">{{.}}</span>{{end}}
-          </td>
-          <td class="muted">{{$m.UpstreamName}}</td>
-          <td>{{if $m.Provider}}<span class="pill">{{$m.Provider}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
-          <td class="muted" title="вход / выход за 1M токенов">{{if $m.PriceLabel}}{{$m.PriceLabel}}{{else}}—{{end}}</td>
-          <td>{{$m.BackendNames}}</td>
-          <td>
-            <form method="post" action="/admin/models/{{$m.ID}}/context" class="ctx-form" title="0 — взять с сервера ({{if $m.Detected}}{{hctx $m.Detected}}{{else}}нет{{end}})">
-              <input type="number" name="max_context" min="0" step="1024" value="{{$m.MaxContext}}" placeholder="{{if $m.Detected}}{{$m.Detected}}{{end}}">
-              <button class="btn-sm" type="submit">OK</button>
-            </form>
-            <div class="muted small">{{if $m.CtxLabel}}{{$m.CtxLabel}}{{else}}неизвестно{{end}}</div>
-          </td>
-          <td>
-            <form method="post" action="/admin/models/{{$m.ID}}/fallback" class="ctx-form" title="Если у основной кончились кредиты, квота или подписка — шлюз возьмёт эту модель">
-              <select name="fallback">
-                <option value="">нет</option>
-                {{range $o := $.Models}}
-                {{if ne $o.Alias $m.Alias}}<option value="{{$o.Alias}}" {{if eq $o.Alias $m.Fallback}}selected{{end}}>{{$o.Alias}}</option>{{end}}
-                {{end}}
-              </select>
-              <button class="btn-sm" type="submit">OK</button>
-            </form>
-          </td>
-          <td>
-            <form method="post" action="/admin/models/{{$m.ID}}/prompt-cache" class="ctx-form" title="inherit — глобальная настройка выше">
-              <select name="prompt_cache">
-                <option value="inherit" {{if or (eq $m.PromptCache "inherit") (eq $m.PromptCache "")}}selected{{end}}>inherit</option>
-                <option value="off" {{if eq $m.PromptCache "off"}}selected{{end}}>off</option>
-                <option value="auto" {{if eq $m.PromptCache "auto"}}selected{{end}}>auto</option>
-                <option value="on" {{if eq $m.PromptCache "on"}}selected{{end}}>on</option>
-              </select>
-              <button class="btn-sm" type="submit">OK</button>
-            </form>
-          </td>
-          <td class="col-params">
-            <button type="button" class="params-btn{{if $m.ParamsSet}} on{{end}} js-params"
-              data-id="{{$m.ID}}" data-alias="{{$m.Alias}}"
-              data-think="{{$m.ParamsThink}}" data-temp="{{$m.ParamsTemp}}"
-              data-predict="{{$m.ParamsPredict}}" data-ctx="{{$m.ParamsCtx}}"
-              data-extra="{{$m.ParamsExtra}}"
-              data-lock-think="{{$m.LockThink}}" data-lock-temp="{{$m.LockTemp}}"
-              data-lock-predict="{{$m.LockPredict}}" data-lock-ctx="{{$m.LockCtx}}"
-              title="Параметры генерации по умолчанию для {{$m.Alias}}">
-              {{if $m.ParamsSet}}
-                {{if $m.ParamsThink}}<span class="pchip">🧠 {{$m.ParamsThink}}{{if $m.LockThink}}🔒{{end}}</span>{{end}}
-                {{if $m.ParamsTemp}}<span class="pchip">🌡 {{$m.ParamsTemp}}{{if $m.LockTemp}}🔒{{end}}</span>{{end}}
-                {{if $m.ParamsPredict}}<span class="pchip">↧ {{$m.ParamsPredict}}{{if $m.LockPredict}}🔒{{end}}</span>{{end}}
-                {{if $m.ParamsCtx}}<span class="pchip">▭ {{$m.ParamsCtx}}{{if $m.LockCtx}}🔒{{end}}</span>{{end}}
-                {{if $m.ParamsExtra}}<span class="pchip" title="{{$m.ParamsExtra}}">+x</span>{{end}}
-              {{else}}
-                <span class="muted small">по умолч.</span>
-              {{end}}
-            </button>
-          </td>
-          <td>
-            {{if $m.HubNodeID}}
-            <span class="pill hub-peer" title="{{$m.HubNodeID}}">с {{if $m.HubNodeName}}{{$m.HubNodeName}}{{else}}hub{{end}}</span>
-            <div class="muted small">чужой alias</div>
-            {{else if $m.HubShare}}
-            <span class="pill hub">шарится</span>
-            <form method="post" action="/admin/models/{{$m.ID}}/hub-share" class="ctx-form" title="Убрать из каталога hub">
-              <input type="hidden" name="hub_share" value="0">
-              <button class="ghost btn-sm" type="submit">убрать</button>
-            </form>
-            {{else}}
-            <span class="muted small">нет</span>
-            <form method="post" action="/admin/models/{{$m.ID}}/hub-share" class="ctx-form" title="Отдавать этот alias через облачный hub (только chat)">
-              <input type="hidden" name="hub_share" value="1">
-              <button class="btn-sm" type="submit">шарить</button>
-            </form>
-            {{end}}
-          </td>
-          <td class="muted">{{$m.LBPolicy}}</td>
-          <td class="col-act">
-            {{if and (eq $m.Alias "auto") $m.HubNodeID}}
-            <span class="muted small">системный</span>
-            {{else}}
-            <form method="post" action="/admin/models/{{$m.ID}}/delete" onsubmit="return confirm('Убрать {{$m.Alias}} из шлюза? Файл на сервере останется.')">
-              <button class="btn-sm danger-text" type="submit">Убрать</button>
-            </form>
-            {{end}}
+            <div class="alias-line">
+              <div class="alias-id">
+                <code class="alias-name" title="{{$m.Alias}}">{{$m.Alias}}</code>
+                {{if and (eq $m.Alias "auto") $m.HubNodeID}}<span class="pill hub" title="Задаёт оператор хаба">auto</span>{{end}}
+                {{if $m.HubShare}}<span class="pill hub">hub</span>{{end}}
+                {{if $m.HubNodeID}}<span class="pill hub-peer" title="{{$m.HubNodeID}}">{{if $m.HubNodeName}}{{$m.HubNodeName}}{{else}}hub{{end}}</span>{{end}}
+                {{range $m.Media}}<span class="pill media-{{.}}">{{.}}</span>{{end}}
+                {{if $m.ParamsSet}}<span class="pill" title="Заданы параметры генерации">парам.</span>{{end}}
+              </div>
+              <div class="alias-meta" title="{{$m.UpstreamName}}{{if $m.Provider}} · {{$m.Provider}}{{end}}{{if $m.BackendNames}} · {{$m.BackendNames}}{{end}}{{if $m.CtxLabel}} · {{$m.CtxLabel}}{{end}}{{if $m.PriceLabel}} · {{$m.PriceLabel}}{{end}} · {{$m.LBPolicy}}{{if $m.Fallback}} · запас {{$m.Fallback}}{{end}}">{{$m.UpstreamName}}{{if $m.Provider}} · {{$m.Provider}}{{end}}{{if $m.BackendNames}} · {{$m.BackendNames}}{{end}}{{if $m.CtxLabel}} · {{$m.CtxLabel}}{{else}} · контекст ?{{end}}{{if $m.PriceLabel}} · {{$m.PriceLabel}}{{end}}</div>
+              <button type="button" class="btn-sm js-alias-settings"
+                data-id="{{$m.ID}}" data-alias="{{$m.Alias}}" data-upstream="{{$m.UpstreamName}}"
+                data-provider="{{$m.Provider}}" data-backends="{{$m.BackendIDsCSV}}"
+                data-context="{{$m.MaxContext}}" data-detected="{{$m.Detected}}"
+                data-fallback="{{$m.Fallback}}" data-cache="{{if $m.PromptCache}}{{$m.PromptCache}}{{else}}inherit{{end}}"
+                data-lb="{{$m.LBPolicy}}" data-hub-share="{{if $m.HubShare}}1{{end}}"
+                data-remote="{{if $m.HubNodeID}}1{{end}}"
+                data-system="{{if and (eq $m.Alias "auto") $m.HubNodeID}}1{{end}}"
+                data-think="{{$m.ParamsThink}}" data-temp="{{$m.ParamsTemp}}"
+                data-predict="{{$m.ParamsPredict}}" data-ctx="{{$m.ParamsCtx}}"
+                data-extra="{{$m.ParamsExtra}}"
+                data-lock-think="{{$m.LockThink}}" data-lock-temp="{{$m.LockTemp}}"
+                data-lock-predict="{{$m.LockPredict}}" data-lock-ctx="{{$m.LockCtx}}">Настройки</button>
+            </div>
           </td>
         </tr>
         {{end}}
@@ -310,15 +220,66 @@
     </table>
   </div>
 </div>
-{{end}}
 
-<dialog id="params-dialog" class="pdialog">
-  <form method="post" id="params-form">
+<dialog id="alias-dialog" class="pdialog wide">
+  <form method="post" id="alias-settings-form">
     <div class="pdialog-head">
-      <h3>🎛 Параметры · <code id="pd-alias"></code></h3>
-      <button type="button" class="ghost btn-sm pdialog-x" data-pd-close aria-label="Закрыть">✕</button>
+      <h3>Alias · <code id="pd-alias"></code></h3>
+      <button type="button" class="ghost btn-sm pdialog-x" data-as-close aria-label="Закрыть">Закрыть</button>
     </div>
-    <p class="muted small">Значения подставляются в каждый запрос к модели, если клиент сам их не прислал. 🔒 lock — принудительно, поверх клиента.</p>
+    <p class="muted small" id="as-lead">Имя для клиентов, провайдер и параметры маршрута. Параметры генерации подставляются, если клиент их не прислал. Замок — поверх клиента.</p>
+
+    <div class="aset">
+      <label for="as-alias">Имя для клиентов</label>
+      <input id="as-alias" name="alias" required autocomplete="off" spellcheck="false">
+      <div id="as-local" class="aset-span">
+        <div class="aset">
+          <label for="as-provider">Провайдер</label>
+          <select id="as-provider">
+            <option value="">Все провайдеры</option>
+            {{range .Providers}}<option value="{{.}}">{{.}}</option>{{end}}
+          </select>
+          <label for="as-upstream">Модель на сервере</label>
+          <select id="as-upstream" name="upstream_name">
+            {{range .Catalog}}
+            {{if not .HubNodeID}}
+            <option value="{{.Name}}" data-backends="{{.BackendCSV}}" data-provider="{{.Provider}}">{{if .Provider}}{{.Provider}} · {{end}}{{.Name}}</option>
+            {{end}}
+            {{end}}
+          </select>
+          <span>Серверы</span>
+          <div class="checks" id="as-backends">
+            {{range .Backends}}
+            <label><input type="checkbox" name="backend_id" value="{{.ID}}"> {{.Name}} · {{.Label}}</label>
+            {{end}}
+          </div>
+          <label for="as-lb">Балансировка</label>
+          <select id="as-lb" name="lb_policy">
+            <option value="least_conn">least_conn</option>
+            <option value="round_robin">round_robin</option>
+            <option value="failover">failover</option>
+          </select>
+          <span>Hub</span>
+          <label class="inline" for="as-hub"><input type="checkbox" id="as-hub" name="hub_share" value="1"> отдавать этот alias в каталог сети</label>
+        </div>
+      </div>
+      <p class="muted small aset-note" id="as-remote" hidden>Модель с другого MikroLLM. Можно сменить локальное имя, контекст, запасную модель и параметры генерации.</p>
+      <label for="as-context">Контекст</label>
+      <input id="as-context" name="max_context" type="number" min="0" step="1024" title="0 — взять с сервера">
+      <label for="as-fallback">Запасная</label>
+      <select id="as-fallback" name="fallback">
+        <option value="">нет</option>
+        {{range .Models}}<option value="{{.Alias}}">{{.Alias}}</option>{{end}}
+      </select>
+      <label for="as-cache">Prompt cache</label>
+      <select id="as-cache" name="prompt_cache">
+        <option value="inherit">inherit</option>
+        <option value="off">off</option>
+        <option value="auto">auto</option>
+        <option value="on">on</option>
+      </select>
+    </div>
+    <p class="muted small" id="as-ctx-hint"></p>
 
     <section class="psec">
       <div class="psec-title">
@@ -370,14 +331,51 @@
       <div class="muted small phint">Известные ключи (top_p, top_k, min_p, seed, repeat_penalty, stop…) идут в маппинг; свои — с префиксом x_.</div>
     </section>
 
-    <div class="pdialog-foot">
-      <button type="button" class="ghost" data-pd-close>Отмена</button>
-      <button type="submit" class="primary">Сохранить</button>
-    </div>
   </form>
+  <form method="post" id="alias-delete-form"></form>
+  <div class="pdialog-foot">
+    <button type="submit" class="ghost danger-text" id="as-delete" form="alias-delete-form">Убрать из шлюза</button>
+    <button type="button" class="ghost" data-as-close>Отмена</button>
+    <button type="submit" class="primary" form="alias-settings-form">Сохранить</button>
+  </div>
 </dialog>
+{{end}}
 
 {{if .Catalog}}
+<dialog id="model-dialog" class="pdialog wide">
+  <div class="pdialog-head">
+    <h3 id="md-title">Модель</h3>
+    <button type="button" class="ghost btn-sm" data-md-close aria-label="Закрыть">Закрыть</button>
+  </div>
+  <p class="muted small" id="md-sub"></p>
+  <dl class="md-meta" id="md-meta"></dl>
+  <div id="md-hosts"></div>
+  <form method="post" action="/admin/models" id="md-connect" hidden>
+    <div class="psec-title">Подключить к шлюзу</div>
+    <div class="aset">
+      <label for="md-alias">Имя для клиентов</label>
+      <input id="md-alias" name="alias" required autocomplete="off" spellcheck="false">
+      <label for="md-lb">Балансировка</label>
+      <select id="md-lb" name="lb_policy">
+        <option value="least_conn">least_conn</option>
+        <option value="round_robin">round_robin</option>
+        <option value="failover">failover</option>
+      </select>
+      <span id="md-prov-label">Серверы</span>
+      <div class="checks" id="md-backends"></div>
+    </div>
+    <input type="hidden" name="upstream_name" id="md-upstream">
+    <input type="hidden" name="max_context" id="md-ctx">
+    <input type="hidden" name="hub_node_id" id="md-hub-id">
+    <input type="hidden" name="hub_node_name" id="md-hub-name">
+    <div class="pdialog-foot">
+      <button type="submit" class="primary">Подключить</button>
+    </div>
+  </form>
+  <div class="pdialog-foot">
+    <button type="button" class="ghost" data-md-close>Закрыть</button>
+  </div>
+</dialog>
 <details class="card">
   <summary>Свой alias (другое имя для клиентов)</summary>
   <form method="post" action="/admin/models" id="alias-form" class="pull-row" style="margin-top:.8rem;flex-wrap:wrap">

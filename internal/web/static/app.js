@@ -535,48 +535,48 @@
     syncPullPlaceholder();
   }
 
-  document.querySelectorAll("[data-ollama]").forEach(function (btn) {
-    btn.addEventListener("click", function (ev) {
-      ev.preventDefault();
-      var action = btn.getAttribute("data-ollama");
-      var id = btn.getAttribute("data-id");
-      var name = btn.getAttribute("data-name");
-      var from = btn.getAttribute("data-name-from");
-      if (from) {
-        var sel = document.getElementById(from);
-        if (sel) name = (sel.value || "").trim();
-      }
-      if (!id || !name) {
-        alert("Выберите модель");
-        return;
-      }
-      var verb = "Выгрузить «" + name + "» из RAM?";
-      if (action === "delete") verb = "Удалить «" + name + "» с диска сервера?";
-      if (action === "load") verb = "Загрузить «" + name + "» в RAM? Для большой модели это может занять несколько минут.";
-      if (!confirm(verb)) return;
-      btn.disabled = true;
-      var old = btn.textContent;
-      if (action === "load") btn.textContent = "загрузка…";
-      var body = new URLSearchParams({ name: name });
-      fetch("/admin/ollama/" + id + "/" + action, {
-        method: "POST",
-        headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrfToken() },
-        body: body,
-        credentials: "same-origin"
-      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-        .then(function (res) {
-          if (!res.ok) throw new Error(res.j.error || "ошибка");
-          if (action === "load") {
-            pollJobs();
-            return;
-          }
-          location.reload();
-        }).catch(function (e) {
-          alert(e.message || e);
-          btn.disabled = false;
-          btn.textContent = old;
-        });
-    });
+  document.addEventListener("click", function (ev) {
+    var btn = ev.target.closest && ev.target.closest("[data-ollama]");
+    if (!btn) return;
+    ev.preventDefault();
+    var action = btn.getAttribute("data-ollama");
+    var id = btn.getAttribute("data-id");
+    var name = btn.getAttribute("data-name");
+    var from = btn.getAttribute("data-name-from");
+    if (from) {
+      var sel = document.getElementById(from);
+      if (sel) name = (sel.value || "").trim();
+    }
+    if (!id || !name) {
+      alert("Выберите модель");
+      return;
+    }
+    var verb = "Выгрузить «" + name + "» из RAM?";
+    if (action === "delete") verb = "Удалить «" + name + "» с диска сервера?";
+    if (action === "load") verb = "Загрузить «" + name + "» в RAM? Для большой модели это может занять несколько минут.";
+    if (!confirm(verb)) return;
+    btn.disabled = true;
+    var old = btn.textContent;
+    if (action === "load") btn.textContent = "загрузка…";
+    var body = new URLSearchParams({ name: name });
+    fetch("/admin/ollama/" + id + "/" + action, {
+      method: "POST",
+      headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrfToken() },
+      body: body,
+      credentials: "same-origin"
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.j.error || "ошибка");
+        if (action === "load") {
+          pollJobs();
+          return;
+        }
+        location.reload();
+      }).catch(function (e) {
+        alert(e.message || e);
+        btn.disabled = false;
+        btn.textContent = old;
+      });
   });
 
   var pullForm = document.getElementById("pull-form");
@@ -1914,57 +1914,281 @@
     syncModeToModel();
   })();
 
-  // Params dialog on /admin/models: chips button opens one shared <dialog>.
+  // Alias settings and catalog model settings on /admin/models.
   (function () {
-    var dlg = document.getElementById("params-dialog");
-    if (!dlg) return;
-    var form = document.getElementById("params-form");
-    var aliasEl = document.getElementById("pd-alias");
-    var tempNum = document.getElementById("pd-temp");
-    var tempRange = document.getElementById("pd-temp-range");
+    var dlg = document.getElementById("alias-dialog");
+    var form = document.getElementById("alias-settings-form");
+    if (dlg && form) {
+      var aliasEl = document.getElementById("pd-alias");
+      var aliasIn = document.getElementById("as-alias");
+      var tempNum = document.getElementById("pd-temp");
+      var tempRange = document.getElementById("pd-temp-range");
+      var upSel = document.getElementById("as-upstream");
+      var provSel = document.getElementById("as-provider");
+      var localBox = document.getElementById("as-local");
+      var remoteNote = document.getElementById("as-remote");
+      var delForm = document.getElementById("alias-delete-form");
+      var delBtn = document.getElementById("as-delete");
 
-    function setRadio(name, val) {
-      form.querySelectorAll('input[name="' + name + '"]').forEach(function (r) {
-        r.checked = r.value === val;
+      function setRadio(name, val) {
+        form.querySelectorAll('input[name="' + name + '"]').forEach(function (r) {
+          r.checked = r.value === val;
+        });
+      }
+      function setLock(id, on) {
+        var el = document.getElementById(id);
+        if (el) el.checked = on === "true" || on === true;
+      }
+      function syncTempFromNum() {
+        if (!tempNum || !tempRange) return;
+        var v = tempNum.value.trim();
+        tempRange.value = v === "" ? 0 : v;
+        tempRange.classList.toggle("unset", v === "");
+      }
+      function setBackends(csv) {
+        var ids = (csv || "").split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+        document.querySelectorAll("#as-backends input[name=backend_id]").forEach(function (cb) {
+          cb.checked = ids.indexOf(cb.value) !== -1;
+        });
+      }
+      function setBoxDisabled(root, off) {
+        if (!root) return;
+        root.hidden = off;
+        root.querySelectorAll("input, select, textarea").forEach(function (el) {
+          el.disabled = off;
+        });
+      }
+      function ensureOption(name, provider, backends) {
+        if (!upSel || upSel.tagName !== "SELECT" || !name) return;
+        upSel.querySelectorAll("option[data-extra]").forEach(function (o) { o.remove(); });
+        var exists = Array.from(upSel.options).some(function (o) { return o.value === name; });
+        if (exists) return;
+        var o = document.createElement("option");
+        o.value = name;
+        o.textContent = name;
+        o.setAttribute("data-provider", provider || "");
+        o.setAttribute("data-backends", backends || "");
+        o.setAttribute("data-extra", "1");
+        upSel.appendChild(o);
+      }
+      function filterUpstream(preferred) {
+        if (!upSel || upSel.tagName !== "SELECT") return;
+        var prov = provSel ? provSel.value : "";
+        var keep = preferred || upSel.value;
+        Array.from(upSel.options).forEach(function (o) {
+          if (!o.value) return;
+          var ok = !prov || (o.getAttribute("data-provider") || "") === prov;
+          o.hidden = !ok;
+          o.disabled = !ok;
+        });
+        var found = Array.from(upSel.options).some(function (o) { return o.value === keep && !o.disabled; });
+        if (found) upSel.value = keep;
+        else {
+          var first = Array.from(upSel.options).find(function (o) { return o.value && !o.disabled; });
+          if (first) upSel.value = first.value;
+        }
+      }
+      function syncBackendsFromUpstream() {
+        if (!upSel || !upSel.options || upSel.selectedIndex < 0) return;
+        var opt = upSel.options[upSel.selectedIndex];
+        if (!opt) return;
+        setBackends(opt.getAttribute("data-backends") || "");
+      }
+      if (tempNum && tempRange) {
+        tempNum.addEventListener("input", syncTempFromNum);
+        tempRange.addEventListener("input", function () { tempNum.value = tempRange.value; tempRange.classList.remove("unset"); });
+      }
+      if (provSel) provSel.addEventListener("change", function () {
+        filterUpstream("");
+        syncBackendsFromUpstream();
+      });
+      if (upSel) upSel.addEventListener("change", syncBackendsFromUpstream);
+
+      document.querySelectorAll(".js-alias-settings").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var d = btn.dataset;
+          form.setAttribute("action", "/admin/models/" + d.id + "/settings");
+          aliasEl.textContent = d.alias || "";
+          aliasIn.value = d.alias || "";
+          aliasIn.readOnly = d.system === "1";
+          var remote = d.remote === "1";
+          setBoxDisabled(localBox, remote);
+          if (remoteNote) remoteNote.hidden = !remote;
+          if (!remote) {
+            if (provSel) provSel.value = d.provider || "";
+            ensureOption(d.upstream, d.provider, d.backends);
+            filterUpstream(d.upstream || "");
+            setBackends(d.backends || "");
+            var lb = document.getElementById("as-lb");
+            if (lb) lb.value = d.lb || "least_conn";
+            var hub = document.getElementById("as-hub");
+            if (hub) hub.checked = d.hubShare === "1";
+          }
+          document.getElementById("as-context").value = d.context || "0";
+          var hint = document.getElementById("as-ctx-hint");
+          if (hint) hint.textContent = d.detected && d.detected !== "0" ? "0 — взять с сервера (" + d.detected + ")." : "0 — взять с сервера.";
+          var fb = document.getElementById("as-fallback");
+          if (fb) {
+            Array.from(fb.options).forEach(function (o) {
+              o.disabled = o.value !== "" && o.value === d.alias;
+            });
+            fb.value = d.fallback || "";
+            if (fb.value !== (d.fallback || "")) fb.value = "";
+          }
+          var cache = document.getElementById("as-cache");
+          if (cache) cache.value = d.cache || "inherit";
+          setRadio("think", d.think || "");
+          tempNum.value = d.temp || "";
+          document.getElementById("pd-predict").value = d.predict || "";
+          document.getElementById("pd-ctx").value = d.ctx || "";
+          document.getElementById("pd-extra").value = d.extra || "";
+          setLock("pd-lock-think", d.lockThink);
+          setLock("pd-lock-temp", d.lockTemp);
+          setLock("pd-lock-predict", d.lockPredict);
+          setLock("pd-lock-ctx", d.lockCtx);
+          syncTempFromNum();
+          if (delForm) delForm.setAttribute("action", "/admin/models/" + d.id + "/delete");
+          if (delBtn) delBtn.hidden = d.system === "1";
+          dlg.showModal();
+          if (!aliasIn.readOnly) aliasIn.focus();
+        });
+      });
+      if (delForm) {
+        delForm.addEventListener("submit", function (ev) {
+          var name = aliasIn.value || aliasEl.textContent || "alias";
+          if (!confirm("Убрать «" + name + "» из шлюза? Файл на сервере останется.")) ev.preventDefault();
+        });
+      }
+      dlg.querySelectorAll("[data-as-close]").forEach(function (b) {
+        b.addEventListener("click", function () { dlg.close(); });
+      });
+      dlg.addEventListener("click", function (e) {
+        if (e.target === dlg) dlg.close();
       });
     }
-    function setLock(id, on) {
-      var el = document.getElementById(id);
-      if (el) el.checked = on === "true" || on === true;
+
+    var md = document.getElementById("model-dialog");
+    if (!md) return;
+    var mdTitle = document.getElementById("md-title");
+    var mdSub = document.getElementById("md-sub");
+    var mdMeta = document.getElementById("md-meta");
+    var mdHosts = document.getElementById("md-hosts");
+    var mdConnect = document.getElementById("md-connect");
+    var mdBackends = document.getElementById("md-backends");
+
+    function metaRow(label, value) {
+      if (!value) return;
+      var dt = document.createElement("dt");
+      dt.textContent = label;
+      var dd = document.createElement("dd");
+      dd.textContent = value;
+      mdMeta.appendChild(dt);
+      mdMeta.appendChild(dd);
+    }
+    function hostButton(text, cls, action, id, name) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = cls;
+      b.setAttribute("data-ollama", action);
+      b.setAttribute("data-id", String(id));
+      b.setAttribute("data-name", name);
+      b.textContent = text;
+      return b;
     }
 
-    function syncTempFromNum() {
-      var v = tempNum.value.trim();
-      tempRange.value = v === "" ? 0 : v;
-      tempRange.classList.toggle("unset", v === "");
-    }
-    tempNum.addEventListener("input", syncTempFromNum);
-    tempRange.addEventListener("input", function () { tempNum.value = tempRange.value; tempRange.classList.remove("unset"); });
-
-    document.querySelectorAll(".js-params").forEach(function (btn) {
+    document.querySelectorAll(".js-model-settings").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var d = btn.dataset;
-        form.setAttribute("action", "/admin/models/" + d.id + "/params");
-        aliasEl.textContent = d.alias;
-        setRadio("think", d.think || "");
-        tempNum.value = d.temp || "";
-        document.getElementById("pd-predict").value = d.predict || "";
-        document.getElementById("pd-ctx").value = d.ctx || "";
-        document.getElementById("pd-extra").value = d.extra || "";
-        setLock("pd-lock-think", d.lockThink);
-        setLock("pd-lock-temp", d.lockTemp);
-        setLock("pd-lock-predict", d.lockPredict);
-        setLock("pd-lock-ctx", d.lockCtx);
-        syncTempFromNum();
-        dlg.showModal();
+        var hosts = [];
+        try { hosts = JSON.parse(d.hosts || "[]") || []; } catch (e) { hosts = []; }
+        mdTitle.textContent = d.name || "Модель";
+        var bits = [];
+        if (d.title) bits.push(d.title);
+        if (d.connected === "1") bits.push("Уже в шлюзе. Имя для клиентов меняется в списке alias ниже.");
+        else if (d.hub && d.online !== "1") bits.push("Узел сейчас офлайн.");
+        mdSub.textContent = bits.join(" · ");
+        mdMeta.textContent = "";
+        metaRow("Провайдер", d.provider);
+        metaRow("Размер", d.size);
+        metaRow("Контекст", d.ctx);
+        metaRow("Цена", d.price);
+        metaRow("Тип", d.media);
+        metaRow("Окно", d.schedule);
+        mdHosts.textContent = "";
+        hosts.forEach(function (h) {
+          var row = document.createElement("div");
+          row.className = "mhost";
+          var info = document.createElement("div");
+          var title = document.createElement("div");
+          title.textContent = h.short || h.name || "сервер";
+          info.appendChild(title);
+          if (h.hint) {
+            var hint = document.createElement("div");
+            hint.className = "muted small";
+            hint.textContent = h.hint;
+            info.appendChild(hint);
+          }
+          var act = document.createElement("div");
+          act.className = "act";
+          if (h.canLoad && h.id) {
+            act.appendChild(hostButton(h.loaded ? "Выгрузить из RAM" : "В RAM", "pill-btn" + (h.loaded ? " ram" : ""), h.loaded ? "unload" : "load", h.id, d.name));
+          }
+          if (h.canDelete && h.id) {
+            act.appendChild(hostButton("Удалить с диска", "btn-sm danger-text", "delete", h.id, d.name));
+          }
+          if (h.hub) {
+            var pill = document.createElement("span");
+            pill.className = "pill" + (h.online ? " ok" : "");
+            pill.textContent = h.online ? "онлайн" : "офлайн";
+            act.appendChild(pill);
+          } else if (!h.canLoad) {
+            var tag = document.createElement("span");
+            tag.className = "pill" + (h.loaded ? " ram" : "");
+            tag.textContent = (h.cloud ? "облако" : (h.label || h.kind || "сервер")) + (h.loaded ? " · RAM" : "");
+            act.appendChild(tag);
+          }
+          row.appendChild(info);
+          row.appendChild(act);
+          mdHosts.appendChild(row);
+        });
+        var isHub = !!d.hub;
+        var canConnect = d.connected !== "1" && !(isHub && d.online !== "1");
+        mdConnect.hidden = !canConnect;
+        document.getElementById("md-alias").value = d.name || "";
+        document.getElementById("md-upstream").value = d.name || "";
+        document.getElementById("md-ctx").value = d.ctxN || "0";
+        document.getElementById("md-lb").value = "least_conn";
+        var hubId = document.getElementById("md-hub-id");
+        var hubName = document.getElementById("md-hub-name");
+        hubId.disabled = !isHub;
+        hubName.disabled = !isHub;
+        hubId.value = isHub ? d.hub : "";
+        hubName.value = isHub ? (d.hubName || "") : "";
+        mdBackends.textContent = "";
+        var provLabel = document.getElementById("md-prov-label");
+        if (provLabel) provLabel.hidden = isHub;
+        if (!isHub) {
+          hosts.forEach(function (h) {
+            if (!h.id) return;
+            var lab = document.createElement("label");
+            var cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.name = "backend_id";
+            cb.value = String(h.id);
+            cb.checked = true;
+            lab.appendChild(cb);
+            lab.appendChild(document.createTextNode(" " + (h.name || h.short || h.id) + (h.label ? " · " + h.label : "")));
+            mdBackends.appendChild(lab);
+          });
+        }
+        md.showModal();
       });
     });
-
-    dlg.querySelectorAll("[data-pd-close]").forEach(function (b) {
-      b.addEventListener("click", function () { dlg.close(); });
+    md.querySelectorAll("[data-md-close]").forEach(function (b) {
+      b.addEventListener("click", function () { md.close(); });
     });
-    dlg.addEventListener("click", function (e) {
-      if (e.target === dlg) dlg.close();
+    md.addEventListener("click", function (e) {
+      if (e.target === md) md.close();
     });
   })();
 

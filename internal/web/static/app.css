@@ -317,15 +317,55 @@ progress { width: 100%; margin-top: .75rem; height: .55rem; }
 .pdialog {
   border: 1px solid var(--line); border-radius: 14px;
   background: var(--card); color: var(--text);
-  padding: 0; width: min(560px, 94vw); max-height: 90vh;
+  padding: 1.1rem 1.2rem; width: min(560px, 94vw); max-height: 90vh;
+  overflow: auto;
 }
+.pdialog.wide { width: min(720px, 96vw); }
 .pdialog::backdrop { background: rgba(4, 8, 14, .62); backdrop-filter: blur(2px); }
-.pdialog form { margin: 0; padding: 1.1rem 1.2rem; }
+.pdialog form { margin: 0; padding: 0; }
 .pdialog-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .3rem; }
 .pdialog-head h3 { margin: 0; font-size: 1.05rem; font-weight: 650; }
 .pdialog-head code { color: var(--acc); }
 .pdialog-x { padding: .1rem .5rem; }
 .pdialog-foot { display: flex; justify-content: flex-end; gap: .6rem; margin-top: 1rem; }
+.pdialog-foot .danger-text { margin-right: auto; }
+.aset {
+  display: grid; grid-template-columns: 9.2rem minmax(0, 1fr);
+  gap: .55rem .75rem; align-items: center;
+}
+.aset-span, .aset-note { grid-column: 1 / -1; }
+.aset-note { margin: 0; }
+.aset input, .aset select { width: 100%; }
+.alias-line {
+  display: flex; align-items: center; gap: .45rem .7rem; min-width: 0;
+}
+.alias-id { display: flex; align-items: center; gap: .3rem; min-width: 0; flex: 0 1 auto; }
+.alias-name {
+  font-weight: 650; max-width: 16rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.alias-meta {
+  flex: 1 1 12rem; min-width: 0; color: var(--muted); font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.alias-line .btn-sm { flex: 0 0 auto; min-height: 2.25rem; }
+.alias-tbl { table-layout: fixed; }
+.alias-tbl td { vertical-align: middle; min-width: 0; }
+.alias-tbl .col-check { width: 2.4rem; }
+.md-meta {
+  display: grid; grid-template-columns: 7.5rem minmax(0, 1fr);
+  gap: .28rem .7rem; margin: .7rem 0 .2rem; font-size: 13px;
+}
+.md-meta dt { color: var(--muted); margin: 0; }
+.md-meta dd { margin: 0; overflow-wrap: anywhere; }
+.mhost {
+  display: flex; justify-content: space-between; gap: .7rem; align-items: center;
+  padding: .55rem 0; border-top: 1px solid var(--line);
+}
+@media (max-width: 640px) {
+  .aset, .md-meta { grid-template-columns: 1fr; }
+  .alias-meta { flex-basis: 100%; }
+}
 .pdialog-foot .primary {
   background: var(--acc); border: 0; color: #0b1220; font-weight: 650;
   padding: .45rem 1.1rem; border-radius: 8px; cursor: pointer;
