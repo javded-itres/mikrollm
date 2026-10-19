@@ -123,7 +123,7 @@ curl http://192.168.88.1:4000/v1/systemone \
 
 Тело как у TypeSafe и Ollama 0.35: `state` (строка, объект или массив) и непустой объект `questions`. Типы вопросов: `choice`, `noul`, `score`. Ответ: `answers` и `usage.input_tokens` / `output_tokens`. Поле `model` в ответе — alias шлюза.
 
-Локальный Ollama и облачный бэкенд вызываются как `POST <base>/v1/systemone`. У OpenRouter путь `/systemone`, потому что base URL уже кончается на `/api/v1`. `nimble` и `tev1` на Ollama требуют сервер 0.35. Через hub решения не ходят.
+Локальный Ollama и облачный бэкенд вызываются как `POST <base>/v1/systemone`. У OpenRouter путь `/systemone`, потому что base URL уже кончается на `/api/v1`. `nimble` и `tev1` на Ollama требуют сервер 0.35. Вызов клиентом через hub-alias по-прежнему 400. Хаб может прислать узлу задание `decision`; шлюз выполняет его как `POST /v1/systemone`. Так классификатор auto ходит в nimble.
 
 ## Выбор бэкенда
 

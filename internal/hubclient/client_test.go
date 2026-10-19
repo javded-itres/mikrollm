@@ -315,6 +315,10 @@ func TestLocalRelayKinds(t *testing.T) {
 	if m != http.MethodGet || p != "/v1/videos/vid1/content?model=hailuo" || body != nil {
 		t.Fatalf("%s %s %v", m, p, body)
 	}
+	m, p, body = localRelay(Job{Alias: "nimble", Kind: "decision", Body: json.RawMessage(`{"state":"hi","questions":{"kind":{"type":"choice"}}}`)})
+	if m != http.MethodPost || p != "/v1/systemone" || !bytes.Contains(body, []byte(`"nimble"`)) || bytes.Contains(body, []byte(`"stream"`)) {
+		t.Fatalf("decision %s %s %s", m, p, body)
+	}
 }
 
 func TestRunJobPreservesToolCalls(t *testing.T) {

@@ -651,6 +651,8 @@ func localRelay(job Job) (method, path string, body []byte) {
 		kind = "chat"
 	}
 	switch kind {
+	case "decision":
+		path = "/v1/systemone"
 	case "images":
 		path = "/v1/images/generations"
 	case "videos":

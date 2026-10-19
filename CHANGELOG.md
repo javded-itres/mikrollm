@@ -6,6 +6,7 @@ GitHub Releases use this English file. Russian copy: [CHANGELOG.ru.md](CHANGELOG
 
 ## Unreleased
 
+- Hub job kind `decision` runs `POST /v1/systemone` on the node. The auto classifier uses it for nimble. A client call to a hub alias still returns 400. [docs/api.md](docs/api.md)
 - Admin **Models**: an alias is one line. Name, provider, servers, context, fallback, cache, load balancing, hub, and generation parameters open in a dialog. Catalog model actions open in a dialog too.
 - A2A proxy streams `text/event-stream`. `message/stream` and `Accept: text/event-stream` are flushed as the upstream agent writes them. A JSON reply is still buffered. [docs/a2a.md](docs/a2a.md)
 - MCP proxy, chat (`stream: true`), hub chat when the relay itself is an event stream, and Grok flush `text/event-stream` the same way. Embeddings, decisions, images, and Codex stay one body: those replies are rewritten or translated. [docs/mcp.md](docs/mcp.md)

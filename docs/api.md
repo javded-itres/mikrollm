@@ -123,7 +123,7 @@ curl http://192.168.88.1:4000/v1/systemone \
 
 The body matches TypeSafe and Ollama 0.35: `state` (string, object, or array) and a non-empty `questions` object. Question types are `choice`, `noul`, and `score`. The response is `answers` plus `usage.input_tokens` / `output_tokens`. The response `model` is the gateway alias.
 
-Local Ollama and a hosted base URL are called at `POST <base>/v1/systemone`. OpenRouter uses `/systemone` because its base URL already ends in `/api/v1`. `nimble` and `tev1` need Ollama 0.35. Hub relay does not carry decisions.
+Local Ollama and a hosted base URL are called at `POST <base>/v1/systemone`. OpenRouter uses `/systemone` because its base URL already ends in `/api/v1`. `nimble` and `tev1` need Ollama 0.35. A client call through a hub alias still returns 400. The hub can send a `decision` job to the node that hosts the model; that gateway runs it as `POST /v1/systemone`. The auto classifier uses this for nimble.
 
 ## Backend selection
 
