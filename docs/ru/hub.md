@@ -62,7 +62,7 @@ Hub отдаёт JSON (или байты видео) узлу A
 MIKROLLM_HUB_URL=http://127.0.0.1:4090
 ```
 
-На RouterOS — в envlist контейнера (`MIKROLLM_HUB_URL`) и перезапуск. Снаружи достаточно Caddy на `:4090` (TLS + reverse_proxy).
+На RouterOS — в envlist контейнера (`MIKROLLM_HUB_URL`) и перезапуск. Hub слушает `127.0.0.1:4090`, снаружи только HTTPS. Caddy проксирует на этот адрес. Порт 4090 не открывать.
 
 Каталог hosted-хаба в браузере: `https://hub.mikrollm.ru`, если оператор проксирует Next UI; **API** всегда `/v1/catalog`, `/v1/relay/…`.
 
@@ -191,7 +191,7 @@ RouterOS `memory-high 64M`: шарьте лёгкое (chat, небольшие 
 - Не шарьте по умолчанию ключ **OpenRouter** (платить будете вы). Шарьте **локальный** Ollama / OpenComfy.
 - Не ждите вложенного шаринга (hub-alias нельзя опубликовать снова).
 - Не отправляйте **видео**-модель как чат.
-- Не цельтесь с MikroTik во внутренний WG-IP хаба (`10.88.97.1:4090` с LAN не отвечает). Нужен `https://hub.mikrollm.ru` или публичный `host:4090`.
+- Не цельтесь с MikroTik во внутренний WG-IP хаба (`10.88.97.1:4090` с LAN не отвечает). Нужен `https://hub.mikrollm.ru`. Порт 4090 не открывать.
 
 ---
 
@@ -200,8 +200,8 @@ RouterOS `memory-high 64M`: шарьте лёгкое (chat, небольшие 
 Репозиторий: [`mikrollm_hub`](https://github.com/javded-itres/mikrollm_hub).
 
 ```bash
-# API
-go run ./cmd/hub -listen :4090 -data ./hub-data
+# API слушает 127.0.0.1:4090. HUB_ADMIN_PASSWORD обязателен.
+HUB_ADMIN_PASSWORD='…' go run ./cmd/hub -data ./hub-data
 # UI
 cd web && HUB_INTERNAL_URL=http://127.0.0.1:4090 npm run dev   # :3000
 ```

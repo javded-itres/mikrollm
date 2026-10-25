@@ -62,7 +62,7 @@ Compiled URL: `https://hub.mikrollm.ru`. Private hub:
 MIKROLLM_HUB_URL=http://127.0.0.1:4090
 ```
 
-On RouterOS put that in the container envlist (`MIKROLLM_HUB_URL`) and restart the container. A public Caddy in front of `:4090` is enough (TLS + reverse_proxy).
+On RouterOS put that in the container envlist (`MIKROLLM_HUB_URL`) and restart the container. Leave the hub on `127.0.0.1:4090` and publish only HTTPS. Caddy reverse-proxies to that address. Do not open port 4090.
 
 Public catalog UI of the hosted hub: open `https://hub.mikrollm.ru` in a browser if the operator proxied the Next UI; the **API** is always `/v1/catalog`, `/v1/relay/…`.
 
@@ -191,7 +191,7 @@ RouterOS `memory-high 64M`: keep shared work small (chat, modest images). Heavy 
 - Do not share **OpenRouter** keys through the hub by default (you would pay for other members). Share **local** Ollama / OpenComfy.
 - Do not expect nested share (a hub alias cannot be published again).
 - Do not send a **video** model as chat.
-- Do not point MikroTik at a WireGuard inner IP of the hub (`10.88.97.1:4090` times out from LAN). Use `https://hub.mikrollm.ru` or the public `host:4090`.
+- Do not point MikroTik at a WireGuard inner IP of the hub (`10.88.97.1:4090` times out from LAN). Use `https://hub.mikrollm.ru`. Do not open port 4090.
 
 ---
 
@@ -200,8 +200,8 @@ RouterOS `memory-high 64M`: keep shared work small (chat, modest images). Heavy 
 Repo: [`mikrollm_hub`](https://github.com/javded-itres/mikrollm_hub).
 
 ```bash
-# API
-go run ./cmd/hub -listen :4090 -data ./hub-data
+# API listens on 127.0.0.1:4090. HUB_ADMIN_PASSWORD is required.
+HUB_ADMIN_PASSWORD='…' go run ./cmd/hub -data ./hub-data
 # UI
 cd web && HUB_INTERNAL_URL=http://127.0.0.1:4090 npm run dev   # :3000
 ```
